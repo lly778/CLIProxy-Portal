@@ -1,0 +1,6 @@
+{{define "content"}}
+<div class="page-head"><div><span class="eyebrow">服务</span><h1>系统状态</h1><p class="muted">查看门户及用量服务当前是否可以正常访问。</p></div><a class="button secondary" href="/health">重新检查</a></div>
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}
+<div class="health-grid">{{range .Checks}}<article class="card health-card"><div class="health-card-head"><span class="status-dot {{statusClass .Status}}"></span><h2>{{.Component}}</h2><span class="badge {{statusClass .Status}}">{{.StatusLabel}}</span></div><p>{{.Message}}</p><div class="muted small">检查：{{.CheckedAt}}{{if .Latency}} · 延迟 {{.Latency}}{{end}}</div></article>{{else}}<div class="empty-state"><p>暂无健康检查结果。</p></div>{{end}}</div>
+<div class="callout section-gap"><div><strong>状态说明</strong><p>此页面只展示服务可用性，不公开服务器配置、凭据或内部错误详情。</p></div></div>
+{{end}}

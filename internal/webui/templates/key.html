@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="page-head"><div><span class="eyebrow">凭据</span><h1>API Key</h1><p class="muted">每个账号最多一个有效 Key，完整内容只展示一次。</p></div></div>
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+{{if .Key.OneTimeSecret}}
+<section class="secret-card"><div class="secret-head"><span class="secret-icon">!</span><div><h2>请立即保存 API Key</h2><p>出于安全原因，离开此页面后将无法再次查看完整 Key。</p></div></div><div class="secret-value"><code id="one-time-key">{{.Key.OneTimeSecret}}</code><button class="button secondary copy-button" type="button" data-copy-target="one-time-key">复制</button></div><div class="secret-meta"><span>API 地址：<code>{{.Key.APIBaseURL}}</code></span><span>别名：{{.Key.Alias}}</span></div><div class="config-box"><div class="card-label">配置示例</div><pre><code>{{.Key.ConfigSnippet}}</code></pre></div>{{if .Key.Examples}}<div class="example-list"><div class="card-label">常用客户端</div>{{range .Key.Examples}}<div class="example-item"><strong>{{.Name}}</strong>{{if .Hint}}<span class="muted small">{{.Hint}}</span>{{end}}<pre><code>{{.Code}}</code></pre></div>{{end}}</div>{{end}}<form method="post" action="/key/acknowledge" class="inline-form">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<button class="button primary" type="submit">我已保存，继续</button></form></section>
+{{else}}
+<section class="card key-panel"><div class="key-panel-head"><div><div class="card-label">当前状态</div><div class="status-line"><span class="status-dot {{statusClass .Key.Status}}"></span><strong>{{.Key.StatusLabel}}</strong></div></div>{{if .Key.Last4}}<div class="key-mask">•••• {{.Key.Last4}}</div>{{end}}</div>
+<dl class="detail-grid key-detail-grid"><div><dt>创建时间</dt><dd>{{.Key.CreatedAt}}</dd></div><div><dt>最近使用</dt><dd>{{.Key.LastUsedAt}}</dd></div><div><dt>同步状态</dt><dd><span class="badge {{statusClass .Key.SyncStatus}}">{{.Key.SyncStatusLabel}}</span></dd></div></dl>
+<div class="key-guidance">
+  {{if .Key.Last4}}<p>如果 Key 被 CPAMP 手工删除，门户会标记为“外部撤销”，不会自动补回。</p>{{end}}
+  <p>领取或撤销前，需要输入当前登录密码。</p>
+  <p>撤销后可以立即重新领取。</p>
+</div>
+<div class="key-actions">
+  {{if .Key.CanClaim}}<form method="post" action="/key/claim" class="key-action" data-confirm="领取后完整 Key 只显示一次，确定继续吗？">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<div class="key-action-head"><div><strong>领取 API Key</strong><p>完整 Key 只显示一次，请领取后立即保存。</p></div><span aria-hidden="true">＋</span></div><label>验证登录密码<input type="password" name="password" placeholder="请输入登录密码" autocomplete="current-password" required></label><button class="button primary wide" type="submit">领取 API Key</button></form>{{end}}
+  {{if .Key.CanTest}}<form method="post" action="/key/test" class="key-action">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<div class="key-action-head"><div><strong>测试 API Key</strong><p>读取当前可用模型，确认 Key 能否正常访问 CPA；不会发起模型调用。</p></div><span aria-hidden="true">✓</span></div><button class="button secondary wide" type="submit">测试 Key</button></form>{{end}}
+  {{if .Key.CanRevoke}}<form method="post" action="/key/revoke" class="key-action danger" data-confirm="撤销后 Key 会立即失效，确定继续吗？">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<div class="key-action-head"><div><strong>撤销 API Key</strong><p>立即停止当前 Key 的访问权限，之后可以重新领取。</p></div><span aria-hidden="true">×</span></div><label>验证登录密码<input type="password" name="password" placeholder="请输入登录密码" autocomplete="current-password" required></label><button class="button danger-outline wide" type="submit">立即撤销</button></form>{{end}}
+</div>
+</section>
+{{end}}
+{{end}}

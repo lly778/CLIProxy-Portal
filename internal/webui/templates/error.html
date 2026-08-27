@@ -1,0 +1,3 @@
+{{define "content"}}
+<section class="error-card"><div class="error-code">{{if .StatusCode}}{{.StatusCode}}{{else}}500{{end}}</div><h1>{{if .Message}}{{.Message}}{{else}}页面暂时不可用{{end}}</h1><p class="muted">{{if .Code}}错误代码：{{.Code}}{{end}}{{if .RequestID}}<br>请求编号：<code>{{.RequestID}}</code>{{end}}</p><div class="button-row centered">{{if .CanGoBack}}<button class="button secondary" type="button" onclick="history.back()">返回上一页</button>{{end}}<a class="button primary" href="/">回到首页</a></div></section>
+{{end}}

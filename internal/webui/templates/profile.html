@@ -1,0 +1,7 @@
+{{define "content"}}
+<div class="page-head"><div><span class="eyebrow">账户</span><h1>个人资料</h1><p class="muted">手机号是登录身份，修改需要管理员人工核验。</p></div></div>
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+<section class="card form-card profile-summary"><div class="avatar">{{.Profile.Initials}}</div><div class="profile-fields"><div class="readonly-field"><span>姓名</span><strong>{{.Profile.Name}}</strong><small>{{.NameHelp}}</small></div><div class="readonly-field"><span>手机号</span><strong class="mono">{{.Profile.Phone}}</strong><small>{{.PhoneHelp}}</small></div><div class="readonly-field"><span>角色</span><strong>{{.Profile.RoleLabel}}</strong></div><div class="readonly-field"><span>注册时间</span><strong>{{.Profile.JoinedAt}}</strong></div></div></section>
+<section class="card policy-preview profile-policy"><div class="section-head compact"><h2>CLIProxy 使用规则</h2><span class="badge neutral">版本 {{.RulesVersion}}</span></div>{{range .Rules}}<div class="profile-rule-body">{{.Body}}</div>{{else}}<p class="muted">暂无规则内容。</p>{{end}}</section>
+<div class="button-row profile-actions"><a class="button secondary" href="/password">修改密码</a>{{if eq .Profile.Role "admin"}}<a class="button secondary" href="/admin">进入管理中心</a>{{end}}</div>
+{{end}}

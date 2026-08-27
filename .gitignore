@@ -1,0 +1,10 @@
+/data/
+/.env
+/secrets/*
+!/secrets/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+/portal
+/portal.exe
+/dist/

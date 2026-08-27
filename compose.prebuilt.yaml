@@ -1,0 +1,35 @@
+services:
+  cliproxy-portal:
+    image: alpine:3.22
+    container_name: cliproxy-portal
+    restart: unless-stopped
+    user: "10001:10001"
+    entrypoint: ["/app/portal"]
+    ports:
+      - "18080:18080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PORTAL_LISTEN_ADDR: ":18080"
+      PORTAL_DATABASE_PATH: "/data/portal.db"
+      PORTAL_EXTERNAL_URL: "${PORTAL_EXTERNAL_URL:-http://localhost:18080}"
+      CPA_API_BASE_URL: "${CPA_API_BASE_URL:-http://localhost:8317}"
+      CPAMP_BASE_URL: "${CPAMP_BASE_URL:-http://host.docker.internal:18317}"
+      CPAMP_ADMIN_KEY_FILE: "/run/secrets/cpamp_admin_key"
+      PORTAL_APP_SECRET_FILE: "/run/secrets/portal_app_secret"
+      PORTAL_TIME_ZONE: "Asia/Shanghai"
+      PORTAL_REGISTRATION_OPEN: "true"
+      PORTAL_TRUST_PROXY_HEADERS: "false"
+    volumes:
+      - ./dist/${PORTAL_BINARY:-portal-linux-amd64}:/app/portal:ro
+      - ./data:/data
+      - ./secrets/cpamp_admin_key:/run/secrets/cpamp_admin_key:ro
+      - ./secrets/portal_app_secret:/run/secrets/portal_app_secret:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:18080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 192m
+    cpus: "0.75"

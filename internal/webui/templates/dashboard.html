@@ -1,0 +1,15 @@
+{{define "content"}}
+<div class="page-head"><div><span class="eyebrow">用户中心</span><h1>{{if .Greeting}}{{.Greeting}}{{else}}账户概览{{end}}</h1><p class="muted">查看账号状态、API Key 和最近的模型调用。</p></div><a class="button secondary" href="/usage">查看完整用量</a></div>
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+<div class="grid grid-3">
+  <article class="card summary-card"><div class="card-label">账号状态</div><div class="status-line summary-value"><span class="status-dot {{statusClass .StatusCard.Status}}"></span><strong>{{.StatusCard.StatusLabel}}</strong></div><p class="summary-detail">{{.StatusCard.Description}}</p><a class="text-link" href="/status">查看状态详情 →</a></article>
+  <article class="card summary-card"><div class="card-label">API Key</div>{{if .Key.Last4}}<div class="key-mask summary-value">•••• {{.Key.Last4}}</div><p class="summary-detail muted">状态：{{.Key.StatusLabel}}{{if ne .Key.SyncStatus .Key.Status}} · 同步：{{.Key.SyncStatusLabel}}{{end}}</p>{{else}}<div class="empty-title summary-value">尚未领取</div><p class="summary-detail muted">批准后可领取一次性 API Key。</p>{{end}}<a class="text-link" href="/key">管理 API Key →</a></article>
+  <article class="card summary-card"><div class="card-label">最近 7 天用量</div><div class="metric-big summary-value">{{.Usage.Requests}}</div><p class="summary-detail muted">请求 · {{.Usage.TotalTokens}} tokens</p><a class="text-link" href="/usage?range=7d">查看趋势 →</a></article>
+</div>
+{{template "quota-pool" .Quota}}
+{{if .ShowClaimHint}}<div class="callout accent"><div><strong>账号已批准，可以领取 API Key</strong><p>Key 只会显示一次，请在领取后立即保存。</p></div><a class="button primary" href="/key?claim=1">领取 Key</a></div>{{end}}
+<div class="section-head"><h2>最近调用</h2><a class="text-link" href="/activity">全部记录</a></div>
+<div class="table-card">{{if .RecentUsage}}<table><thead><tr><th>时间</th><th>模型</th><th>状态</th><th>Tokens</th><th>耗时</th></tr></thead><tbody>{{range .RecentUsage}}<tr><td>{{.At}}</td><td class="mono">{{.Model}}</td><td><span class="badge {{statusClass .Status}}">{{.StatusLabel}}</span></td><td>{{.TotalTokens}}</td><td>{{.Latency}}</td></tr>{{end}}</tbody></table>{{else}}<div class="empty-state"><div class="empty-icon">◌</div><strong>暂无调用记录</strong><p>使用 API Key 发起调用后，最近记录会显示在这里。</p></div>{{end}}</div>
+<div class="section-head"><h2>可用模型</h2><a class="text-link" href="/models">查看全部</a></div>
+<div class="model-chips">{{range .Models}}<span class="chip mono">{{.Name}}</span>{{else}}<span class="muted">模型列表暂不可用</span>{{end}}</div>
+{{end}}

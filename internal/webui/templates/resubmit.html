@@ -1,0 +1,15 @@
+{{define "content"}}
+<section class="card form-card narrow">
+  <div class="auth-head"><span class="eyebrow">重新申请</span><h1>修正并重新提交</h1><p>手机号保持不变；请更新姓名、密码并重新确认当前规则。</p></div>
+  {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}
+  <form method="post" action="/resubmit" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <label>姓名<input type="text" name="name" value="{{.Name}}" minlength="2" maxlength="50" required></label>
+    <label>新密码<input type="password" name="password" minlength="10" required></label>
+    <label>确认新密码<input type="password" name="confirm_password" minlength="10" required></label>
+    {{range .Rules}}<label class="check-row rule-row"><input type="checkbox" name="rule" value="accept" required> <span><strong>{{.Title}}</strong><br><span class="muted">{{.Body}}</span></span></label>{{end}}
+    <input type="hidden" name="rules_version" value="{{.RulesVersion}}">
+    <button class="button primary" type="submit">重新提交审批</button>
+  </form>
+</section>
+{{end}}

@@ -1,0 +1,16 @@
+{{define "content"}}
+<section class="auth-card">
+  <div class="auth-head"><span class="eyebrow">人工重置</span><h1>设置新密码</h1><p>输入手机号和管理员提供的 15 分钟一次性重置码。</p></div>
+  {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}
+  {{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+  <form method="post" action="/reset" class="stack-form">
+    {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+    <label>手机号<input type="tel" name="phone" inputmode="numeric" value="{{.Phone}}" maxlength="11" required></label>
+    <label>一次性重置码<input class="mono" type="text" name="code" value="{{.Code}}" autocomplete="one-time-code" required></label>
+    <label>新密码<input type="password" name="password" minlength="{{.MinimumLength}}" required></label>
+    <label>确认新密码<input type="password" name="confirm_password" minlength="{{.MinimumLength}}" required></label>
+    <button class="button primary wide" type="submit">重置密码</button>
+  </form>
+  <div class="auth-foot"><a href="/login">返回登录</a></div>
+</section>
+{{end}}

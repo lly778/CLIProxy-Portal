@@ -1,0 +1,77 @@
+{{define "base" -}}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>{{if .Title}}{{.Title}} · {{end}}{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="/" aria-label="返回首页">
+        <span class="brand-mark">C</span>
+        <span>{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}}</span>
+      </a>
+      {{if .IsLoggedIn}}
+      <details class="account-menu">
+        <summary><span class="account-avatar" aria-hidden="true">{{if .User}}{{if .User.Initials}}{{.User.Initials}}{{else}}账{{end}}{{else}}账{{end}}</span><span class="account-name">{{if .User}}{{.User.Name}}{{else}}账户{{end}}</span><span class="account-chevron" aria-hidden="true">⌄</span></summary>
+        <div class="account-popover">
+          <span class="muted small">{{if .User}}{{.User.Phone}}{{end}}</span>
+          <a href="/profile">个人资料</a>
+          <a href="/password">修改密码</a>
+          <form method="post" action="/logout">
+            {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+            <button class="link-button" type="submit">退出登录</button>
+          </form>
+        </div>
+      </details>
+      {{else}}
+      <a class="text-link" href="/login">登录</a>
+      {{end}}
+    </div>
+  </header>
+
+  {{if .IsLoggedIn}}
+  <div class="shell">
+    <aside class="sidebar" aria-label="主导航">
+      <nav data-mobile-nav>
+        <a class="nav-item{{if eq .ActiveNav "dashboard"}} active{{end}}" href="/dashboard"><span>⌂</span>概览</a>
+        <a class="nav-item{{if eq .ActiveNav "status"}} active{{end}}" href="/status"><span>◌</span>账号状态</a>
+        <a class="nav-item{{if eq .ActiveNav "key"}} active{{end}}" href="/key"><span>▣</span>API Key</a>
+        <a class="nav-item{{if eq .ActiveNav "usage"}} active{{end}}" href="/usage"><span>▥</span>使用量</a>
+        <a class="nav-item{{if eq .ActiveNav "models"}} active{{end}}" href="/models"><span>◇</span>可用模型</a>
+        <a class="nav-item{{if eq .ActiveNav "profile"}} active{{end}}" href="/profile"><span>◎</span>个人资料</a>
+        <a class="nav-item{{if eq .ActiveNav "activity"}} active{{end}}" href="/activity"><span>≡</span>请求日志</a>
+        <a class="nav-item{{if eq .ActiveNav "health"}} active{{end}}" href="/health"><span>♥</span>系统状态</a>
+        {{if and .User (eq .User.Role "admin")}}
+        <div class="nav-heading">管理</div>
+        <a class="nav-item{{if eq .ActiveNav "admin-dashboard"}} active{{end}}" href="/admin"><span>▦</span>管理概览</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-usage"}} active{{end}}" href="/admin/usage"><span>▥</span>全局用量</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-approvals"}} active{{end}}" href="/admin/approvals"><span>✓</span>审批队列</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-users"}} active{{end}}" href="/admin/users"><span>♙</span>用户管理</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-admins"}} active{{end}}" href="/admin/admins"><span>♜</span>管理员</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-policy"}} active{{end}}" href="/admin/policy"><span>☷</span>使用规则</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-audit"}} active{{end}}" href="/admin/audit"><span>≡</span>操作日志</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-health"}} active{{end}}" href="/admin/health"><span>♥</span>系统健康</a>
+        {{end}}
+      </nav>
+    </aside>
+    <main class="main" id="main">
+      {{template "content" .}}
+    </main>
+  </div>
+  {{else}}
+  <main class="public-main" id="main">
+    {{template "content" .}}
+  </main>
+  {{end}}
+  <footer class="footer">{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}} · 内部服务</footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
+{{end}}
