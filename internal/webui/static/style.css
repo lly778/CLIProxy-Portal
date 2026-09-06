@@ -464,7 +464,11 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .rule-display p { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
+.audit-result-cell { width: 1%; min-width: 100px; }
+.audit-detail-cell { width: 280px; max-width: 320px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
 .request-log-table table { min-width: 1120px; }
+.request-status-cell { width: 1%; min-width: 180px; }
+.request-status-detail { max-width: 210px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
 .page-number { display: inline-block; min-width: 100px; margin: 0 9px; color: var(--muted); text-align: center; font-size: 12px; }
 .detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }
