@@ -504,21 +504,7 @@ type AdminPolicyView struct {
 	RegistrationOpen bool
 }
 
-type AdminAuditView struct {
-	LayoutView
-	From      string
-	To        string
-	Actor     string
-	Action    string
-	Query     string
-	Actions   []string
-	Entries   []AuditView
-	Page      int
-	PageCount int
-	Total     string
-}
-
-type AdminHealthView struct {
+type AdminSystemView struct {
 	LayoutView
 	Checks       []HealthCheckView
 	LastSyncAt   string
@@ -526,6 +512,23 @@ type AdminHealthView struct {
 	SyncInterval string
 	Retrying     bool
 	Messages     []NoticeView
+	AuditError   string
+	Entries      []AuditView
+	Total        string
+}
+
+type GlobalRequestView struct {
+	RequestView
+	User      UserView
+	UserLabel string
+	Linked    bool
+}
+
+type AdminRequestsView struct {
+	LayoutView
+	Requests []GlobalRequestView
+	Shown    string
+	Total    string
 }
 
 type ErrorView struct {

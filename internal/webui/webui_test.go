@@ -102,8 +102,8 @@ func TestAllPagesExecuteWithZeroViews(t *testing.T) {
 		PageAdminApprovals: AdminApprovalsView{},
 		PageAdminUpstreams: AdminUpstreamsView{},
 		PageAdminPolicy:    AdminPolicyView{},
-		PageAdminAudit:     AdminAuditView{},
-		PageAdminHealth:    AdminHealthView{},
+		PageAdminRequests:  AdminRequestsView{},
+		PageAdminSystem:    AdminSystemView{},
 		PageError:          ErrorView{},
 	}
 	for page, view := range views {

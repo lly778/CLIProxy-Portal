@@ -1,7 +1,0 @@
-{{define "content"}}
-<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>操作日志</h1><p class="muted">操作记录只追加，至少保留一年；普通管理员不能删除。</p></div></div>
-{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
-<form method="get" action="/admin/audit" class="filter-bar"><input type="date" name="from" value="{{.From}}" aria-label="开始日期"><span>至</span><input type="date" name="to" value="{{.To}}" aria-label="结束日期"><select name="action" aria-label="筛选操作"><option value="">全部操作</option>{{range .Actions}}<option value="{{.}}"{{if eq $.Action .}} selected{{end}}>{{.}}</option>{{end}}</select><input type="search" name="q" value="{{.Query}}" placeholder="搜索操作人、目标或请求 ID"><button class="button secondary" type="submit">筛选</button></form>
-<div class="table-card audit-table"><table><thead><tr><th>时间</th><th>操作人</th><th>操作</th><th>目标</th><th>结果</th><th>来源</th><th>详情</th></tr></thead><tbody>{{range .Entries}}<tr><td>{{.At}}</td><td>{{.Actor}}</td><td>{{.Action}}</td><td>{{.Target}}</td><td><span class="badge {{statusClass .Result}}">{{.Result}}</span></td><td class="mono">{{.IP}}</td><td>{{.Details}}<div class="muted tiny">{{.RequestID}}</div></td></tr>{{else}}<tr><td colspan="7"><div class="empty-state compact"><p>没有匹配的审计记录。</p></div></td></tr>{{end}}</tbody></table></div>
-<div class="pagination"><span class="muted">共 {{.Total}} 条</span><span class="page-number">第 {{.Page}} / {{.PageCount}} 页</span></div>
-{{end}}

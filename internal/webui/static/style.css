@@ -448,6 +448,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .rule-display p { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
+.request-log-table table { min-width: 1120px; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
 .page-number { display: inline-block; min-width: 100px; margin: 0 9px; color: var(--muted); text-align: center; font-size: 12px; }
 .detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }

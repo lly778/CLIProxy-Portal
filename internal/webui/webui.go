@@ -25,7 +25,7 @@ var pageNames = []string{
 	"login", "register", "reset", "resubmit",
 	"dashboard", "status", "key", "usage", "models", "activity", "health", "profile", "password",
 	"admin-dashboard", "admin-users", "admin-user", "admin-approvals",
-	"admin-upstreams", "admin-policy", "admin-audit", "admin-health", "error",
+	"admin-upstreams", "admin-policy", "admin-requests", "admin-system", "error",
 }
 
 // Page constants are accepted by Renderer.Render and Renderer.Execute.
@@ -49,8 +49,8 @@ const (
 	PageAdminApprovals = "admin-approvals"
 	PageAdminUpstreams = "admin-upstreams"
 	PageAdminPolicy    = "admin-policy"
-	PageAdminAudit     = "admin-audit"
-	PageAdminHealth    = "admin-health"
+	PageAdminRequests  = "admin-requests"
+	PageAdminSystem    = "admin-system"
 	PageError          = "error"
 )
 

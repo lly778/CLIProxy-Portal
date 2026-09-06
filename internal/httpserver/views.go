@@ -153,18 +153,22 @@ func (s *Server) usageViews(a cpamp.AnalyticsResponse, from, to time.Time) (webu
 	var requests []webui.RequestView
 	if a.Events != nil {
 		for _, e := range a.Events.Items {
-			status, label := "success", "成功"
-			if e.Failed {
-				status, label = "failed", "失败"
-			}
-			latency := "—"
-			if e.LatencyMS != nil {
-				latency = fmt.Sprintf("%d ms", *e.LatencyMS)
-			}
-			requests = append(requests, webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: e.FailSummary})
+			requests = append(requests, s.requestView(e))
 		}
 	}
 	return summary, daily, models, requests
+}
+
+func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
+	status, label := "success", "成功"
+	if e.Failed {
+		status, label = "failed", "失败"
+	}
+	latency := "—"
+	if e.LatencyMS != nil {
+		latency = fmt.Sprintf("%d ms", *e.LatencyMS)
+	}
+	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: e.FailSummary}
 }
 
 func modelUsageCharts(models []webui.ModelUsageView) ([]webui.ModelUsageView, []webui.ModelUsageView) {

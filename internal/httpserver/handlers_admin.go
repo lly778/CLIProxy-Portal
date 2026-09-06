@@ -564,28 +564,50 @@ func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
 }
 
-func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
+func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	page := parseInt(r.URL.Query().Get("page"), 1)
-	if page < 1 {
-		page = 1
-	}
-	items, err := s.Store.ListAudit(r.Context(), 100, (page-1)*100)
+	events, err := s.Keys.GlobalRequests(r.Context(), 100)
 	if err != nil {
-		s.errorPage(w, r, 500, "操作日志暂时不可用", err)
+		s.errorPage(w, r, http.StatusBadGateway, "全局请求日志暂时不可用", err)
 		return
 	}
-	v := webui.AdminAuditView{LayoutView: s.layout(u, currentToken(r), "操作日志", "admin-audit"), Entries: s.auditViews(items), Page: page, PageCount: page, Total: strconv.Itoa(len(items)), Actions: []string{"user.register", "user.approve", "user.reject", "key.issue", "key.revoke", "user.suspend", "user.delete", "upstream.enable", "upstream.disable", "oauth_model.enable", "oauth_model.disable", "policy.publish"}}
-	_ = s.UI.Render(w, webui.PageAdminAudit, v)
+	v := webui.AdminRequestsView{LayoutView: s.layout(u, currentToken(r), "全局请求日志", "admin-requests"), Shown: strconv.Itoa(len(events.Items)), Total: compactNumber(events.TotalCount)}
+	if events.TotalCount == 0 && len(events.Items) > 0 {
+		v.Total = strconv.Itoa(len(events.Items))
+	}
+	type owner struct {
+		user   domain.User
+		linked bool
+	}
+	owners := make(map[string]owner)
+	for _, event := range events.Items {
+		hash := strings.ToLower(strings.TrimSpace(event.APIKeyHash))
+		account, cached := owners[hash]
+		if !cached && hash != "" {
+			if key, keyErr := s.Store.KeyByHash(r.Context(), hash); keyErr == nil {
+				if target, userErr := s.Store.UserByID(r.Context(), key.UserID); userErr == nil {
+					account = owner{user: target, linked: true}
+				}
+			}
+			owners[hash] = account
+		}
+		row := webui.GlobalRequestView{RequestView: s.requestView(event), UserLabel: "外部 Key"}
+		if account.linked {
+			row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
+		}
+		v.Requests = append(v.Requests, row)
+	}
+	_ = s.UI.Render(w, webui.PageAdminRequests, v)
 }
-func (s *Server) adminHealth(w http.ResponseWriter, r *http.Request) {
+
+func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost && !s.verifyCSRF(r) {
 		s.errorPage(w, r, 403, "请求已失效", nil)
 		return
 	}
 	u := currentUser(r)
 	now := time.Now().UTC()
-	v := webui.AdminHealthView{LayoutView: s.layout(u, currentToken(r), "系统健康", "admin-health"), LastSyncAt: "由后台每次启动后执行", NextSyncAt: s.formatTime(now.Add(s.Cfg.ReconcileInterval)), SyncInterval: s.Cfg.ReconcileInterval.String()}
+	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system"), LastSyncAt: "由后台每次启动后执行", NextSyncAt: s.formatTime(now.Add(s.Cfg.ReconcileInterval)), SyncInterval: s.Cfg.ReconcileInterval.String()}
 	start := time.Now()
 	err := s.Store.Ping(r.Context())
 	v.Checks = append(v.Checks, healthView("门户数据库", err, time.Since(start), s))
@@ -595,7 +617,15 @@ func (s *Server) adminHealth(w http.ResponseWriter, r *http.Request) {
 	if err = s.Keys.Reconcile(r.Context()); err != nil {
 		v.Messages = append(v.Messages, webui.NoticeView{Kind: "warning", Title: "Key 对账失败", Message: "系统会按计划继续重试。"})
 	}
-	_ = s.UI.Render(w, webui.PageAdminHealth, v)
+	items, auditErr := s.Store.ListAudit(r.Context(), 100, 0)
+	if auditErr != nil {
+		v.AuditError = "操作日志暂时不可用"
+		s.Logger.Error("list audit log", "error", auditErr)
+	} else {
+		v.Entries = s.auditViews(items)
+		v.Total = strconv.Itoa(len(items))
+	}
+	_ = s.UI.Render(w, webui.PageAdminSystem, v)
 }
 func healthView(name string, err error, d time.Duration, s *Server) webui.HealthCheckView {
 	v := webui.HealthCheckView{Component: name, Status: "healthy", StatusLabel: "正常", Message: "检查通过", CheckedAt: s.formatTime(time.Now()), Latency: d.Round(time.Millisecond).String()}

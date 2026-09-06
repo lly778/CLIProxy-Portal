@@ -123,7 +123,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 				response["api_key_stats"] = stats
 			}
 			if req.Include.EventsPage != nil {
-				response["events"] = map[string]any{"total_count": 1, "items": []map[string]any{{"timestamp_ms": time.Now().UnixMilli(), "model": "gpt-test", "reasoning_effort": "high", "input_tokens": 120, "output_tokens": 30, "cached_tokens": 20, "cache_read_tokens": 40, "cache_creation_tokens": 10, "reasoning_tokens": 25, "total_tokens": 150, "latency_ms": 1_200, "failed": false}}}
+				event := map[string]any{"timestamp_ms": time.Now().UnixMilli(), "model": "gpt-test", "reasoning_effort": "high", "input_tokens": 120, "output_tokens": 30, "cached_tokens": 20, "cache_read_tokens": 40, "cache_creation_tokens": 10, "reasoning_tokens": 25, "total_tokens": 150, "latency_ms": 1_200, "failed": false}
+				if len(keys) > 0 {
+					event["api_key_hash"] = cpamp.HashAPIKey(keys[0])
+				}
+				response["events"] = map[string]any{"total_count": 1, "items": []map[string]any{event}}
 			}
 			_ = json.NewEncoder(w).Encode(response)
 		case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
@@ -290,6 +294,17 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminLogin := getBody(t, adminClient, portal.URL+"/login", http.StatusOK)
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
+	adminRequestsPage := getBody(t, adminClient, portal.URL+"/admin/requests", http.StatusOK)
+	if !strings.Contains(adminRequestsPage, "全局请求日志") || !strings.Contains(adminRequestsPage, "最近 100 条") || !strings.Contains(adminRequestsPage, "张三") || !strings.Contains(adminRequestsPage, "gpt-test") {
+		t.Fatalf("admin global request page missing linked request: %s", adminRequestsPage)
+	}
+	adminSystemPage := getBody(t, adminClient, portal.URL+"/admin/system", http.StatusOK)
+	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "操作日志") {
+		t.Fatalf("admin system page did not merge health and operation logs: %s", adminSystemPage)
+	}
+	if strings.Contains(adminSystemPage, `href="/admin/audit"`) || strings.Contains(adminSystemPage, `href="/admin/health"`) {
+		t.Fatalf("admin navigation still links legacy system pages: %s", adminSystemPage)
+	}
 	upstreamsPage := getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
 	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
 		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)

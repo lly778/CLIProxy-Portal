@@ -570,6 +570,40 @@ func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) 
 	return value, err
 }
 
+// GlobalRequests returns the latest sanitized model-request metadata across
+// every API key. Prompt and response bodies are never requested or exposed.
+func (k *Keys) GlobalRequests(ctx context.Context, limit int) (cpamp.EventsResponse, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	now := k.Now()
+	from := now.AddDate(-10, 0, 0)
+	cacheKey := fmt.Sprintf("global-requests:%d:%d", now.Unix()/60, limit)
+	if value, ok := k.cached(cacheKey); ok && value.Events != nil {
+		return *value.Events, nil
+	}
+	req := cpamp.AnalyticsRequest{
+		FromMS: from.UnixMilli(), ToMS: now.UnixMilli(), NowMS: now.UnixMilli(), TimeZone: "Asia/Shanghai",
+		Include: cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: limit}},
+	}
+	value, err := k.CPAMP.Analytics(ctx, req)
+	if err != nil {
+		return cpamp.EventsResponse{}, err
+	}
+	if value.Events == nil {
+		return cpamp.EventsResponse{Items: []cpamp.EventRow{}}, nil
+	}
+	sort.SliceStable(value.Events.Items, func(i, j int) bool { return value.Events.Items[i].TimestampMS > value.Events.Items[j].TimestampMS })
+	if len(value.Events.Items) > limit {
+		value.Events.Items = value.Events.Items[:limit]
+	}
+	k.putCache(cacheKey, value)
+	return *value.Events, nil
+}
+
 // APIKeyUsage returns one aggregate row per requested portal key. It is used
 // by paginated administrator lists so one CPAMP query can populate every row.
 func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.Time) ([]cpamp.APIKeyUsageStat, error) {

@@ -92,9 +92,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/policy", s.withAdmin(s.adminPolicy))
 	mux.HandleFunc("POST /admin/policy", s.withAdmin(s.adminPolicySave))
 	mux.HandleFunc("POST /admin/registration", s.withAdmin(s.adminRegistration))
-	mux.HandleFunc("GET /admin/audit", s.withAdmin(s.adminAudit))
-	mux.HandleFunc("GET /admin/health", s.withAdmin(s.adminHealth))
-	mux.HandleFunc("POST /admin/health/check", s.withAdmin(s.adminHealth))
+	mux.HandleFunc("GET /admin/requests", s.withAdmin(s.adminRequests))
+	mux.HandleFunc("GET /admin/system", s.withAdmin(s.adminSystem))
+	mux.HandleFunc("POST /admin/system/check", s.withAdmin(s.adminSystem))
 	return s.recover(s.headers(s.logRequests(mux)))
 }
 
