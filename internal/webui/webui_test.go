@@ -152,6 +152,7 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 	}
 	view := DashboardView{Quota: QuotaPoolView{
 		Show: true, Available: true, Provider: "Codex", Accounts: "共 2 个已启用账号",
+		AvailabilityLabel: "可用 0 / 2", AvailabilityClass: "danger", NoUsableAccounts: true,
 		CSRFToken: "csrf-token", ReturnTo: "/dashboard", RefreshRunning: true,
 		Groups: []QuotaGroupView{{Label: "PLUS · 周额度", RemainingPercent: 50}},
 	}}
@@ -160,7 +161,7 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{`data-quota-pool`, `data-refresh-running="true"`, `data-quota-refresh-form`, `最早下次重置`} {
+	for _, want := range []string{`data-quota-pool`, `data-refresh-running="true"`, `data-quota-refresh-form`, `最早下次重置`, `可用 0 / 2`, `当前无可用上游账号`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("quota pool output does not contain %q", want)
 		}

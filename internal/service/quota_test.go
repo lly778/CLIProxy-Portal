@@ -96,7 +96,7 @@ func TestUpstreamQuotaKeepsPlansSeparate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.TotalAccounts != 2 || pool.UnknownCount != 0 || len(pool.Groups) != 4 {
+	if pool.TotalAccounts != 2 || pool.UsableAccounts != 2 || pool.UnknownCount != 0 || len(pool.Groups) != 4 {
 		t.Fatalf("pool = %#v", pool)
 	}
 	remaining := map[string]int{}
@@ -105,6 +105,54 @@ func TestUpstreamQuotaKeepsPlansSeparate(t *testing.T) {
 	}
 	if remaining["plus/five_hour"] != 80 || remaining["plus/weekly"] != 95 || remaining["pro/five_hour"] != 60 || remaining["pro/weekly"] != 30 {
 		t.Fatalf("remaining groups = %#v", remaining)
+	}
+}
+
+func TestUpstreamQuotaRequiresOneAccountToHaveEveryWindowAvailable(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{
+				{"name": "one.json", "provider": "codex", "auth_index": "one"},
+				{"name": "two.json", "provider": "codex", "auth_index": "two"},
+			}})
+		case "/v0/management/quota-snapshots/query":
+			end := now.Add(time.Hour).UnixMilli()
+			exhausted, available := 100.0, 10.0
+			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{Items: []cpamp.QuotaSnapshotItem{
+				{RowKey: "one.json\x00one", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &exhausted, PlanType: "plus", Availability: "active"},
+					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &available, PlanType: "plus", Availability: "active"},
+				}},
+				{RowKey: "two.json\x00two", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &available, PlanType: "plus", Availability: "active"},
+					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &exhausted, PlanType: "plus", Availability: "active"},
+				}},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := cpamp.New(server.URL, "admin-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := NewKeys(nil, client)
+	keys.Now = func() time.Time { return now }
+	keys.CacheTTL = 0
+	pool, err := keys.UpstreamQuota(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pool.TotalAccounts != 2 || pool.UsableAccounts != 0 || len(pool.Groups) != 2 {
+		t.Fatalf("pool = %#v", pool)
+	}
+	for _, group := range pool.Groups {
+		if group.RemainingPercent != 45 {
+			t.Fatalf("group = %#v", group)
+		}
 	}
 }
 

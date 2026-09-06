@@ -205,18 +205,21 @@ type ModelView struct {
 }
 
 type QuotaPoolView struct {
-	Show            bool
-	Available       bool
-	Provider        string
-	Accounts        string
-	UnknownCount    int
-	Groups          []QuotaGroupView
-	CSRFToken       string
-	ReturnTo        string
-	RefreshLabel    string
-	RefreshMessage  string
-	RefreshDisabled bool
-	RefreshRunning  bool
+	Show              bool
+	Available         bool
+	Provider          string
+	Accounts          string
+	AvailabilityLabel string
+	AvailabilityClass string
+	NoUsableAccounts  bool
+	UnknownCount      int
+	Groups            []QuotaGroupView
+	CSRFToken         string
+	ReturnTo          string
+	RefreshLabel      string
+	RefreshMessage    string
+	RefreshDisabled   bool
+	RefreshRunning    bool
 }
 
 type QuotaGroupView struct {

@@ -52,10 +52,11 @@ type quotaPoolCache struct {
 // provider quota snapshots. Percentages are account-weighted because provider
 // plans do not expose a common absolute token capacity.
 type UpstreamQuotaPool struct {
-	Provider      string
-	TotalAccounts int
-	Groups        []UpstreamQuotaGroup
-	UnknownCount  int
+	Provider       string
+	TotalAccounts  int
+	UsableAccounts int
+	Groups         []UpstreamQuotaGroup
+	UnknownCount   int
 }
 
 type UpstreamQuotaGroup struct {
@@ -664,6 +665,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 			continue
 		}
 		knownAccounts[item.RowKey] = struct{}{}
+		accountUsable := true
 		for _, selected := range windows {
 			window, period := selected.Window, selected.Period
 			plan := strings.ToLower(strings.TrimSpace(window.PlanType))
@@ -677,6 +679,9 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 				groups[key] = acc
 			}
 			remaining := quotaRemaining(window)
+			if remaining <= 0 {
+				accountUsable = false
+			}
 			acc.group.KnownAccounts++
 			acc.remainingTotal += remaining
 			if remaining > 0 {
@@ -692,6 +697,9 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 			if window.ObservedAtMS > 0 && (acc.group.ObservedAt.IsZero() || observed.After(acc.group.ObservedAt)) {
 				acc.group.ObservedAt = observed
 			}
+		}
+		if accountUsable {
+			pool.UsableAccounts++
 		}
 	}
 	keys := make([]string, 0, len(groups))

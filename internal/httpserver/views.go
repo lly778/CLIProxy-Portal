@@ -286,16 +286,24 @@ func compactNumber(value int64) string {
 func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, returnTo string) webui.QuotaPoolView {
 	refresh := s.Keys.QuotaRefreshStatus()
 	v := webui.QuotaPoolView{
-		Show:           pool.TotalAccounts > 0,
-		Available:      len(pool.Groups) > 0,
-		Provider:       pool.Provider,
-		Accounts:       fmt.Sprintf("共 %d 个已启用账号", pool.TotalAccounts),
-		UnknownCount:   pool.UnknownCount,
-		CSRFToken:      csrfToken,
-		ReturnTo:       returnTo,
-		RefreshLabel:   "刷新额度",
-		RefreshMessage: refresh.Message,
-		RefreshRunning: refresh.Running,
+		Show:              pool.TotalAccounts > 0,
+		Available:         len(pool.Groups) > 0,
+		Provider:          pool.Provider,
+		Accounts:          fmt.Sprintf("共 %d 个已启用账号", pool.TotalAccounts),
+		AvailabilityLabel: fmt.Sprintf("可用 %d / %d", pool.UsableAccounts, pool.TotalAccounts),
+		AvailabilityClass: "success",
+		NoUsableAccounts:  pool.UsableAccounts == 0 && len(pool.Groups) > 0,
+		UnknownCount:      pool.UnknownCount,
+		CSRFToken:         csrfToken,
+		ReturnTo:          returnTo,
+		RefreshLabel:      "刷新额度",
+		RefreshMessage:    refresh.Message,
+		RefreshRunning:    refresh.Running,
+	}
+	if pool.UsableAccounts == 0 {
+		v.AvailabilityClass = "danger"
+	} else if pool.UsableAccounts < pool.TotalAccounts {
+		v.AvailabilityClass = "warning"
 	}
 	if refresh.Running {
 		v.RefreshDisabled = true

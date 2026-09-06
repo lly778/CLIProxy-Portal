@@ -3,9 +3,10 @@
 <section class="card quota-pool-card" data-quota-pool data-refresh-running="{{if .RefreshRunning}}true{{else}}false{{end}}">
   <div class="quota-pool-head">
     <div><span class="eyebrow">共享资源</span><h2>上游额度池</h2></div>
-    <div class="quota-pool-tools"><div class="quota-pool-badges"><span class="badge neutral">{{.Provider}}</span><span class="muted small">{{.Accounts}}</span></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="{{.ReturnTo}}"><button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
+    <div class="quota-pool-tools"><div class="quota-pool-badges"><span class="badge neutral">{{.Provider}}</span>{{if .Available}}<span class="badge {{.AvailabilityClass}}">{{.AvailabilityLabel}}</span>{{end}}<span class="muted small">{{.Accounts}}</span></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="{{.ReturnTo}}"><button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
   </div>
   {{if .Available}}
+  {{if .NoUsableAccounts}}<div class="quota-pool-unavailable" role="status"><span class="status-dot danger"></span><div><strong>当前无可用上游账号</strong><p>每个账号至少有一个额度周期已经耗尽；下方百分比仅用于查看各周期的汇总情况。</p></div></div>{{end}}
   <div class="quota-group-list">
   {{range .Groups}}<div class="quota-group">
     <div class="quota-pool-summary">
@@ -15,7 +16,7 @@
     <div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div>
   </div>{{end}}
   </div>
-  <p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。不同套餐和不同周期不会混合计算。{{if .UnknownCount}}另有 {{.UnknownCount}} 个账号尚无当前额度数据。{{end}}</p>
+  <p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。不同套餐和不同周期不会混合计算；可用账号要求同一账号的所有当前额度周期均未耗尽。{{if .UnknownCount}}另有 {{.UnknownCount}} 个账号尚无当前额度数据。{{end}}</p>
   {{else}}
   <div class="empty-state compact"><strong>额度信息等待同步</strong><p>CPAMP 尚未提供可用的额度快照；可点击右上角刷新。</p></div>
   {{end}}

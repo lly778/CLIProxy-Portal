@@ -487,7 +487,7 @@ func TestAdminStatusCardUsesAdministratorPerspective(t *testing.T) {
 
 func TestQuotaPoolViewLabelsFiveHourWindow(t *testing.T) {
 	server := &Server{Cfg: config.Config{TimeZone: time.UTC}, Keys: &service.Keys{}}
-	view := server.quotaPoolView(service.UpstreamQuotaPool{TotalAccounts: 1, Provider: "Codex", Groups: []service.UpstreamQuotaGroup{{PlanType: "plus", Period: "five_hour", KnownAccounts: 1, AvailableAccounts: 1, RemainingPercent: 80}}}, "", "/dashboard")
+	view := server.quotaPoolView(service.UpstreamQuotaPool{TotalAccounts: 1, UsableAccounts: 1, Provider: "Codex", Groups: []service.UpstreamQuotaGroup{{PlanType: "plus", Period: "five_hour", KnownAccounts: 1, AvailableAccounts: 1, RemainingPercent: 80}}}, "", "/dashboard")
 	if len(view.Groups) != 1 || view.Groups[0].Label != "PLUS · 5 小时额度" {
 		t.Fatalf("five-hour quota view = %#v", view.Groups)
 	}
