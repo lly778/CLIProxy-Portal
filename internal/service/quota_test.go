@@ -20,7 +20,7 @@ func TestQuotaRefreshIsSharedAndEnforcesCooldown(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"name": "plus.json", "provider": "codex", "auth_index": "auth-1"}}})
 		case "/v0/management/api-call":
 			apiCalls++
-			_, _ = w.Write([]byte(`{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"secondary_window":{"used_percent":5,"limit_window_seconds":2592000,"reset_after_seconds":1000}}}}`))
+			_, _ = w.Write([]byte(`{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":1000},"secondary_window":{"used_percent":5,"limit_window_seconds":604800,"reset_after_seconds":1000}}}}`))
 		case "/v0/management/quota-snapshots":
 			writes++
 			_, _ = w.Write([]byte(`{"observed_at_ms":1,"items":[]}`))
@@ -52,6 +52,56 @@ func TestQuotaRefreshIsSharedAndEnforcesCooldown(t *testing.T) {
 	}
 	if _, err := keys.StartQuotaRefresh(); !errors.Is(err, ErrQuotaRefreshCooldown) {
 		t.Fatalf("second refresh error = %v", err)
+	}
+}
+
+func TestUpstreamQuotaAveragesEachAccountOnce(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{
+				{"name": "first.json", "provider": "codex", "auth_index": "first"},
+				{"name": "second.json", "provider": "codex", "auth_index": "second"},
+			}})
+		case "/v0/management/quota-snapshots/query":
+			end := now.Add(4 * 24 * time.Hour).UnixMilli()
+			firstRemaining, staleDuplicate, secondRemaining := 42.0, 99.0, 14.0
+			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{Items: []cpamp.QuotaSnapshotItem{
+				{RowKey: "first.json\x00first", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{ProviderWindowID: "weekly", WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, RemainingPercent: &firstRemaining, PlanType: "plus", Availability: "active"},
+				}},
+				// A duplicate result for the same credential must not give that
+				// account extra weight in the pool average.
+				{RowKey: "first.json\x00first", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{ProviderWindowID: "weekly", WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.Add(-time.Minute).UnixMilli(), CycleEndMS: &end, RemainingPercent: &staleDuplicate, PlanType: "plus", Availability: "active"},
+				}},
+				{RowKey: "second.json\x00second", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{ProviderWindowID: "weekly", WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, RemainingPercent: &secondRemaining, PlanType: "plus", Availability: "active"},
+				}},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := cpamp.New(server.URL, "admin-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := NewKeys(nil, client)
+	keys.Now = func() time.Time { return now }
+	keys.CacheTTL = 0
+	pool, err := keys.UpstreamQuota(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pool.Groups) != 1 {
+		t.Fatalf("groups = %#v", pool.Groups)
+	}
+	group := pool.Groups[0]
+	if group.Period != "weekly" || group.KnownAccounts != 2 || group.AvailableAccounts != 2 || group.RemainingPercent != 28 {
+		t.Fatalf("weekly group = %#v", group)
 	}
 }
 

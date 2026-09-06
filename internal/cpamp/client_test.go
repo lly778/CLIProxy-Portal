@@ -87,6 +87,45 @@ func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) 
 	}
 }
 
+func TestRefreshCodexQuotaSnapshotRetriesAndMergesPartialMainWindows(t *testing.T) {
+	var apiCalls int
+	var snapshot map[string]any
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case pathAPICall:
+			apiCalls++
+			if apiCalls == 1 {
+				_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":57,"limit_window_seconds":18000,"reset_after_seconds":1000}}}}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":57,"limit_window_seconds":18000,"reset_after_seconds":1000},"secondary_window":{"used_percent":86,"limit_window_seconds":604800,"reset_after_seconds":2000}}}}`)
+		case pathQuotaWrite:
+			if err := json.NewDecoder(r.Body).Decode(&snapshot); err != nil {
+				t.Fatalf("decode snapshot: %v", err)
+			}
+			_, _ = io.WriteString(w, `{"observed_at_ms":1,"items":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	file := AuthFile{Name: "plus.json", Provider: "codex", AuthIndex: "auth-1"}
+	if err := client.RefreshCodexQuotaSnapshot(context.Background(), file, time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+	if apiCalls != 2 {
+		t.Fatalf("api calls = %d, want 2", apiCalls)
+	}
+	entries := snapshot["entries"].([]any)
+	windows := entries[0].(map[string]any)["windows"].([]any)
+	if len(windows) != 2 {
+		t.Fatalf("windows = %#v", windows)
+	}
+	weekly := windows[1].(map[string]any)
+	if weekly["window_kind"] != "weekly" || weekly["remaining_percent"] != float64(14) {
+		t.Fatalf("weekly window = %#v", weekly)
+	}
+}
+
 func requireAdmin(t *testing.T, r *http.Request) {
 	t.Helper()
 	if got := r.Header.Get("Authorization"); got != "Bearer "+testAdminKey {

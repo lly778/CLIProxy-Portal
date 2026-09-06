@@ -611,7 +611,13 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		group          UpstreamQuotaGroup
 		remainingTotal float64
 	}
+	type quotaContribution struct {
+		plan   string
+		period string
+		window cpamp.QuotaSnapshotWindow
+	}
 	groups := make(map[string]*quotaAccumulator)
+	contributions := make(map[string]quotaContribution)
 	knownAccounts := make(map[string]struct{}, len(result.Items))
 	for _, item := range result.Items {
 		windows := currentQuotaWindows(item.Windows)
@@ -625,28 +631,36 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 			if plan == "" {
 				plan = "unknown"
 			}
-			key := plan + "\x00" + period
-			acc := groups[key]
-			if acc == nil {
-				acc = &quotaAccumulator{group: UpstreamQuotaGroup{PlanType: plan, Period: period}}
-				groups[key] = acc
+			key := plan + "\x00" + period + "\x00" + item.RowKey
+			current, exists := contributions[key]
+			if !exists || window.ObservedAtMS > current.window.ObservedAtMS {
+				contributions[key] = quotaContribution{plan: plan, period: period, window: window}
 			}
-			remaining := quotaRemaining(window)
-			acc.group.KnownAccounts++
-			acc.remainingTotal += remaining
-			if remaining > 0 {
-				acc.group.AvailableAccounts++
+		}
+	}
+	for _, contribution := range contributions {
+		window := contribution.window
+		key := contribution.plan + "\x00" + contribution.period
+		acc := groups[key]
+		if acc == nil {
+			acc = &quotaAccumulator{group: UpstreamQuotaGroup{PlanType: contribution.plan, Period: contribution.period}}
+			groups[key] = acc
+		}
+		remaining := quotaRemaining(window)
+		acc.group.KnownAccounts++
+		acc.remainingTotal += remaining
+		if remaining > 0 {
+			acc.group.AvailableAccounts++
+		}
+		if window.CycleEndMS != nil && *window.CycleEndMS > k.Now().UnixMilli() {
+			reset := time.UnixMilli(*window.CycleEndMS).UTC()
+			if acc.group.NextResetAt.IsZero() || reset.Before(acc.group.NextResetAt) {
+				acc.group.NextResetAt = reset
 			}
-			if window.CycleEndMS != nil && *window.CycleEndMS > k.Now().UnixMilli() {
-				reset := time.UnixMilli(*window.CycleEndMS).UTC()
-				if acc.group.NextResetAt.IsZero() || reset.Before(acc.group.NextResetAt) {
-					acc.group.NextResetAt = reset
-				}
-			}
-			observed := time.UnixMilli(window.ObservedAtMS).UTC()
-			if window.ObservedAtMS > 0 && (acc.group.ObservedAt.IsZero() || observed.After(acc.group.ObservedAt)) {
-				acc.group.ObservedAt = observed
-			}
+		}
+		observed := time.UnixMilli(window.ObservedAtMS).UTC()
+		if window.ObservedAtMS > 0 && (acc.group.ObservedAt.IsZero() || observed.After(acc.group.ObservedAt)) {
+			acc.group.ObservedAt = observed
 		}
 	}
 	keys := make([]string, 0, len(groups))
