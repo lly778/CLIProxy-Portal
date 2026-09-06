@@ -248,11 +248,15 @@ func classifyMainCodexWindow(name string, duration float64, hasDuration bool, pl
 }
 
 func quotaResetEnd(raw map[string]any, observedAt time.Time) (int64, string, bool) {
-	if resetAt, ok := numberValue(raw, "reset_at", "resetAt"); ok && resetAt > 0 {
+	resetAt, hasResetAt := numberValue(raw, "reset_at", "resetAt")
+	if hasResetAt && resetAt > float64(observedAt.Unix()) {
 		return int64(math.Floor(resetAt)) * 1000, "exact", true
 	}
 	if after, ok := numberValue(raw, "reset_after_seconds", "resetAfterSeconds"); ok && after > 0 {
 		return observedAt.Add(time.Duration(after * float64(time.Second))).UnixMilli(), "derived", true
+	}
+	if hasResetAt && resetAt > 0 {
+		return int64(math.Floor(resetAt)) * 1000, "exact", true
 	}
 	return 0, "unknown", false
 }

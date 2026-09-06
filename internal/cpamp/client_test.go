@@ -87,6 +87,17 @@ func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) 
 	}
 }
 
+func TestQuotaResetEndPrefersLiveCountdownOverExpiredTimestamp(t *testing.T) {
+	observedAt := time.Date(2026, 9, 6, 19, 27, 0, 0, time.UTC)
+	end, accuracy, ok := quotaResetEnd(map[string]any{
+		"reset_at":            float64(observedAt.Add(-5 * 24 * time.Hour).Unix()),
+		"reset_after_seconds": float64(15 * 60 * 60),
+	}, observedAt)
+	if !ok || accuracy != "derived" || end != observedAt.Add(15*time.Hour).UnixMilli() {
+		t.Fatalf("quotaResetEnd() = (%d, %q, %v)", end, accuracy, ok)
+	}
+}
+
 func requireAdmin(t *testing.T, r *http.Request) {
 	t.Helper()
 	if got := r.Header.Get("Authorization"); got != "Bearer "+testAdminKey {
