@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -634,13 +635,7 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 		if name == "" || provider == "" {
 			continue
 		}
-		accountID := rawText(raw, "accountId", "account_id", "chatgptAccountId", "chatgpt_account_id")
-		if accountID == "" {
-			accountID = rawNestedText(raw, "metadata", "accountId", "account_id", "chatgptAccountId", "chatgpt_account_id")
-		}
-		if accountID == "" {
-			accountID = rawNestedText(raw, "attributes", "accountId", "account_id", "chatgptAccountId", "chatgpt_account_id")
-		}
+		accountID := rawCodexAccountID(raw)
 		files = append(files, AuthFile{
 			Name:            name,
 			Provider:        provider,
@@ -652,6 +647,75 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 		})
 	}
 	return files, nil
+}
+
+// rawCodexAccountID mirrors CPA-Manager-Plus' Codex identity resolution. Some
+// auth-file rows expose chatgpt_account_id directly, while others only carry it
+// as a claim in id_token. Only the non-secret account ID is retained.
+func rawCodexAccountID(record map[string]json.RawMessage) string {
+	keys := []string{"chatgpt_account_id", "chatgptAccountId", "account_id", "accountId"}
+	if value := rawText(record, keys...); value != "" {
+		return value
+	}
+	for _, parent := range []string{"metadata", "attributes"} {
+		if value := rawNestedText(record, parent, keys...); value != "" {
+			return value
+		}
+	}
+	for _, raw := range codexIDTokenCandidates(record) {
+		if value := accountIDFromIDToken(raw, keys); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func codexIDTokenCandidates(record map[string]json.RawMessage) []json.RawMessage {
+	candidates := make([]json.RawMessage, 0, 6)
+	for _, key := range []string{"id_token", "idToken"} {
+		if raw := record[key]; len(raw) > 0 {
+			candidates = append(candidates, raw)
+		}
+	}
+	for _, parent := range []string{"metadata", "attributes"} {
+		var nested map[string]json.RawMessage
+		if raw := record[parent]; len(raw) == 0 || json.Unmarshal(raw, &nested) != nil {
+			continue
+		}
+		for _, key := range []string{"id_token", "idToken"} {
+			if raw := nested[key]; len(raw) > 0 {
+				candidates = append(candidates, raw)
+			}
+		}
+	}
+	return candidates
+}
+
+func accountIDFromIDToken(raw json.RawMessage, keys []string) string {
+	var claims map[string]json.RawMessage
+	if len(raw) > 0 && raw[0] == '{' && json.Unmarshal(raw, &claims) == nil {
+		return rawText(claims, keys...)
+	}
+	var token string
+	if json.Unmarshal(raw, &token) != nil {
+		return ""
+	}
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 64<<10 {
+		return ""
+	}
+	if strings.HasPrefix(token, "{") && json.Unmarshal([]byte(token), &claims) == nil {
+		return rawText(claims, keys...)
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(payload) > 64<<10 || json.Unmarshal(payload, &claims) != nil {
+		return ""
+	}
+	return rawText(claims, keys...)
 }
 
 func rawNestedText(record map[string]json.RawMessage, parent string, keys ...string) string {

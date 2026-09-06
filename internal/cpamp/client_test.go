@@ -2,6 +2,7 @@ package cpamp
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -343,6 +344,29 @@ func TestQuotaSnapshotMetadataFlow(t *testing.T) {
 	}
 	if len(result.Items) != 1 || len(result.Items[0].Windows) != 1 || result.Items[0].Windows[0].UsedPercent == nil || *result.Items[0].Windows[0].UsedPercent != 5 {
 		t.Fatalf("quota result = %#v", result)
+	}
+}
+
+func TestListAuthFilesDerivesCodexAccountIDFromIDToken(t *testing.T) {
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"chatgpt_account_id":"acct-from-token"}`))
+	token := "header." + claims + ".signature"
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requireAdmin(t, r)
+		if r.URL.Path != pathAuthFiles {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{
+			{"name": "codex-token.json", "provider": "codex", "auth_index": "auth-token", "metadata": map[string]any{"id_token": token}},
+			{"name": "codex-object.json", "provider": "codex", "auth_index": "auth-object", "attributes": map[string]any{"idToken": map[string]any{"accountId": "acct-from-object"}}},
+		}})
+	})
+	files, err := client.ListAuthFiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || files[0].AccountID != "acct-from-token" || files[1].AccountID != "acct-from-object" {
+		t.Fatalf("auth files = %#v", files)
 	}
 }
 
