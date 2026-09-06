@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -168,7 +169,95 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 	if e.LatencyMS != nil {
 		latency = fmt.Sprintf("%d ms", *e.LatencyMS)
 	}
-	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: e.FailSummary}
+	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: requestFailureSummary(e)}
+}
+
+func requestFailureSummary(e cpamp.EventRow) string {
+	if !e.Failed {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if e.FailStatusCode != nil && *e.FailStatusCode >= 100 {
+		parts = append(parts, fmt.Sprintf("HTTP %d", *e.FailStatusCode))
+	}
+	summary := strings.TrimSpace(e.FailSummary)
+	if summary == "" {
+		return strings.Join(parts, " · ")
+	}
+
+	var payload any
+	if json.Unmarshal([]byte(summary), &payload) == nil {
+		if object, ok := payload.(map[string]any); ok {
+			code, message := failureJSONDetails(object)
+			parts = appendUnique(parts, code)
+			parts = appendUnique(parts, message)
+		}
+		return truncateFailureSummary(strings.Join(parts, " · "), 180)
+	}
+	if strings.ContainsAny(summary, "\r\n") || strings.HasPrefix(summary, "{") || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "<") {
+		return strings.Join(parts, " · ")
+	}
+	parts = appendUnique(parts, summary)
+	return truncateFailureSummary(strings.Join(parts, " · "), 180)
+}
+
+func failureJSONDetails(object map[string]any) (string, string) {
+	code := firstFailureText(object, "code", "type")
+	message := firstFailureText(object, "message", "detail")
+	if nested, ok := object["error"].(map[string]any); ok {
+		if nestedCode := firstFailureText(nested, "code", "type"); nestedCode != "" {
+			code = nestedCode
+		}
+		if nestedMessage := firstFailureText(nested, "message", "detail"); nestedMessage != "" {
+			message = nestedMessage
+		}
+	} else if message == "" {
+		message = failureText(object["error"])
+	}
+	return code, message
+}
+
+func firstFailureText(object map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := failureText(object[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func failureText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return typed.String()
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64)
+	default:
+		return ""
+	}
+}
+
+func appendUnique(values []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return values
+	}
+	for _, existing := range values {
+		if strings.EqualFold(existing, value) {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func truncateFailureSummary(value string, limit int) string {
+	runes := []rune(strings.TrimSpace(value))
+	if limit < 1 || len(runes) <= limit {
+		return string(runes)
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
 
 func modelUsageCharts(models []webui.ModelUsageView) ([]webui.ModelUsageView, []webui.ModelUsageView) {
