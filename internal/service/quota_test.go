@@ -55,6 +55,61 @@ func TestQuotaRefreshIsSharedAndEnforcesCooldown(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountStatusIsVerifiedAndInvalidatesQuota(t *testing.T) {
+	disabled := false
+	patches := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v0/management/auth-files" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "runtime-1", "physicalName": "one.json", "provider": "codex", "auth_index": "auth-1", "account": "one@example.com", "disabled": disabled}}})
+		case r.URL.Path == "/v0/management/auth-files/status" && r.Method == http.MethodPatch:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["name"] != "runtime-1" || body["cpamp_physical_name"] != "one.json" {
+				t.Fatalf("status payload = %#v", body)
+			}
+			disabled, _ = body["disabled"].(bool)
+			patches++
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := cpamp.New(server.URL, "admin-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := NewKeys(nil, client)
+	accounts, err := keys.UpstreamAccounts(context.Background())
+	if err != nil || len(accounts) != 1 || accounts[0].Disabled {
+		t.Fatalf("accounts = %#v, err = %v", accounts, err)
+	}
+	updated, err := keys.SetUpstreamAccountDisabled(context.Background(), accounts[0].ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Disabled || !disabled || patches != 1 {
+		t.Fatalf("updated = %#v disabled=%v patches=%d", updated, disabled, patches)
+	}
+}
+
+func TestOAuthModelRuleMatchingDistinguishesExactAndWildcard(t *testing.T) {
+	matched, wildcard := excludedModelRule("gpt-5.6-sol", []string{"gpt-old", "gpt-5.*"})
+	if matched != "gpt-5.*" || wildcard != "gpt-5.*" {
+		t.Fatalf("wildcard match = %q, %q", matched, wildcard)
+	}
+	matched, wildcard = excludedModelRule("GPT-OLD", []string{"gpt-old"})
+	if matched != "gpt-old" || wildcard != "" {
+		t.Fatalf("exact match = %q, %q", matched, wildcard)
+	}
+	if wildcardModelMatch("gpt-*-preview", "gpt-5-preview") != true || wildcardModelMatch("gpt-*-preview", "gpt-5") {
+		t.Fatal("wildcard matcher returned an unexpected result")
+	}
+}
+
 func TestUpstreamQuotaKeepsPlansSeparate(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

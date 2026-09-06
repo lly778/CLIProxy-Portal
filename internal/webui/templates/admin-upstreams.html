@@ -1,0 +1,44 @@
+{{define "content"}}
+<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游账号</h1><p class="muted">启用或停用 CPAMP 中的 Codex 凭证。状态变更会影响后续请求调度与共享额度统计。</p></div></div>
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+<section class="card upstream-card">
+  <div class="section-head compact"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><span class="badge neutral">{{len .Accounts}} 个账号</span></div>
+  <div class="upstream-list">
+    {{range .Accounts}}
+    <article class="upstream-row">
+      <span class="upstream-icon" aria-hidden="true">C</span>
+      <div class="upstream-main"><strong>{{.Account}}</strong><span class="muted mono">{{.Name}}</span>{{if .AuthIndex}}<small class="muted">身份索引 {{.AuthIndex}}</small>{{end}}</div>
+      {{if .Disabled}}<span class="badge danger">{{.StatusLabel}}</span>{{else}}<span class="badge success">{{.StatusLabel}}</span>{{end}}
+      <form method="post" action="/admin/upstreams/{{.ID}}/status" data-confirm="{{if .Disabled}}确定启用该上游账号吗？{{else}}确定停用该上游账号吗？停用后新请求将不再调度到此账号。{{end}}">
+        {{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}
+        <input type="hidden" name="disabled" value="{{if .Disabled}}false{{else}}true{{end}}">
+        {{if .Disabled}}<button class="button secondary" type="submit">启用</button>{{else}}<button class="button danger-outline" type="submit">停用</button>{{end}}
+      </form>
+    </article>
+    {{else}}
+    <div class="empty-state"><div class="empty-icon">◇</div><strong>暂无 Codex 上游账号</strong><p>请先在 CPAMP 中添加凭证，随后可在这里管理启用状态。</p></div>
+    {{end}}
+  </div>
+</section>
+<section class="card upstream-card section-gap">
+  <div class="section-head compact"><div><h2>OAuth 模型</h2><p class="muted small">全局控制 Codex OAuth 路由是否使用某个模型。</p></div><span class="badge neutral">{{len .Models}} 个模型</span></div>
+  {{if .ModelError}}<div class="alert danger" role="alert">{{.ModelError}}</div>{{end}}
+  {{if .WildcardRules}}<div class="oauth-rule-note"><span class="muted small">保留的通配禁用规则</span><div>{{range .WildcardRules}}<span class="badge warning mono">{{.}}</span>{{end}}</div></div>{{end}}
+  <div class="oauth-model-list">
+    {{range .Models}}
+    <article class="oauth-model-row">
+      <div class="upstream-main"><strong class="mono">{{.ID}}</strong>{{if .DisplayName}}<span class="muted">{{.DisplayName}}</span>{{end}}{{if .WildcardRule}}<small class="muted">由通配规则 {{.WildcardRule}} 控制</small>{{end}}</div>
+      {{if .Enabled}}<span class="badge success">已启用</span>{{else}}<span class="badge danger">已停用</span>{{end}}
+      {{if .WildcardRule}}<span class="muted small">请在 CPAMP 调整规则</span>{{else}}
+      <form method="post" action="/admin/upstreams/models/status" data-confirm="确定{{if .Enabled}}停用{{else}}启用{{end}}模型 {{.ID}} 吗？">
+        {{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}
+        <input type="hidden" name="model" value="{{.ID}}">
+        <input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}">
+        {{if .Enabled}}<button class="button danger-outline" type="submit">停用</button>{{else}}<button class="button secondary" type="submit">启用</button>{{end}}
+      </form>{{end}}
+    </article>
+    {{else}}{{if not $.ModelError}}<div class="empty-state compact"><strong>暂无模型定义</strong><p>CPAMP 当前未返回 Codex 模型定义。</p></div>{{end}}{{end}}
+  </div>
+</section>
+<div class="callout warning"><strong>切换说明</strong><p>停用只改变 CPAMP 的调度状态，不会删除凭证文件；重新启用后可继续使用。停用最后一个可用账号会导致模型请求无法分配。</p></div>
+{{end}}

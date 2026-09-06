@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,14 +28,16 @@ const (
 )
 
 const (
-	pathHealth       = "/health"
-	pathStatus       = "/status"
-	pathAPIKeys      = "/v0/management/api-keys"
-	pathAuthFiles    = "/v0/management/auth-files"
-	pathAliases      = "/v0/management/api-key-aliases"
-	pathAnalytics    = "/v0/management/monitoring/analytics"
-	pathQuotaQuery   = "/v0/management/quota-snapshots/query"
-	pathModelCatalog = "/v1/models"
+	pathHealth           = "/health"
+	pathStatus           = "/status"
+	pathAPIKeys          = "/v0/management/api-keys"
+	pathAuthFiles        = "/v0/management/auth-files"
+	pathOAuthExcluded    = "/v0/management/oauth-excluded-models"
+	pathModelDefinitions = "/v0/management/model-definitions"
+	pathAliases          = "/v0/management/api-key-aliases"
+	pathAnalytics        = "/v0/management/monitoring/analytics"
+	pathQuotaQuery       = "/v0/management/quota-snapshots/query"
+	pathModelCatalog     = "/v1/models"
 )
 
 // Config controls a Client. BaseURL should point at the Manager Server, for
@@ -255,12 +258,19 @@ type Model struct {
 // snapshots. It deliberately excludes auth-file contents and provider tokens.
 type AuthFile struct {
 	Name            string
+	RuntimeID       string
 	Provider        string
 	AuthIndex       string
 	AccountSnapshot string
 	AccountID       string
 	ProjectID       string
 	Disabled        bool
+}
+
+// OAuthModelDefinition is a sanitized static model entry returned by CPAMP.
+type OAuthModelDefinition struct {
+	ID          string
+	DisplayName string
 }
 
 // QuotaAccountTarget is CPAMP's credential identity envelope. Callers should
@@ -644,6 +654,7 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 		}
 		files = append(files, AuthFile{
 			Name:            name,
+			RuntimeID:       rawText(raw, "runtimeId", "runtime_id", "id"),
 			Provider:        provider,
 			AuthIndex:       rawText(raw, "authIndex", "auth_index"),
 			AccountSnapshot: rawText(raw, "accountSnapshot", "account_snapshot", "account", "email"),
@@ -653,6 +664,171 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 		})
 	}
 	return files, nil
+}
+
+// SetAuthFileDisabled enables or disables one credential through CPAMP. The
+// identity preconditions keep duplicate filenames and changed runtime entries
+// from causing an update to the wrong credential.
+func (c *Client) SetAuthFileDisabled(ctx context.Context, file AuthFile, disabled bool) error {
+	target := strings.TrimSpace(file.RuntimeID)
+	if target == "" {
+		target = strings.TrimSpace(file.Name)
+	}
+	if target == "" || strings.TrimSpace(file.Name) == "" {
+		return errors.New("cpamp auth file identity is required")
+	}
+	payload := map[string]any{
+		"name":                target,
+		"disabled":            disabled,
+		"cpamp_physical_name": strings.TrimSpace(file.Name),
+	}
+	if value := strings.TrimSpace(file.RuntimeID); value != "" {
+		payload["cpamp_runtime_id"] = value
+	}
+	if value := strings.TrimSpace(file.AuthIndex); value != "" {
+		payload["auth_index"] = value
+	}
+	if value := strings.TrimSpace(file.Provider); value != "" {
+		payload["cpamp_provider"] = value
+	}
+	if value := strings.TrimSpace(file.AccountID); value != "" {
+		payload["cpamp_account_id"] = value
+	}
+	if value := strings.TrimSpace(file.AccountSnapshot); value != "" {
+		payload["cpamp_account_snapshot"] = value
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("cpamp %s/status request encoding failed", pathAuthFiles)
+	}
+	_, err = c.do(ctx, http.MethodPatch, pathAuthFiles+"/status", body, c.adminHeader)
+	return err
+}
+
+// ListOAuthExcludedModels returns global OAuth exclusion rules for one
+// provider. CPAMP may return either a direct provider map or an envelope.
+func (c *Client) ListOAuthExcludedModels(ctx context.Context, provider string) ([]string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return nil, errors.New("cpamp OAuth provider is required")
+	}
+	body, err := c.do(ctx, http.MethodGet, pathOAuthExcluded, nil, c.adminHeader)
+	if err != nil {
+		return nil, err
+	}
+	var root map[string]json.RawMessage
+	if err := decodeJSON(pathOAuthExcluded, body, &root); err != nil {
+		return nil, err
+	}
+	source := root
+	for _, envelope := range []string{"oauth-excluded-models", "items"} {
+		if raw, ok := root[envelope]; ok {
+			var nested map[string]json.RawMessage
+			if json.Unmarshal(raw, &nested) == nil {
+				source = nested
+				break
+			}
+		}
+	}
+	raw, ok := source[provider]
+	if !ok {
+		for key, value := range source {
+			if strings.EqualFold(strings.TrimSpace(key), provider) {
+				raw, ok = value, true
+				break
+			}
+		}
+	}
+	if !ok || len(raw) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return []string{}, nil
+	}
+	var values []string
+	if json.Unmarshal(raw, &values) != nil {
+		var text string
+		if json.Unmarshal(raw, &text) != nil {
+			return nil, fmt.Errorf("cpamp %s returned invalid model rules", pathOAuthExcluded)
+		}
+		values = strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' })
+	}
+	return normalizeModelRules(values), nil
+}
+
+// SetOAuthExcludedModels replaces the exclusion rules for one provider. An
+// empty list removes the provider entry, matching CPAMP's own management UI.
+func (c *Client) SetOAuthExcludedModels(ctx context.Context, provider string, models []string) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return errors.New("cpamp OAuth provider is required")
+	}
+	normalized := normalizeModelRules(models)
+	if len(normalized) > 500 {
+		return errors.New("cpamp OAuth model rule limit exceeded")
+	}
+	if len(normalized) == 0 {
+		query := url.Values{"provider": []string{provider}}
+		_, err := c.do(ctx, http.MethodDelete, pathOAuthExcluded+"?"+query.Encode(), nil, c.adminHeader)
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"provider": provider, "models": normalized})
+	if err != nil {
+		return fmt.Errorf("cpamp %s request encoding failed", pathOAuthExcluded)
+	}
+	_, err = c.do(ctx, http.MethodPatch, pathOAuthExcluded, payload, c.adminHeader)
+	return err
+}
+
+// ListOAuthModelDefinitions lists CPAMP's static model catalog for a provider,
+// including entries currently hidden by OAuth exclusion rules.
+func (c *Client) ListOAuthModelDefinitions(ctx context.Context, provider string) ([]OAuthModelDefinition, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return nil, errors.New("cpamp OAuth provider is required")
+	}
+	requestPath := pathModelDefinitions + "/" + url.PathEscape(provider)
+	body, err := c.do(ctx, http.MethodGet, requestPath, nil, c.adminHeader)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Models []map[string]json.RawMessage `json:"models"`
+	}
+	if err := decodeJSON(requestPath, body, &envelope); err != nil {
+		return nil, err
+	}
+	result := make([]OAuthModelDefinition, 0, len(envelope.Models))
+	seen := make(map[string]struct{}, len(envelope.Models))
+	for _, raw := range envelope.Models {
+		id := rawText(raw, "id")
+		key := strings.ToLower(id)
+		if id == "" || len(id) > 200 {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, OAuthModelDefinition{ID: id, DisplayName: rawText(raw, "display_name", "displayName")})
+	}
+	return result, nil
+}
+
+func normalizeModelRules(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value == "" || len(value) > 200 {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return strings.ToLower(result[i]) < strings.ToLower(result[j]) })
+	return result
 }
 
 func rawNestedText(record map[string]json.RawMessage, parent string, keys ...string) string {

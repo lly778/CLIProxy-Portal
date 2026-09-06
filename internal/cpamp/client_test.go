@@ -331,7 +331,7 @@ func TestQuotaSnapshotMetadataFlow(t *testing.T) {
 		requireAdmin(t, r)
 		switch r.URL.Path {
 		case pathAuthFiles:
-			_, _ = io.WriteString(w, `{"files":[{"name":"codex.json","provider":"codex","auth_index":7,"account":"hidden@example.com","metadata":{"chatgpt_account_id":"acct-nested"}},{"name":"off.json","type":"codex","authIndex":"8","disabled":true}]}`)
+			_, _ = io.WriteString(w, `{"files":[{"id":"runtime-7","physicalName":"codex.json","provider":"codex","auth_index":7,"account":"hidden@example.com","metadata":{"chatgpt_account_id":"acct-nested"}},{"name":"off.json","type":"codex","authIndex":"8","disabled":true}]}`)
 		case pathQuotaQuery:
 			var request QuotaSnapshotQueryRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -349,7 +349,7 @@ func TestQuotaSnapshotMetadataFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list auth files: %v", err)
 	}
-	if len(files) != 2 || files[0].AuthIndex != "7" || files[0].AccountSnapshot != "hidden@example.com" || files[0].AccountID != "acct-nested" || !files[1].Disabled {
+	if len(files) != 2 || files[0].RuntimeID != "runtime-7" || files[0].AuthIndex != "7" || files[0].AccountSnapshot != "hidden@example.com" || files[0].AccountID != "acct-nested" || !files[1].Disabled {
 		t.Fatalf("auth files = %#v", files)
 	}
 	result, err := client.QueryQuotaSnapshots(context.Background(), QuotaSnapshotQueryRequest{Accounts: []QuotaQueryAccount{{RowKey: "row-1", Provider: "codex", Account: QuotaAccountTarget{AuthFileSnapshot: files[0].Name, AuthIndex: files[0].AuthIndex}}}})
@@ -358,6 +358,92 @@ func TestQuotaSnapshotMetadataFlow(t *testing.T) {
 	}
 	if len(result.Items) != 1 || len(result.Items[0].Windows) != 1 || result.Items[0].Windows[0].UsedPercent == nil || *result.Items[0].Windows[0].UsedPercent != 5 {
 		t.Fatalf("quota result = %#v", result)
+	}
+}
+
+func TestSetAuthFileDisabledSendsIdentityPreconditions(t *testing.T) {
+	var payload map[string]any
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requireAdmin(t, r)
+		if r.URL.Path != pathAuthFiles+"/status" || r.Method != http.MethodPatch {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode status request: %v", err)
+		}
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	})
+	file := AuthFile{Name: "codex.json", RuntimeID: "runtime-7", Provider: "codex", AuthIndex: "auth-7", AccountID: "acct-7", AccountSnapshot: "hidden@example.com"}
+	if err := client.SetAuthFileDisabled(context.Background(), file, true); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"name": "runtime-7", "disabled": true, "auth_index": "auth-7",
+		"cpamp_physical_name": "codex.json", "cpamp_runtime_id": "runtime-7",
+		"cpamp_provider": "codex", "cpamp_account_id": "acct-7",
+		"cpamp_account_snapshot": "hidden@example.com",
+	}
+	for key, value := range want {
+		if payload[key] != value {
+			t.Errorf("payload[%q] = %#v, want %#v", key, payload[key], value)
+		}
+	}
+}
+
+func TestOAuthExcludedModelsAndDefinitions(t *testing.T) {
+	rules := []string{"GPT-Z", "gpt-a", "gpt-a"}
+	patches, deletes := 0, 0
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requireAdmin(t, r)
+		switch {
+		case r.URL.Path == pathOAuthExcluded && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"oauth-excluded-models": map[string]any{"codex": rules}})
+		case r.URL.Path == pathOAuthExcluded && r.Method == http.MethodPatch:
+			var body struct {
+				Provider string   `json:"provider"`
+				Models   []string `json:"models"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Provider != "codex" {
+				t.Fatalf("provider = %q", body.Provider)
+			}
+			rules = body.Models
+			patches++
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		case r.URL.Path == pathOAuthExcluded && r.Method == http.MethodDelete:
+			if r.URL.Query().Get("provider") != "codex" {
+				t.Fatalf("delete provider = %q", r.URL.Query().Get("provider"))
+			}
+			rules = nil
+			deletes++
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		case r.URL.Path == pathModelDefinitions+"/codex" && r.Method == http.MethodGet:
+			_, _ = io.WriteString(w, `{"models":[{"id":"gpt-z","display_name":"GPT Z"},{"id":"gpt-a"},{"id":"GPT-A"},{"display_name":"missing"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	gotRules, err := client.ListOAuthExcludedModels(context.Background(), "Codex")
+	if err != nil || len(gotRules) != 2 || gotRules[0] != "gpt-a" || gotRules[1] != "GPT-Z" {
+		t.Fatalf("rules = %#v, err = %v", gotRules, err)
+	}
+	models, err := client.ListOAuthModelDefinitions(context.Background(), "codex")
+	if err != nil || len(models) != 2 || models[0].DisplayName != "GPT Z" {
+		t.Fatalf("models = %#v, err = %v", models, err)
+	}
+	if err := client.SetOAuthExcludedModels(context.Background(), "codex", []string{"gpt-b", "GPT-A", "gpt-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if patches != 1 || len(rules) != 2 || rules[0] != "GPT-A" || rules[1] != "gpt-b" {
+		t.Fatalf("patched rules = %#v patches=%d", rules, patches)
+	}
+	if err := client.SetOAuthExcludedModels(context.Background(), "codex", nil); err != nil {
+		t.Fatal(err)
+	}
+	if deletes != 1 || len(rules) != 0 {
+		t.Fatalf("deleted rules = %#v deletes=%d", rules, deletes)
 	}
 }
 

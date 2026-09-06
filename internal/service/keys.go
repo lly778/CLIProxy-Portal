@@ -70,6 +70,27 @@ type UpstreamQuotaGroup struct {
 	Estimated         bool
 }
 
+// UpstreamAccount is the sanitized administrator-facing identity and state of
+// one Codex credential. It never contains provider tokens or auth-file data.
+type UpstreamAccount struct {
+	ID        string
+	Name      string
+	Account   string
+	Provider  string
+	AuthIndex string
+	Disabled  bool
+}
+
+// OAuthModelSetting is one global OAuth model routing switch. A model disabled
+// by a wildcard rule is read-only here because removing that rule would affect
+// other models as well.
+type OAuthModelSetting struct {
+	ID           string
+	DisplayName  string
+	Enabled      bool
+	WildcardRule string
+}
+
 var (
 	ErrQuotaRefreshRunning  = errors.New("额度正在刷新")
 	ErrQuotaRefreshCooldown = errors.New("额度刚刚刷新过，请稍后再试")
@@ -594,6 +615,252 @@ func usageGranularity(from, to time.Time) string {
 		return "hour"
 	}
 	return "day"
+}
+
+// UpstreamAccounts lists Codex credentials that administrators may enable or
+// disable. The opaque ID is derived from CPAMP's full sanitized identity so a
+// submitted action can be matched against a fresh listing.
+func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) {
+	typed, ok := k.CPAMP.(interface {
+		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
+	})
+	if !ok {
+		return nil, errors.New("CPAMP 客户端不支持上游账号管理")
+	}
+	files, err := typed.ListAuthFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	accounts := make([]UpstreamAccount, 0, len(files))
+	seen := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || strings.TrimSpace(file.Name) == "" {
+			continue
+		}
+		id := upstreamAccountID(file)
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		label := strings.TrimSpace(file.AccountSnapshot)
+		if label == "" {
+			label = strings.TrimSpace(file.Name)
+		}
+		accounts = append(accounts, UpstreamAccount{
+			ID: id, Name: strings.TrimSpace(file.Name), Account: label,
+			Provider: "Codex", AuthIndex: strings.TrimSpace(file.AuthIndex), Disabled: file.Disabled,
+		})
+	}
+	sort.SliceStable(accounts, func(i, j int) bool {
+		if accounts[i].Disabled != accounts[j].Disabled {
+			return !accounts[i].Disabled
+		}
+		return strings.ToLower(accounts[i].Account) < strings.ToLower(accounts[j].Account)
+	})
+	return accounts, nil
+}
+
+// SetUpstreamAccountDisabled re-resolves the submitted opaque ID immediately
+// before mutating CPAMP, then verifies that the requested state was applied.
+func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabled bool) (UpstreamAccount, error) {
+	typed, ok := k.CPAMP.(interface {
+		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
+		SetAuthFileDisabled(context.Context, cpamp.AuthFile, bool) error
+	})
+	if !ok {
+		return UpstreamAccount{}, errors.New("CPAMP 客户端不支持上游账号管理")
+	}
+	files, err := typed.ListAuthFiles(ctx)
+	if err != nil {
+		return UpstreamAccount{}, err
+	}
+	var selected cpamp.AuthFile
+	found := false
+	for _, file := range files {
+		if strings.EqualFold(strings.TrimSpace(file.Provider), "codex") && upstreamAccountID(file) == strings.TrimSpace(id) {
+			selected, found = file, true
+			break
+		}
+	}
+	if !found {
+		return UpstreamAccount{}, errors.New("上游账号不存在或已发生变化，请刷新后重试")
+	}
+	if selected.Disabled != disabled {
+		if err := typed.SetAuthFileDisabled(ctx, selected, disabled); err != nil {
+			return UpstreamAccount{}, err
+		}
+		confirmed, err := typed.ListAuthFiles(ctx)
+		if err != nil {
+			return UpstreamAccount{}, err
+		}
+		verified := false
+		for _, file := range confirmed {
+			if upstreamAccountID(file) == strings.TrimSpace(id) {
+				if file.Disabled != disabled {
+					return UpstreamAccount{}, errors.New("CPAMP 未确认上游账号状态变更")
+				}
+				selected, verified = file, true
+				break
+			}
+		}
+		if !verified {
+			return UpstreamAccount{}, errors.New("状态变更后无法确认上游账号")
+		}
+	}
+	k.invalidateQuota()
+	k.refreshMu.Lock()
+	k.refreshedQuota = make(map[string][]cpamp.QuotaSnapshotWindow)
+	k.refreshMu.Unlock()
+	label := strings.TrimSpace(selected.AccountSnapshot)
+	if label == "" {
+		label = strings.TrimSpace(selected.Name)
+	}
+	return UpstreamAccount{ID: upstreamAccountID(selected), Name: strings.TrimSpace(selected.Name), Account: label, Provider: "Codex", AuthIndex: strings.TrimSpace(selected.AuthIndex), Disabled: disabled}, nil
+}
+
+func upstreamAccountID(file cpamp.AuthFile) string {
+	return security.SHA256(strings.Join([]string{
+		strings.TrimSpace(file.Name), strings.TrimSpace(file.RuntimeID), strings.TrimSpace(file.AuthIndex),
+		strings.ToLower(strings.TrimSpace(file.Provider)), strings.TrimSpace(file.AccountID), strings.TrimSpace(file.AccountSnapshot),
+	}, "\x00"))
+}
+
+// OAuthModelSettings combines CPAMP's static Codex catalog with the global
+// OAuth exclusion rules so administrators can see the effective state.
+func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []string, error) {
+	typed, ok := k.CPAMP.(interface {
+		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
+		ListOAuthExcludedModels(context.Context, string) ([]string, error)
+	})
+	if !ok {
+		return nil, nil, errors.New("CPAMP 客户端不支持 OAuth 模型管理")
+	}
+	definitions, err := typed.ListOAuthModelDefinitions(ctx, "codex")
+	if err != nil {
+		return nil, nil, err
+	}
+	rules, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	if err != nil {
+		return nil, nil, err
+	}
+	models := make([]OAuthModelSetting, 0, len(definitions))
+	for _, definition := range definitions {
+		matched, wildcard := excludedModelRule(definition.ID, rules)
+		models = append(models, OAuthModelSetting{ID: definition.ID, DisplayName: definition.DisplayName, Enabled: matched == "", WildcardRule: wildcard})
+	}
+	sort.SliceStable(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
+	wildcards := make([]string, 0)
+	for _, rule := range rules {
+		if strings.Contains(rule, "*") {
+			wildcards = append(wildcards, rule)
+		}
+	}
+	return models, wildcards, nil
+}
+
+// SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
+// remain untouched because changing one would alter multiple model switches.
+func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool) error {
+	typed, ok := k.CPAMP.(interface {
+		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
+		ListOAuthExcludedModels(context.Context, string) ([]string, error)
+		SetOAuthExcludedModels(context.Context, string, []string) error
+	})
+	if !ok {
+		return errors.New("CPAMP 客户端不支持 OAuth 模型管理")
+	}
+	modelID = strings.TrimSpace(modelID)
+	definitions, err := typed.ListOAuthModelDefinitions(ctx, "codex")
+	if err != nil {
+		return err
+	}
+	canonical := ""
+	for _, definition := range definitions {
+		if strings.EqualFold(strings.TrimSpace(definition.ID), modelID) {
+			canonical = strings.TrimSpace(definition.ID)
+			break
+		}
+	}
+	if canonical == "" {
+		return errors.New("OAuth 模型不存在或模型定义已变化，请刷新后重试")
+	}
+	rules, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	if err != nil {
+		return err
+	}
+	matched, wildcard := excludedModelRule(canonical, rules)
+	if enabled && wildcard != "" {
+		return fmt.Errorf("该模型由通配规则 %q 禁用，请在 CPAMP 中调整该规则", wildcard)
+	}
+	next := make([]string, 0, len(rules)+1)
+	for _, rule := range rules {
+		if strings.EqualFold(strings.TrimSpace(rule), canonical) {
+			continue
+		}
+		next = append(next, rule)
+	}
+	if !enabled && matched == "" {
+		next = append(next, canonical)
+	}
+	if (enabled && matched != "") || (!enabled && matched == "") {
+		if err := typed.SetOAuthExcludedModels(ctx, "codex", next); err != nil {
+			return err
+		}
+	}
+	confirmed, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	if err != nil {
+		return err
+	}
+	confirmedRule, _ := excludedModelRule(canonical, confirmed)
+	if (enabled && confirmedRule != "") || (!enabled && confirmedRule == "") {
+		return errors.New("CPAMP 未确认 OAuth 模型状态变更")
+	}
+	return nil
+}
+
+func excludedModelRule(model string, rules []string) (matched, wildcard string) {
+	for _, rule := range rules {
+		rule = strings.TrimSpace(rule)
+		if rule == "" {
+			continue
+		}
+		if strings.EqualFold(rule, model) {
+			matched = rule
+			continue
+		}
+		if strings.Contains(rule, "*") && wildcardModelMatch(rule, model) {
+			return rule, rule
+		}
+	}
+	return matched, ""
+}
+
+func wildcardModelMatch(pattern, value string) bool {
+	pattern, value = strings.ToLower(pattern), strings.ToLower(value)
+	p, v, star, checkpoint := 0, 0, -1, 0
+	for v < len(value) {
+		if p < len(pattern) && pattern[p] == value[v] {
+			p++
+			v++
+			continue
+		}
+		if p < len(pattern) && pattern[p] == '*' {
+			star, checkpoint = p, v
+			p++
+			continue
+		}
+		if star >= 0 {
+			p = star + 1
+			checkpoint++
+			v = checkpoint
+			continue
+		}
+		return false
+	}
+	for p < len(pattern) && pattern[p] == '*' {
+		p++
+	}
+	return p == len(pattern)
 }
 
 // UpstreamQuota returns the shared Codex account-pool quota windows without

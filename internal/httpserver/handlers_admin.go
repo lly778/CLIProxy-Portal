@@ -182,6 +182,15 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		pages = 1
 	}
 	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
+	allUsers, _ := s.Store.ListUsers(r.Context(), "", "", 1000, 0)
+	adminCount, _ := s.Store.CountAdmins(r.Context())
+	v.CanCreateAdmin = true
+	for _, account := range allUsers {
+		if !account.IsAdmin() || account.Status == domain.StatusDeleted {
+			continue
+		}
+		v.Admins = append(v.Admins, webui.AdminRowView{User: s.userView(account), LastLoginAt: s.formatTime(account.LastLoginAt), CreatedAt: s.formatTime(account.CreatedAt), CanDisable: account.ID != u.ID && adminCount > 1, IsLastAdmin: adminCount == 1})
+	}
 	keyOwners := make(map[string]string)
 	lastUsedByUser := make(map[string]time.Time)
 	var hashes []string
@@ -388,19 +397,6 @@ func (s *Server) adminApprovals(w http.ResponseWriter, r *http.Request) {
 	_ = s.UI.Render(w, webui.PageAdminApprovals, v)
 }
 
-func (s *Server) adminAdmins(w http.ResponseWriter, r *http.Request) {
-	u := currentUser(r)
-	admins, _ := s.Store.ListUsers(r.Context(), "", "", 1000, 0)
-	count, _ := s.Store.CountAdmins(r.Context())
-	v := webui.AdminAdminsView{LayoutView: s.layout(u, currentToken(r), "管理员", "admin-admins"), CanCreate: true, CanManage: true}
-	for _, x := range admins {
-		if !x.IsAdmin() || x.Status == domain.StatusDeleted {
-			continue
-		}
-		v.Admins = append(v.Admins, webui.AdminRowView{User: s.userView(x), LastLoginAt: s.formatTime(x.LastLoginAt), CreatedAt: s.formatTime(x.CreatedAt), CanDisable: x.ID != u.ID && count > 1, IsLastAdmin: count == 1})
-	}
-	_ = s.UI.Render(w, webui.PageAdminAdmins, v)
-}
 func (s *Server) adminCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.verifyCSRF(r) {
 		s.errorPage(w, r, 403, "请求已失效", nil)
@@ -412,7 +408,7 @@ func (s *Server) adminCreate(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, 400, err.Error(), nil)
 		return
 	}
-	http.Redirect(w, r, "/admin/admins", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/users#administrators", http.StatusSeeOther)
 }
 func (s *Server) adminDisable(w http.ResponseWriter, r *http.Request) {
 	if !s.verifyCSRF(r) {
@@ -432,7 +428,7 @@ func (s *Server) adminDisable(w http.ResponseWriter, r *http.Request) {
 	_ = s.Store.SetUserStatus(r.Context(), target.ID, domain.StatusSuspended, "管理员停用")
 	_ = s.Store.DeleteUserSessions(r.Context(), target.ID, "")
 	s.audit(r, currentUser(r), "admin.disable", target.ID, "")
-	http.Redirect(w, r, "/admin/admins", http.StatusSeeOther)
+	http.Redirect(w, r, "/admin/users#administrators", http.StatusSeeOther)
 }
 
 func (s *Server) adminPolicy(w http.ResponseWriter, r *http.Request) {
@@ -486,6 +482,88 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/admin/policy", http.StatusSeeOther)
 }
 
+func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
+	u := currentUser(r)
+	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游账号", "admin-upstreams")}
+	accounts, err := s.Keys.UpstreamAccounts(r.Context())
+	if err != nil {
+		v.Error = "上游账号暂时不可用"
+		s.Logger.Error("list upstream accounts", "error", err)
+	} else {
+		for _, account := range accounts {
+			row := webui.UpstreamAccountView{
+				ID: account.ID, Name: account.Name, Account: account.Account,
+				Provider: account.Provider, AuthIndex: account.AuthIndex,
+				Disabled: account.Disabled, StatusLabel: "已启用",
+			}
+			if account.Disabled {
+				row.StatusLabel = "已停用"
+				v.Disabled++
+			} else {
+				v.Enabled++
+			}
+			v.Accounts = append(v.Accounts, row)
+		}
+	}
+	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
+	if modelErr != nil {
+		v.ModelError = "OAuth 模型状态暂时不可用"
+		s.Logger.Error("list OAuth model settings", "error", modelErr)
+	} else {
+		v.WildcardRules = wildcards
+		for _, model := range models {
+			v.Models = append(v.Models, webui.OAuthModelView{ID: model.ID, DisplayName: model.DisplayName, Enabled: model.Enabled, WildcardRule: model.WildcardRule})
+		}
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
+		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("error")); msg != "" {
+		v.ModelError = msg
+	}
+	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	modelID := strings.TrimSpace(r.FormValue("model"))
+	enabled := r.FormValue("enabled") == "true"
+	if err := s.Keys.SetOAuthModelEnabled(r.Context(), modelID, enabled); err != nil {
+		s.Logger.Error("update OAuth model status", "model", modelID, "error", err)
+		http.Redirect(w, r, "/admin/upstreams?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	action, message := "oauth_model.disable", "OAuth 模型已停用"
+	if enabled {
+		action, message = "oauth_model.enable", "OAuth 模型已启用"
+	}
+	s.audit(r, currentUser(r), action, modelID, "Codex")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
+}
+
+func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	disabled := r.FormValue("disabled") == "true"
+	account, err := s.Keys.SetUpstreamAccountDisabled(r.Context(), r.PathValue("id"), disabled)
+	if err != nil {
+		s.Logger.Error("update upstream account status", "error", err)
+		s.errorPage(w, r, http.StatusBadGateway, "更新上游账号失败，请刷新后重试", nil)
+		return
+	}
+	action, message := "upstream.disable", "上游账号已停用"
+	if !disabled {
+		action, message = "upstream.enable", "上游账号已启用"
+	}
+	s.audit(r, currentUser(r), action, account.ID, account.Provider)
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
+}
+
 func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	page := parseInt(r.URL.Query().Get("page"), 1)
@@ -497,7 +575,7 @@ func (s *Server) adminAudit(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, 500, "操作日志暂时不可用", err)
 		return
 	}
-	v := webui.AdminAuditView{LayoutView: s.layout(u, currentToken(r), "操作日志", "admin-audit"), Entries: s.auditViews(items), Page: page, PageCount: page, Total: strconv.Itoa(len(items)), Actions: []string{"user.register", "user.approve", "user.reject", "key.issue", "key.revoke", "user.suspend", "user.delete", "policy.publish"}}
+	v := webui.AdminAuditView{LayoutView: s.layout(u, currentToken(r), "操作日志", "admin-audit"), Entries: s.auditViews(items), Page: page, PageCount: page, Total: strconv.Itoa(len(items)), Actions: []string{"user.register", "user.approve", "user.reject", "key.issue", "key.revoke", "user.suspend", "user.delete", "upstream.enable", "upstream.disable", "oauth_model.enable", "oauth_model.disable", "policy.publish"}}
 	_ = s.UI.Render(w, webui.PageAdminAudit, v)
 }
 func (s *Server) adminHealth(w http.ResponseWriter, r *http.Request) {

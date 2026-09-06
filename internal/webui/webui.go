@@ -24,8 +24,8 @@ var assets embed.FS
 var pageNames = []string{
 	"login", "register", "reset", "resubmit",
 	"dashboard", "status", "key", "usage", "models", "activity", "health", "profile", "password",
-	"admin-dashboard", "admin-users", "admin-user", "admin-approvals", "admin-admins",
-	"admin-policy", "admin-audit", "admin-health", "error",
+	"admin-dashboard", "admin-users", "admin-user", "admin-approvals",
+	"admin-upstreams", "admin-policy", "admin-audit", "admin-health", "error",
 }
 
 // Page constants are accepted by Renderer.Render and Renderer.Execute.
@@ -47,7 +47,7 @@ const (
 	PageAdminUsers     = "admin-users"
 	PageAdminUser      = "admin-user"
 	PageAdminApprovals = "admin-approvals"
-	PageAdminAdmins    = "admin-admins"
+	PageAdminUpstreams = "admin-upstreams"
 	PageAdminPolicy    = "admin-policy"
 	PageAdminAudit     = "admin-audit"
 	PageAdminHealth    = "admin-health"

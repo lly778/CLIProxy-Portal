@@ -399,13 +399,15 @@ type UserRowView struct {
 
 type AdminUsersView struct {
 	LayoutView
-	Query     string
-	Status    string
-	Statuses  []string
-	Users     []UserRowView
-	Page      int
-	PageCount int
-	Total     string
+	Query          string
+	Status         string
+	Statuses       []string
+	Users          []UserRowView
+	Page           int
+	PageCount      int
+	Total          string
+	Admins         []AdminRowView
+	CanCreateAdmin bool
 }
 
 type AdminUserDetailView struct {
@@ -452,14 +454,31 @@ type AdminRowView struct {
 	IsLastAdmin bool
 }
 
-type AdminAdminsView struct {
+type UpstreamAccountView struct {
+	ID          string
+	Name        string
+	Account     string
+	Provider    string
+	AuthIndex   string
+	Disabled    bool
+	StatusLabel string
+}
+
+type AdminUpstreamsView struct {
 	LayoutView
-	Admins      []AdminRowView
-	CanCreate   bool
-	CanManage   bool
-	NewPhone    string
-	NewName     string
-	NewPassword string
+	Accounts      []UpstreamAccountView
+	Models        []OAuthModelView
+	WildcardRules []string
+	ModelError    string
+	Enabled       int
+	Disabled      int
+}
+
+type OAuthModelView struct {
+	ID           string
+	DisplayName  string
+	Enabled      bool
+	WildcardRule string
 }
 
 type PolicyView struct {

@@ -34,6 +34,10 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var modelCatalogReads int
 	var lastSeenMS int64
 	var lastSeenAnalyticsCalls int
+	var upstreamDisabled bool
+	var upstreamStatusChanges int
+	var oauthExcluded = []string{"gpt-disabled"}
+	var oauthStatusChanges int
 	cpampServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -63,7 +67,40 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			aliasCleanup = body.AllowOrphanAliasCleanup
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": aliases})
 		case r.URL.Path == "/v0/management/auth-files" && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"name": "plus.json", "provider": "codex", "auth_index": "auth-1"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "runtime-1", "physicalName": "plus.json", "provider": "codex", "auth_index": "auth-1", "account": "upstream@example.com", "disabled": upstreamDisabled}}})
+		case r.URL.Path == "/v0/management/auth-files/status" && r.Method == http.MethodPatch:
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode upstream status: %v", err)
+			}
+			if body["name"] != "runtime-1" || body["cpamp_physical_name"] != "plus.json" {
+				t.Errorf("unexpected upstream status identity: %#v", body)
+			}
+			upstreamDisabled, _ = body["disabled"].(bool)
+			upstreamStatusChanges++
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		case r.URL.Path == "/v0/management/model-definitions/codex" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{{"id": "gpt-disabled", "display_name": "Disabled model"}, {"id": "gpt-enabled", "display_name": "Enabled model"}}})
+		case r.URL.Path == "/v0/management/oauth-excluded-models" && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"oauth-excluded-models": map[string]any{"codex": oauthExcluded}})
+		case r.URL.Path == "/v0/management/oauth-excluded-models" && r.Method == http.MethodPatch:
+			var body struct {
+				Provider string   `json:"provider"`
+				Models   []string `json:"models"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode OAuth model status: %v", err)
+			}
+			if body.Provider != "codex" {
+				t.Errorf("OAuth provider = %q", body.Provider)
+			}
+			oauthExcluded = append([]string(nil), body.Models...)
+			oauthStatusChanges++
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		case r.URL.Path == "/v0/management/oauth-excluded-models" && r.Method == http.MethodDelete:
+			oauthExcluded = nil
+			oauthStatusChanges++
+			_, _ = io.WriteString(w, `{"ok":true}`)
 		case r.URL.Path == "/v0/management/quota-snapshots/query" && r.Method == http.MethodPost:
 			_ = json.NewEncoder(w).Encode(map[string]any{"generated_at_ms": time.Now().UnixMilli(), "items": []any{}})
 		case r.URL.Path == "/v0/management/api-call" && r.Method == http.MethodPost:
@@ -253,6 +290,42 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminLogin := getBody(t, adminClient, portal.URL+"/login", http.StatusOK)
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
+	upstreamsPage := getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
+	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
+		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)
+	}
+	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
+	upstreamID := extract(t, upstreamsPage, `/admin/upstreams/([a-f0-9]{64})/status`)
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/"+upstreamID+"/status", url.Values{"csrf_token": {adminCSRF}, "disabled": {"true"}}, http.StatusSeeOther)
+	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
+	if !strings.Contains(upstreamsPage, "已停用") {
+		t.Fatalf("disabled upstream state was not rendered: %s", upstreamsPage)
+	}
+	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/"+upstreamID+"/status", url.Values{"csrf_token": {adminCSRF}, "disabled": {"false"}}, http.StatusSeeOther)
+	mu.Lock()
+	if upstreamDisabled || upstreamStatusChanges != 2 {
+		mu.Unlock()
+		t.Fatalf("upstream state disabled=%v changes=%d", upstreamDisabled, upstreamStatusChanges)
+	}
+	mu.Unlock()
+	if !strings.Contains(upstreamsPage, "OAuth 模型") || !strings.Contains(upstreamsPage, "gpt-enabled") || !strings.Contains(upstreamsPage, "gpt-disabled") {
+		t.Fatalf("admin upstream page missing OAuth model switches: %s", upstreamsPage)
+	}
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-enabled"}, "enabled": {"false"}}, http.StatusSeeOther)
+	mu.Lock()
+	if oauthStatusChanges != 1 || !containsFold(oauthExcluded, "gpt-enabled") {
+		mu.Unlock()
+		t.Fatalf("OAuth exclusions after disable = %#v changes=%d", oauthExcluded, oauthStatusChanges)
+	}
+	mu.Unlock()
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-enabled"}, "enabled": {"true"}}, http.StatusSeeOther)
+	mu.Lock()
+	if oauthStatusChanges != 2 || containsFold(oauthExcluded, "gpt-enabled") {
+		mu.Unlock()
+		t.Fatalf("OAuth exclusions after enable = %#v changes=%d", oauthExcluded, oauthStatusChanges)
+	}
+	mu.Unlock()
 	adminUsersPage := getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
 	if !strings.Contains(adminUsersPage, "2.3K 请求") || !strings.Contains(adminUsersPage, "5.1M tokens") {
 		t.Fatalf("admin user usage was not populated: %s", adminUsersPage)
@@ -260,6 +333,10 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminUsersPage, "最近使用") || !strings.Contains(adminUsersPage, usedAt.In(cfg.TimeZone).Format("2006-01-02 15:04")) {
 		t.Fatalf("admin user last-used time was not populated from model requests: %s", adminUsersPage)
 	}
+	if !strings.Contains(adminUsersPage, "添加管理员") || !strings.Contains(adminUsersPage, "/admin/users/admins") {
+		t.Fatalf("administrator management was not merged into user management: %s", adminUsersPage)
+	}
+	getBody(t, adminClient, portal.URL+"/admin/admins", http.StatusNotFound)
 	adminUserPage := getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
 	if !strings.Contains(adminUserPage, "最近 100 条模型请求") || !strings.Contains(adminUserPage, "gpt-test") || strings.Contains(adminUserPage, "最近操作") {
 		t.Fatalf("admin user detail did not show model request records: %s", adminUserPage)
@@ -418,6 +495,15 @@ func TestCompactNumberUsesKAndMUnits(t *testing.T) {
 			t.Errorf("compactNumber(%d) = %q, want %q", value, got, want)
 		}
 	}
+}
+
+func containsFold(values []string, want string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestUsageViewsFormatsHourlyTimelineLabels(t *testing.T) {
