@@ -347,7 +347,7 @@ func (s *Server) adminUserAction(w http.ResponseWriter, r *http.Request) {
 			msg = "一次性重置码：" + code + "（15 分钟内有效，仅显示本次）"
 		}
 	case "change-phone":
-		err = s.Accounts.ChangePhone(r.Context(), actor, target, r.FormValue("phone"), r.FormValue("admin_password"), s.clientIP(r))
+		err = s.Accounts.ChangePhone(r.Context(), actor, target, r.FormValue("phone"), s.clientIP(r))
 		msg = "手机号已修改"
 	case "role":
 		nextRole := domain.Role(strings.TrimSpace(r.FormValue("role")))

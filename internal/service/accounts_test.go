@@ -66,3 +66,30 @@ func TestAdminSessionIdleTimeout(t *testing.T) {
 	}
 	_ = st
 }
+
+func TestChangePhoneRequiresAdminRoleWithoutPasswordReauthentication(t *testing.T) {
+	a, st := accountsForTest(t)
+	ctx := context.Background()
+	admin, err := a.CreateAdmin(ctx, "13900139000", "管理员", "very-long-admin-password", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := st.LatestPolicy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := a.Register(ctx, "13800138000", "张三", "long-password-123", policy.Version, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.ChangePhone(ctx, admin, user, "13700137000", "127.0.0.1"); err != nil {
+		t.Fatalf("administrator changed phone: %v", err)
+	}
+	updated, err := st.UserByID(ctx, user.ID)
+	if err != nil || updated.Phone != "13700137000" {
+		t.Fatalf("updated user = %#v, err = %v", updated, err)
+	}
+	if err = a.ChangePhone(ctx, user, admin, "13600136000", "127.0.0.1"); err == nil {
+		t.Fatal("ordinary user changed another account phone")
+	}
+}

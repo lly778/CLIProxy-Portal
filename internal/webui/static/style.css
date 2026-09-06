@@ -230,7 +230,7 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-action-form label { display: grid; gap: 6px; color: #475467; font-size: 11px; font-weight: 650; }
 .admin-action-form input { min-height: 40px; }
 .admin-action-form .button { grid-column: 1 / -1; justify-self: start; }
-.admin-action-form.change-phone-form { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+.admin-action-form.change-phone-form { grid-template-columns: minmax(0, 1fr) auto; }
 .admin-action-form.change-phone-form .button { grid-column: auto; }
 .admin-action-form.delete-form { grid-template-columns: minmax(0, 1fr) auto; }
 .admin-action-form.delete-form .button { grid-column: auto; }

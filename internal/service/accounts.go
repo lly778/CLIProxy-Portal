@@ -294,9 +294,9 @@ func (a *Accounts) Reject(ctx context.Context, actor, target domain.User, reason
 	}
 	return a.audit(ctx, event(actor, target, "user.reject", reason, ip, a.Now()))
 }
-func (a *Accounts) ChangePhone(ctx context.Context, actor, target domain.User, phoneInput, adminPassword, ip string) error {
-	if !security.VerifyPassword(actor.PasswordHash, adminPassword) {
-		return errors.New("管理员密码错误")
+func (a *Accounts) ChangePhone(ctx context.Context, actor, target domain.User, phoneInput, ip string) error {
+	if !actor.IsAdmin() {
+		return errors.New("无权限")
 	}
 	phone, err := security.NormalizeMainlandPhone(phoneInput)
 	if err != nil {
