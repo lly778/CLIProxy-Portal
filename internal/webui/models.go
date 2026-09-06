@@ -401,6 +401,7 @@ type AdminUsersView struct {
 	LayoutView
 	Query     string
 	Status    string
+	Sort      string
 	Statuses  []string
 	Users     []UserRowView
 	Page      int

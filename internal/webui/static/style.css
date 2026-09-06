@@ -320,7 +320,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .metric-card span, .metric-card small { display: block; color: var(--muted); }
 .metric-card span { font-size: 12px; }
 .metric-card strong { display: block; margin: 8px 0 3px; font-size: 23px; letter-spacing: -.04em; }
-.metric-card strong em { color: var(--muted); font-size: 1em; font-style: normal; font-weight: inherit; }
+.metric-card strong em { color: #dc2626; font-size: 1em; font-style: normal; font-weight: inherit; }
+.failure-count { color: #dc2626; font-style: normal; }
 .metric-card small { font-size: 11px; }
 .filter-inline, .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filter-inline select { width: auto; min-width: 110px; }

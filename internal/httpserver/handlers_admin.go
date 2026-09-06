@@ -172,17 +172,30 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	const size = 30
 	status, q := r.URL.Query().Get("status"), strings.TrimSpace(r.URL.Query().Get("q"))
-	users, err := s.Store.ListUsers(r.Context(), status, q, size, (page-1)*size)
+	sortOrder := normalizeAdminUserSort(r.URL.Query().Get("sort"))
+	statusTotal, err := s.Store.CountUsers(r.Context(), status)
 	if err != nil {
 		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
 		return
 	}
-	total, _ := s.Store.CountUsers(r.Context(), status)
+	loadLimit := statusTotal
+	if loadLimit < 1 {
+		loadLimit = 1
+	}
+	users, err := s.Store.ListUsers(r.Context(), status, q, loadLimit, 0)
+	if err != nil {
+		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
+		return
+	}
+	total := len(users)
 	pages := (total + size - 1) / size
 	if pages < 1 {
 		pages = 1
 	}
-	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
+	if page > pages {
+		page = pages
+	}
+	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Sort: sortOrder, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
 	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
@@ -232,17 +245,81 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	type sortableUser struct {
+		user     domain.User
+		lastUsed time.Time
+		usage    cpamp.UsageSummary
+	}
+	rows := make([]sortableUser, 0, len(users))
 	for _, x := range users {
+		rows = append(rows, sortableUser{user: x, lastUsed: lastUsedByUser[x.ID], usage: usageByUser[x.ID]})
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		left, right := rows[i], rows[j]
+		switch sortOrder {
+		case "created_asc":
+			return left.user.CreatedAt.Before(right.user.CreatedAt)
+		case "last_used_desc":
+			return adminUserTimeBefore(left.lastUsed, right.lastUsed, true)
+		case "last_used_asc":
+			return adminUserTimeBefore(left.lastUsed, right.lastUsed, false)
+		case "usage_desc":
+			if left.usage.TotalCalls != right.usage.TotalCalls {
+				return left.usage.TotalCalls > right.usage.TotalCalls
+			}
+			return left.usage.TotalTokens > right.usage.TotalTokens
+		case "usage_asc":
+			if left.usage.TotalCalls != right.usage.TotalCalls {
+				return left.usage.TotalCalls < right.usage.TotalCalls
+			}
+			return left.usage.TotalTokens < right.usage.TotalTokens
+		case "name_asc":
+			return strings.ToLower(left.user.Name) < strings.ToLower(right.user.Name)
+		case "name_desc":
+			return strings.ToLower(left.user.Name) > strings.ToLower(right.user.Name)
+		default:
+			return left.user.CreatedAt.After(right.user.CreatedAt)
+		}
+	})
+	start := (page - 1) * size
+	end := start + size
+	if end > len(rows) {
+		end = len(rows)
+	}
+	for _, item := range rows[start:end] {
+		x := item.user
 		usage := webui.UsageSummaryView{Requests: "—", TotalTokens: "—"}
 		if usageLoaded {
-			summary := usageByUser[x.ID]
+			summary := item.usage
 			usage.Requests = compactNumber(summary.TotalCalls)
 			usage.TotalTokens = compactNumber(summary.TotalTokens)
 		}
-		row := webui.UserRowView{User: s.userView(x), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(lastUsedByUser[x.ID]), CanManage: true, Usage: usage}
+		row := webui.UserRowView{User: s.userView(x), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(item.lastUsed), CanManage: true, Usage: usage}
 		v.Users = append(v.Users, row)
 	}
 	_ = s.UI.Render(w, webui.PageAdminUsers, v)
+}
+
+func normalizeAdminUserSort(value string) string {
+	switch value {
+	case "created_asc", "last_used_desc", "last_used_asc", "usage_desc", "usage_asc", "name_asc", "name_desc":
+		return value
+	default:
+		return "created_desc"
+	}
+}
+
+func adminUserTimeBefore(left, right time.Time, descending bool) bool {
+	if left.IsZero() || right.IsZero() {
+		if left.IsZero() && right.IsZero() {
+			return false
+		}
+		return !left.IsZero()
+	}
+	if descending {
+		return left.After(right)
+	}
+	return left.Before(right)
 }
 
 func (s *Server) adminUser(w http.ResponseWriter, r *http.Request) {

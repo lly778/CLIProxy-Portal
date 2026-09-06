@@ -7,7 +7,6 @@
 <section class="card key-panel"><div class="key-panel-head"><div><div class="card-label">当前状态</div><div class="status-line"><span class="status-dot {{statusClass .Key.Status}}"></span><strong>{{.Key.StatusLabel}}</strong></div></div>{{if .Key.Last4}}<div class="key-mask">•••• {{.Key.Last4}}</div>{{end}}</div>
 <dl class="detail-grid key-detail-grid"><div><dt>创建时间</dt><dd>{{.Key.CreatedAt}}</dd></div><div><dt>最近使用</dt><dd>{{.Key.LastUsedAt}}</dd></div><div><dt>同步状态</dt><dd><span class="badge {{statusClass .Key.SyncStatus}}">{{.Key.SyncStatusLabel}}</span></dd></div></dl>
 <div class="key-guidance">
-  {{if .Key.Last4}}<p>如果 Key 被 CPAMP 手工删除，门户会标记为“外部撤销”，不会自动补回。</p>{{end}}
   <p>领取或撤销前，需要输入当前登录密码。</p>
   <p>撤销后可以立即重新领取。</p>
 </div>
