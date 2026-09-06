@@ -32,3 +32,15 @@ func TestRequestFailureSummaryHidesHeaderOnlyJSON(t *testing.T) {
 		t.Fatalf("header-only failure summary = %q, want %q", got, want)
 	}
 }
+
+func TestRequestFailureSummaryReadsReasonAfterConcatenatedHeaders(t *testing.T) {
+	status := int64(429)
+	event := cpamp.EventRow{
+		Failed:         true,
+		FailStatusCode: &status,
+		FailSummary:    `{"Cf-Cache-Status":["DYNAMIC"],"Cf-Ray":["abc"]}{"type":"usage_limit_reached","message":"Usage limit reached"}`,
+	}
+	if got, want := requestFailureSummary(event), "HTTP 429 · usage_limit_reached · Usage limit reached"; got != want {
+		t.Fatalf("concatenated failure summary = %q, want %q", got, want)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -185,13 +186,9 @@ func requestFailureSummary(e cpamp.EventRow) string {
 		return strings.Join(parts, " · ")
 	}
 
-	var payload any
-	if json.Unmarshal([]byte(summary), &payload) == nil {
-		if object, ok := payload.(map[string]any); ok {
-			code, message := failureJSONDetails(object)
-			parts = appendUnique(parts, code)
-			parts = appendUnique(parts, message)
-		}
+	if code, message, structured := failureJSONSummary(summary); structured {
+		parts = appendUnique(parts, code)
+		parts = appendUnique(parts, message)
 		return truncateFailureSummary(strings.Join(parts, " · "), 180)
 	}
 	if strings.ContainsAny(summary, "\r\n") || strings.HasPrefix(summary, "{") || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "<") {
@@ -199,6 +196,36 @@ func requestFailureSummary(e cpamp.EventRow) string {
 	}
 	parts = appendUnique(parts, summary)
 	return truncateFailureSummary(strings.Join(parts, " · "), 180)
+}
+
+func failureJSONSummary(summary string) (string, string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(summary))
+	decoder.UseNumber()
+	var code, message string
+	structured := false
+	for {
+		var payload any
+		err := decoder.Decode(&payload)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			break
+		}
+		structured = true
+		object, ok := payload.(map[string]any)
+		if !ok {
+			continue
+		}
+		objectCode, objectMessage := failureJSONDetails(object)
+		if code == "" {
+			code = objectCode
+		}
+		if message == "" {
+			message = objectMessage
+		}
+	}
+	return code, message, structured
 }
 
 func failureJSONDetails(object map[string]any) (string, string) {
