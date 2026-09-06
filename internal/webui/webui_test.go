@@ -161,7 +161,7 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{`data-quota-pool`, `data-refresh-running="true"`, `data-quota-refresh-form`, `最早下次重置`, `可用 0 / 2`, `当前无可用上游账号`} {
+	for _, want := range []string{`data-quota-pool`, `data-refresh-running="true"`, `data-quota-refresh-form`, `最早可恢复时间`, `可用 0 / 2`, `当前无可用上游账号`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("quota pool output does not contain %q", want)
 		}

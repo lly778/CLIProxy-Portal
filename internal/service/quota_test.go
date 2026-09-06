@@ -185,6 +185,36 @@ func TestWeeklyExhaustionExcludesFiveHourQuota(t *testing.T) {
 	}
 }
 
+func TestFiveHourEffectiveResetWaitsForExhaustedWeeklyWindow(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	fiveHourEnd := now.Add(time.Hour).UnixMilli()
+	weeklyEnd := now.Add(12 * time.Hour).UnixMilli()
+	available, exhausted := 20.0, 100.0
+	fiveHour := cpamp.QuotaSnapshotWindow{CycleEndMS: &fiveHourEnd, UsedPercent: &available}
+	windows := []quotaWindowSelection{
+		{Period: "five_hour", Window: fiveHour},
+		{Period: "weekly", Window: cpamp.QuotaSnapshotWindow{CycleEndMS: &weeklyEnd, UsedPercent: &exhausted}},
+	}
+	if got := quotaWindowEffectiveReset("five_hour", fiveHour, windows, now); !got.Equal(time.UnixMilli(weeklyEnd)) {
+		t.Fatalf("five-hour effective reset = %v, want %v", got, time.UnixMilli(weeklyEnd))
+	}
+}
+
+func TestWeeklyEffectiveResetDoesNotWaitForExhaustedFiveHourWindow(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	fiveHourEnd := now.Add(12 * time.Hour).UnixMilli()
+	weeklyEnd := now.Add(time.Hour).UnixMilli()
+	available, exhausted := 20.0, 100.0
+	weekly := cpamp.QuotaSnapshotWindow{CycleEndMS: &weeklyEnd, UsedPercent: &available}
+	windows := []quotaWindowSelection{
+		{Period: "five_hour", Window: cpamp.QuotaSnapshotWindow{CycleEndMS: &fiveHourEnd, UsedPercent: &exhausted}},
+		{Period: "weekly", Window: weekly},
+	}
+	if got := quotaWindowEffectiveReset("weekly", weekly, windows, now); !got.Equal(time.UnixMilli(weeklyEnd)) {
+		t.Fatalf("weekly effective reset = %v, want %v", got, time.UnixMilli(weeklyEnd))
+	}
+}
+
 func TestCurrentQuotaWindowsKeepsFreshestWindowPerPeriod(t *testing.T) {
 	oldUsed, newUsed, weeklyUsed, modelUsed := 80.0, 20.0, 5.0, 1.0
 	windows := currentQuotaWindows([]cpamp.QuotaSnapshotWindow{

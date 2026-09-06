@@ -11,7 +11,7 @@
   {{range .Groups}}<div class="quota-group">
     <div class="quota-pool-summary">
       <div class="quota-pool-value"><span>{{.Label}}</span><strong>{{.RemainingPercent}}%</strong><span>额度剩余（按账号等权估算）</span></div>
-      <dl class="quota-pool-meta"><div><dt>账号状态</dt><dd>{{.Accounts}}</dd></div><div><dt>最早下次重置</dt><dd>{{.ResetAt}}</dd></div><div><dt>数据更新</dt><dd>{{.ObservedAt}}</dd></div></dl>
+      <dl class="quota-pool-meta"><div><dt>账号状态</dt><dd>{{.Accounts}}</dd></div><div><dt>最早可恢复时间</dt><dd>{{.ResetAt}}</dd></div><div><dt>数据更新</dt><dd>{{.ObservedAt}}</dd></div></dl>
     </div>
     <div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div>
   </div>{{end}}

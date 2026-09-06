@@ -694,8 +694,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 					acc.group.AvailableAccounts++
 				}
 			}
-			if window.CycleEndMS != nil && *window.CycleEndMS > k.Now().UnixMilli() {
-				reset := time.UnixMilli(*window.CycleEndMS).UTC()
+			if reset := quotaWindowEffectiveReset(period, window, windows, now); !reset.IsZero() {
 				if acc.group.NextResetAt.IsZero() || reset.Before(acc.group.NextResetAt) {
 					acc.group.NextResetAt = reset
 				}
@@ -740,6 +739,33 @@ func quotaWindowIncludedInAverage(period string, windows []quotaWindowSelection)
 		}
 	}
 	return true
+}
+
+func quotaWindowEffectiveReset(period string, window cpamp.QuotaSnapshotWindow, windows []quotaWindowSelection, now time.Time) time.Time {
+	reset := futureQuotaReset(window, now)
+	if period != "five_hour" {
+		return reset
+	}
+	for _, selected := range windows {
+		if selected.Period != "weekly" && selected.Period != "monthly" {
+			continue
+		}
+		if quotaRemaining(selected.Window) > 0 {
+			continue
+		}
+		longReset := futureQuotaReset(selected.Window, now)
+		if longReset.After(reset) {
+			reset = longReset
+		}
+	}
+	return reset
+}
+
+func futureQuotaReset(window cpamp.QuotaSnapshotWindow, now time.Time) time.Time {
+	if window.CycleEndMS == nil || *window.CycleEndMS <= now.UnixMilli() {
+		return time.Time{}
+	}
+	return time.UnixMilli(*window.CycleEndMS).UTC()
 }
 
 type quotaWindowSelection struct {
