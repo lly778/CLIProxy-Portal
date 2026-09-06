@@ -295,6 +295,7 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 		ReturnTo:       returnTo,
 		RefreshLabel:   "刷新额度",
 		RefreshMessage: refresh.Message,
+		RefreshRunning: refresh.Running,
 	}
 	if refresh.Running {
 		v.RefreshDisabled = true

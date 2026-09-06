@@ -118,7 +118,7 @@ func (k *Keys) StartQuotaRefresh() (QuotaRefreshStatus, error) {
 		Running:       true,
 		LastStartedAt: now,
 		NextAllowedAt: now.Add(k.RefreshCooldown),
-		Message:       "正在从上游读取额度，请稍后刷新页面查看结果",
+		Message:       "正在从上游读取额度，完成后会自动更新",
 	}
 	status := k.refresh
 	k.refreshMu.Unlock()

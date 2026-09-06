@@ -145,6 +145,28 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 	}
 }
 
+func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := DashboardView{Quota: QuotaPoolView{
+		Show: true, Available: true, Provider: "Codex", Accounts: "共 2 个已启用账号",
+		CSRFToken: "csrf-token", ReturnTo: "/dashboard", RefreshRunning: true,
+		Groups: []QuotaGroupView{{Label: "PLUS · 周额度", RemainingPercent: 50}},
+	}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, view); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{`data-quota-pool`, `data-refresh-running="true"`, `data-quota-refresh-form`, `最早下次重置`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("quota pool output does not contain %q", want)
+		}
+	}
+}
+
 func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

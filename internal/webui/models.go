@@ -216,6 +216,7 @@ type QuotaPoolView struct {
 	RefreshLabel    string
 	RefreshMessage  string
 	RefreshDisabled bool
+	RefreshRunning  bool
 }
 
 type QuotaGroupView struct {

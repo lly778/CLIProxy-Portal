@@ -126,6 +126,62 @@
 
   document.addEventListener("submit", function (event) {
     var form = event.target;
+    if (form.matches("[data-quota-refresh-form]")) {
+      event.preventDefault();
+      var button = form.querySelector("button[type='submit']");
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      button.textContent = "正在刷新…";
+
+      function delay(ms) {
+        return new Promise(function (resolve) { window.setTimeout(resolve, ms); });
+      }
+
+      function updateQuotaPool() {
+        return fetch(window.location.href, {
+          credentials: "same-origin",
+          cache: "no-store",
+          headers: { "Accept": "text/html" }
+        }).then(function (response) {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.text();
+        }).then(function (html) {
+          var page = new DOMParser().parseFromString(html, "text/html");
+          var current = document.querySelector("[data-quota-pool]");
+          var next = page.querySelector("[data-quota-pool]");
+          if (!current || !next) throw new Error("quota pool missing");
+          var running = next.getAttribute("data-refresh-running") === "true";
+          current.replaceWith(document.importNode(next, true));
+          return running;
+        });
+      }
+
+      function pollQuotaPool(attempt, failures) {
+        return updateQuotaPool().then(function (running) {
+          if (!running || attempt >= 180) return;
+          return delay(1000).then(function () { return pollQuotaPool(attempt + 1, 0); });
+        }).catch(function (error) {
+          if (attempt >= 180 || failures >= 4) throw error;
+          return delay(1500).then(function () { return pollQuotaPool(attempt + 1, failures + 1); });
+        });
+      }
+
+      fetch(form.action, {
+        method: "POST",
+        body: new URLSearchParams(new FormData(form)),
+        credentials: "same-origin",
+        headers: { "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
+      }).then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return pollQuotaPool(0, 0);
+      }).catch(function () {
+        var currentButton = document.querySelector("[data-quota-refresh-form] button[type='submit']");
+        if (!currentButton) return;
+        currentButton.disabled = false;
+        currentButton.textContent = "刷新失败，请重试";
+      });
+      return;
+    }
     if (form.matches("[data-model-test-form]")) {
       event.preventDefault();
       var card = form.closest(".model-card");
