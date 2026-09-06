@@ -472,6 +472,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .detail-hero-main { flex: 1; min-width: 200px; }
 .detail-hero-main p { margin: 8px 0; color: var(--muted); }
 @media (min-width: 761px) {
+  .detail-hero .suspend-actions { align-self: center; }
   .detail-hero .suspend-action { flex-wrap: nowrap; }
   .detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }
 }
