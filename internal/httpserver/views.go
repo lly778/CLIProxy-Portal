@@ -187,8 +187,11 @@ func requestFailureSummary(e cpamp.EventRow) string {
 	}
 
 	if code, message, structured := failureJSONSummary(summary); structured {
-		parts = appendUnique(parts, code)
-		parts = appendUnique(parts, message)
+		if message != "" {
+			parts = appendUnique(parts, message)
+		} else {
+			parts = appendUnique(parts, code)
+		}
 		return truncateFailureSummary(strings.Join(parts, " · "), 180)
 	}
 	if strings.ContainsAny(summary, "\r\n") || strings.HasPrefix(summary, "{") || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "<") {

@@ -20,7 +20,7 @@ func TestRequestFailureSummaryExtractsUsefulFailureDetails(t *testing.T) {
 		FailStatusCode: &status,
 		FailSummary:    `{"error":{"type":"usage_limit_reached","message":"Usage limit reached"},"Cf-Ray":["abc"]}`,
 	}
-	if got, want := requestFailureSummary(event), "HTTP 429 · usage_limit_reached · Usage limit reached"; got != want {
+	if got, want := requestFailureSummary(event), "HTTP 429 · Usage limit reached"; got != want {
 		t.Fatalf("failure summary = %q, want %q", got, want)
 	}
 }
@@ -40,7 +40,15 @@ func TestRequestFailureSummaryReadsReasonAfterConcatenatedHeaders(t *testing.T) 
 		FailStatusCode: &status,
 		FailSummary:    `{"Cf-Cache-Status":["DYNAMIC"],"Cf-Ray":["abc"]}{"type":"usage_limit_reached","message":"Usage limit reached"}`,
 	}
-	if got, want := requestFailureSummary(event), "HTTP 429 · usage_limit_reached · Usage limit reached"; got != want {
+	if got, want := requestFailureSummary(event), "HTTP 429 · Usage limit reached"; got != want {
 		t.Fatalf("concatenated failure summary = %q, want %q", got, want)
+	}
+}
+
+func TestRequestFailureSummaryFallsBackToErrorCode(t *testing.T) {
+	status := int64(429)
+	event := cpamp.EventRow{Failed: true, FailStatusCode: &status, FailSummary: `{"type":"usage_limit_reached"}`}
+	if got, want := requestFailureSummary(event), "HTTP 429 · usage_limit_reached"; got != want {
+		t.Fatalf("code-only failure summary = %q, want %q", got, want)
 	}
 }
