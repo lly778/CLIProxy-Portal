@@ -350,6 +350,21 @@ func TestCurrentQuotaWindowsAcceptsFreshValueWithObsoleteBoundary(t *testing.T) 
 	if len(windows) != 1 || windows[0].Period != "weekly" || quotaRemaining(windows[0].Window) != 7 {
 		t.Fatalf("windows = %#v", windows)
 	}
+	wantReset := time.UnixMilli(oldEnd).Add(7 * 24 * time.Hour)
+	if got := futureQuotaReset(windows[0].Window, now); !got.Equal(wantReset) {
+		t.Fatalf("estimated reset = %v, want %v", got, wantReset)
+	}
+}
+
+func TestFutureQuotaResetRejectsExpiredUnrefreshedSnapshot(t *testing.T) {
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	duration := int64(7 * 24 * 60 * 60)
+	oldEnd := now.Add(-24 * time.Hour).UnixMilli()
+	used := 99.0
+	window := cpamp.QuotaSnapshotWindow{WindowKind: "weekly", CycleEndMS: &oldEnd, DurationSeconds: &duration, ObservedAtMS: now.Add(-8 * 24 * time.Hour).UnixMilli(), UsedPercent: &used, Stale: true, Availability: "active"}
+	if got := futureQuotaReset(window, now); !got.IsZero() {
+		t.Fatalf("expired unrefreshed reset = %v", got)
+	}
 }
 
 func TestCurrentQuotaWindowsPrefersLiveRefreshAtSameObservationTime(t *testing.T) {

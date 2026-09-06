@@ -1154,10 +1154,27 @@ func quotaWindowEffectiveReset(period string, window cpamp.QuotaSnapshotWindow, 
 }
 
 func futureQuotaReset(window cpamp.QuotaSnapshotWindow, now time.Time) time.Time {
-	if window.CycleEndMS == nil || *window.CycleEndMS <= now.UnixMilli() {
+	if window.CycleEndMS == nil {
 		return time.Time{}
 	}
-	return time.UnixMilli(*window.CycleEndMS).UTC()
+	reset := time.UnixMilli(*window.CycleEndMS).UTC()
+	if reset.After(now) {
+		return reset
+	}
+	// CPAMP can pair a newly observed quota percentage with the preceding
+	// cycle boundary. When the duration confirms a regular bounded window,
+	// advance that boundary to the next occurrence instead of showing no
+	// reset time for an otherwise current observation.
+	availability := strings.ToLower(strings.TrimSpace(window.Availability))
+	if !freshQuotaWithObsoleteBoundary(window, availability, now) || window.DurationSeconds == nil {
+		return time.Time{}
+	}
+	duration := time.Duration(*window.DurationSeconds) * time.Second
+	if duration <= 0 {
+		return time.Time{}
+	}
+	cycles := now.Sub(reset)/duration + 1
+	return reset.Add(cycles * duration)
 }
 
 type quotaWindowSelection struct {

@@ -354,8 +354,8 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminUsersPage, "最近使用") || !strings.Contains(adminUsersPage, usedAt.In(cfg.TimeZone).Format("2006-01-02 15:04")) {
 		t.Fatalf("admin user last-used time was not populated from model requests: %s", adminUsersPage)
 	}
-	if !strings.Contains(adminUsersPage, `<span class="badge role-admin">管理员</span>`) || !strings.Contains(adminUsersPage, "/admin/users/"+u.ID+"/role") || !strings.Contains(adminUsersPage, "设为管理员") {
-		t.Fatalf("administrator roles were not integrated into the user table: %s", adminUsersPage)
+	if !strings.Contains(adminUsersPage, `<span class="badge role-admin">管理员</span>`) || strings.Contains(adminUsersPage, "/admin/users/"+u.ID+"/role") || strings.Contains(adminUsersPage, "设为管理员") {
+		t.Fatalf("administrator role actions were not confined to user details: %s", adminUsersPage)
 	}
 	if strings.Contains(adminUsersPage, "添加管理员") || strings.Contains(adminUsersPage, "/admin/users/admins") || strings.Contains(adminUsersPage, "<h2>管理员</h2>") {
 		t.Fatalf("standalone administrator management was still rendered: %s", adminUsersPage)
@@ -364,6 +364,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminUserPage := getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
 	if !strings.Contains(adminUserPage, "最近 100 条模型请求") || !strings.Contains(adminUserPage, "gpt-test") || strings.Contains(adminUserPage, "最近操作") {
 		t.Fatalf("admin user detail did not show model request records: %s", adminUserPage)
+	}
+	if !strings.Contains(adminUserPage, "/admin/users/"+u.ID+"/role") || !strings.Contains(adminUserPage, "设为管理员") || !strings.Contains(adminUserPage, "角色权限") {
+		t.Fatalf("administrator role action was not rendered in user details: %s", adminUserPage)
 	}
 	adminUsagePage := getBody(t, adminClient, portal.URL+"/admin/usage?range=7d", http.StatusOK)
 	if !strings.Contains(adminUsagePage, "按用户") || !strings.Contains(adminUsagePage, "张三") || !strings.Contains(adminUsagePage, "2.3K 请求") || !strings.Contains(adminUsagePage, "5.1M tokens") {
@@ -440,23 +443,29 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if newFullKey == fullKey {
 		t.Fatal("reissued key did not change")
 	}
-	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
-	adminCSRF = extract(t, adminUsersPage, `name="csrf_token" value="([^"]+)"`)
+	adminUserPage = getBody(t, adminClient, portal.URL+"/admin/users/"+admin.ID, http.StatusOK)
+	adminCSRF = extract(t, adminUserPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/users/"+admin.ID+"/role", url.Values{"csrf_token": {adminCSRF}, "role": {"user"}}, http.StatusSeeOther)
 	unchangedAdmin, err := st.UserByID(t.Context(), admin.ID)
 	if err != nil || !unchangedAdmin.IsAdmin() {
 		t.Fatalf("current administrator role changed: user=%#v err=%v", unchangedAdmin, err)
 	}
+	adminUserPage = getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
+	adminCSRF = extract(t, adminUserPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/users/"+u.ID+"/role", url.Values{"csrf_token": {adminCSRF}, "role": {"admin"}}, http.StatusSeeOther)
 	promoted, err := st.UserByID(t.Context(), u.ID)
 	if err != nil || !promoted.IsAdmin() {
 		t.Fatalf("user was not promoted: user=%#v err=%v", promoted, err)
 	}
 	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
-	if !strings.Contains(adminUsersPage, "转为普通用户") {
-		t.Fatalf("demotion action was not rendered: %s", adminUsersPage)
+	if strings.Contains(adminUsersPage, "转为普通用户") {
+		t.Fatalf("demotion action leaked into the user list: %s", adminUsersPage)
 	}
-	adminCSRF = extract(t, adminUsersPage, `name="csrf_token" value="([^"]+)"`)
+	adminUserPage = getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
+	if !strings.Contains(adminUserPage, "转为普通用户") {
+		t.Fatalf("demotion action was not rendered in user details: %s", adminUserPage)
+	}
+	adminCSRF = extract(t, adminUserPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/users/"+u.ID+"/role", url.Values{"csrf_token": {adminCSRF}, "role": {"user"}}, http.StatusSeeOther)
 	demoted, err := st.UserByID(t.Context(), u.ID)
 	if err != nil || demoted.IsAdmin() {

@@ -183,7 +183,6 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		pages = 1
 	}
 	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
-	adminCount, _ := s.Store.CountAdmins(r.Context())
 	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
@@ -241,20 +240,6 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 			usage.TotalTokens = compactNumber(summary.TotalTokens)
 		}
 		row := webui.UserRowView{User: s.userView(x), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(lastUsedByUser[x.ID]), CanManage: true, Usage: usage}
-		if x.IsAdmin() {
-			switch {
-			case x.ID == u.ID:
-				row.RoleHint = "当前账号"
-			case x.Status == domain.StatusApproved && adminCount <= 1:
-				row.RoleHint = "最后一位管理员"
-			default:
-				row.CanChangeRole, row.NextRole, row.RoleAction = true, string(domain.RoleUser), "转为普通用户"
-				row.RoleConfirm = "确定将该管理员转为普通用户吗？其现有登录会话将立即失效。"
-			}
-		} else if x.Status == domain.StatusApproved {
-			row.CanChangeRole, row.NextRole, row.RoleAction = true, string(domain.RoleAdmin), "设为管理员"
-			row.RoleConfirm = "确定将该用户设为管理员吗？其现有登录会话将立即失效。"
-		}
 		v.Users = append(v.Users, row)
 	}
 	_ = s.UI.Render(w, webui.PageAdminUsers, v)
@@ -278,6 +263,20 @@ func (s *Server) renderAdminUser(w http.ResponseWriter, r *http.Request, target 
 	a, _ := s.Keys.Usage(r.Context(), target.ID, from, to, 100)
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	v := webui.AdminUserDetailView{LayoutView: s.layout(actor, currentToken(r), target.Name, "admin-users"), Target: s.userView(target), Key: s.keyView(target), StatusCard: s.adminStatusCard(target), Usage: summary, Daily: daily, ByModel: models, Requests: requests, CanApprove: target.Status == domain.StatusPending || target.Status == domain.StatusRejected, CanReject: target.Status == domain.StatusPending, CanSuspend: target.Status == domain.StatusApproved, CanUnsuspend: target.Status == domain.StatusSuspended, CanDelete: target.ID != actor.ID, CanReset: target.Status != domain.StatusDeleted, CanChangePhone: target.Status != domain.StatusDeleted, DeleteWarning: "将先撤销 API Key，再永久匿名化账号。此操作不可恢复。"}
+	if target.IsAdmin() {
+		canDemote := target.ID != actor.ID
+		if canDemote && target.Status == domain.StatusApproved {
+			adminCount, countErr := s.Store.CountAdmins(r.Context())
+			canDemote = countErr == nil && adminCount > 1
+		}
+		if canDemote {
+			v.CanChangeRole, v.NextRole, v.RoleAction = true, string(domain.RoleUser), "转为普通用户"
+			v.RoleConfirm = "确定将该管理员转为普通用户吗？其现有登录会话将立即失效。"
+		}
+	} else if target.Status == domain.StatusApproved {
+		v.CanChangeRole, v.NextRole, v.RoleAction = true, string(domain.RoleAdmin), "设为管理员"
+		v.RoleConfirm = "确定将该用户设为管理员吗？其现有登录会话将立即失效。"
+	}
 	if msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
@@ -386,7 +385,7 @@ func (s *Server) adminUserAction(w http.ResponseWriter, r *http.Request) {
 		} else {
 			query.Set("msg", msg)
 		}
-		http.Redirect(w, r, "/admin/users?"+query.Encode(), http.StatusSeeOther)
+		http.Redirect(w, r, "/admin/users/"+target.ID+"?"+query.Encode(), http.StatusSeeOther)
 		return
 	}
 	if err != nil {

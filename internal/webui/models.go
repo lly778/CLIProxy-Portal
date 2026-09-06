@@ -390,16 +390,11 @@ type AdminDashboardView struct {
 }
 
 type UserRowView struct {
-	User          UserView
-	Pending       bool
-	LastUsed      string
-	Usage         UsageSummaryView
-	CanManage     bool
-	CanChangeRole bool
-	NextRole      string
-	RoleAction    string
-	RoleConfirm   string
-	RoleHint      string
+	User      UserView
+	Pending   bool
+	LastUsed  string
+	Usage     UsageSummaryView
+	CanManage bool
 }
 
 type AdminUsersView struct {
@@ -429,6 +424,10 @@ type AdminUserDetailView struct {
 	CanDelete      bool
 	CanReset       bool
 	CanChangePhone bool
+	CanChangeRole  bool
+	NextRole       string
+	RoleAction     string
+	RoleConfirm    string
 	DeleteWarning  string
 }
 
