@@ -16,7 +16,7 @@
     <div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div>
   </div>{{end}}
   </div>
-  <p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。不同套餐和不同周期不会混合计算；可用账号要求同一账号的所有当前额度周期均未耗尽。{{if .UnknownCount}}另有 {{.UnknownCount}} 个账号尚无当前额度数据。{{end}}</p>
+  <p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。不同套餐和不同周期不会混合计算；长周期额度耗尽的账号不计入短周期汇总，短周期耗尽不影响长周期显示。{{if .UnknownCount}}另有 {{.UnknownCount}} 个账号尚无当前额度数据。{{end}}</p>
   {{else}}
   <div class="empty-state compact"><strong>额度信息等待同步</strong><p>CPAMP 尚未提供可用的额度快照；可点击右上角刷新。</p></div>
   {{end}}

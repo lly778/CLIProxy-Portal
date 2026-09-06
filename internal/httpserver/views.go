@@ -328,7 +328,7 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 			Label:            plan + " · " + period,
 			RemainingPercent: group.RemainingPercent,
 			StatusClass:      "success",
-			Accounts:         fmt.Sprintf("%d 个有额度 · %d 个已同步", group.AvailableAccounts, group.KnownAccounts),
+			Accounts:         fmt.Sprintf("%d 个可用 · %d 个已同步", group.AvailableAccounts, group.KnownAccounts),
 			ResetAt:          s.formatTime(group.NextResetAt),
 			ObservedAt:       s.formatTime(group.ObservedAt),
 			Estimated:        group.Estimated,

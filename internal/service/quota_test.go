@@ -108,7 +108,7 @@ func TestUpstreamQuotaKeepsPlansSeparate(t *testing.T) {
 	}
 }
 
-func TestUpstreamQuotaRequiresOneAccountToHaveEveryWindowAvailable(t *testing.T) {
+func TestUpstreamQuotaExcludesWeeklyExhaustedAccountFromFiveHourAverage(t *testing.T) {
 	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -119,15 +119,15 @@ func TestUpstreamQuotaRequiresOneAccountToHaveEveryWindowAvailable(t *testing.T)
 			}})
 		case "/v0/management/quota-snapshots/query":
 			end := now.Add(time.Hour).UnixMilli()
-			exhausted, available := 100.0, 10.0
+			exhausted, firstAvailable, secondFiveHour, secondWeekly := 100.0, 10.0, 20.0, 30.0
 			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{Items: []cpamp.QuotaSnapshotItem{
 				{RowKey: "one.json\x00one", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
-					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &exhausted, PlanType: "plus", Availability: "active"},
-					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &available, PlanType: "plus", Availability: "active"},
+					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &firstAvailable, PlanType: "plus", Availability: "active"},
+					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &exhausted, PlanType: "plus", Availability: "active"},
 				}},
 				{RowKey: "two.json\x00two", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
-					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &available, PlanType: "plus", Availability: "active"},
-					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &exhausted, PlanType: "plus", Availability: "active"},
+					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &secondFiveHour, PlanType: "plus", Availability: "active"},
+					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &end, UsedPercent: &secondWeekly, PlanType: "plus", Availability: "active"},
 				}},
 			}})
 		default:
@@ -146,13 +146,42 @@ func TestUpstreamQuotaRequiresOneAccountToHaveEveryWindowAvailable(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pool.TotalAccounts != 2 || pool.UsableAccounts != 0 || len(pool.Groups) != 2 {
+	if pool.TotalAccounts != 2 || pool.UsableAccounts != 1 || len(pool.Groups) != 2 {
 		t.Fatalf("pool = %#v", pool)
 	}
+	want := map[string]int{"five_hour": 80, "weekly": 35}
 	for _, group := range pool.Groups {
-		if group.RemainingPercent != 45 {
+		if group.RemainingPercent != want[group.Period] || group.AvailableAccounts != 1 || group.KnownAccounts != 2 {
 			t.Fatalf("group = %#v", group)
 		}
+	}
+}
+
+func TestFiveHourExhaustionDoesNotExcludeWeeklyQuota(t *testing.T) {
+	exhausted, available := 100.0, 20.0
+	windows := []quotaWindowSelection{
+		{Period: "five_hour", Window: cpamp.QuotaSnapshotWindow{UsedPercent: &exhausted}},
+		{Period: "weekly", Window: cpamp.QuotaSnapshotWindow{UsedPercent: &available}},
+	}
+	if !quotaWindowIncludedInAverage("weekly", windows) {
+		t.Fatal("weekly quota was excluded by exhausted five-hour quota")
+	}
+	if !quotaWindowIncludedInAverage("five_hour", windows) {
+		t.Fatal("five-hour quota should remain in its own average as a zero value")
+	}
+}
+
+func TestWeeklyExhaustionExcludesFiveHourQuota(t *testing.T) {
+	exhausted, available := 100.0, 20.0
+	windows := []quotaWindowSelection{
+		{Period: "five_hour", Window: cpamp.QuotaSnapshotWindow{UsedPercent: &available}},
+		{Period: "weekly", Window: cpamp.QuotaSnapshotWindow{UsedPercent: &exhausted}},
+	}
+	if quotaWindowIncludedInAverage("five_hour", windows) {
+		t.Fatal("five-hour quota remained eligible after weekly quota was exhausted")
+	}
+	if !quotaWindowIncludedInAverage("weekly", windows) {
+		t.Fatal("weekly quota excluded itself from its own average")
 	}
 }
 

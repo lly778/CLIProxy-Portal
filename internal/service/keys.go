@@ -654,8 +654,9 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	}
 	result.Items = k.mergeRefreshedQuota(result.Items, now)
 	type quotaAccumulator struct {
-		group          UpstreamQuotaGroup
-		remainingTotal float64
+		group            UpstreamQuotaGroup
+		remainingTotal   float64
+		includedAccounts int
 	}
 	groups := make(map[string]*quotaAccumulator)
 	knownAccounts := make(map[string]struct{}, len(result.Items))
@@ -666,6 +667,12 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		}
 		knownAccounts[item.RowKey] = struct{}{}
 		accountUsable := true
+		for _, selected := range windows {
+			if quotaRemaining(selected.Window) <= 0 {
+				accountUsable = false
+				break
+			}
+		}
 		for _, selected := range windows {
 			window, period := selected.Window, selected.Period
 			plan := strings.ToLower(strings.TrimSpace(window.PlanType))
@@ -679,13 +686,13 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 				groups[key] = acc
 			}
 			remaining := quotaRemaining(window)
-			if remaining <= 0 {
-				accountUsable = false
-			}
 			acc.group.KnownAccounts++
-			acc.remainingTotal += remaining
-			if remaining > 0 {
-				acc.group.AvailableAccounts++
+			if quotaWindowIncludedInAverage(period, windows) {
+				acc.remainingTotal += remaining
+				acc.includedAccounts++
+				if remaining > 0 {
+					acc.group.AvailableAccounts++
+				}
 			}
 			if window.CycleEndMS != nil && *window.CycleEndMS > k.Now().UnixMilli() {
 				reset := time.UnixMilli(*window.CycleEndMS).UTC()
@@ -709,8 +716,10 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	sort.Strings(keys)
 	for _, key := range keys {
 		acc := groups[key]
-		acc.group.RemainingPercent = int(math.Round(acc.remainingTotal / float64(acc.group.KnownAccounts)))
-		acc.group.Estimated = acc.group.KnownAccounts > 1
+		if acc.includedAccounts > 0 {
+			acc.group.RemainingPercent = int(math.Round(acc.remainingTotal / float64(acc.includedAccounts)))
+		}
+		acc.group.Estimated = acc.includedAccounts > 1
 		pool.Groups = append(pool.Groups, acc.group)
 	}
 	pool.UnknownCount = pool.TotalAccounts - len(knownAccounts)
@@ -719,6 +728,18 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	}
 	k.putQuota(pool)
 	return pool, nil
+}
+
+func quotaWindowIncludedInAverage(period string, windows []quotaWindowSelection) bool {
+	if period != "five_hour" {
+		return true
+	}
+	for _, selected := range windows {
+		if (selected.Period == "weekly" || selected.Period == "monthly") && quotaRemaining(selected.Window) <= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type quotaWindowSelection struct {
