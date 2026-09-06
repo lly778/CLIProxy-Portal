@@ -466,7 +466,16 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .audit-table table { min-width: 900px; }
 .audit-result-cell { width: 1%; min-width: 100px; }
 .audit-detail-cell { width: 280px; max-width: 320px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
-.request-log-table table { min-width: 1120px; }
+.request-log-table table { min-width: 0; table-layout: fixed; }
+.request-log-table th, .request-log-table td { padding-right: 10px; padding-left: 10px; overflow: hidden; text-overflow: ellipsis; }
+.request-log-table th:nth-child(1) { width: 13%; }
+.request-log-table th:nth-child(2) { width: 12%; }
+.request-log-table th:nth-child(3) { width: 12%; }
+.request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 7%; }
+.request-log-table th:nth-child(9) { width: 8%; }
+.request-log-table th:nth-child(10) { width: 9%; }
+.request-log-table th:nth-child(11) { width: 11%; }
+.request-log-table .request-status-cell { width: 11%; min-width: 0; }
 .request-status-cell { width: 1%; min-width: 180px; }
 .request-status-detail { max-width: 210px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
