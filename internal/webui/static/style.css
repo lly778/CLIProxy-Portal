@@ -82,6 +82,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .section-head h2 { margin-bottom: 0; }
 .section-head.compact { margin: 0 0 16px; }
 .section-head.compact p { margin: 6px 0 0; line-height: 1.65; }
+.system-section-head p { margin: 9px 0 0; line-height: 1.6; }
 .section-gap { margin-top: 20px; }
 .section { margin-top: 34px; }
 .grid { display: grid; gap: 18px; }
