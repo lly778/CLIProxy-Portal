@@ -390,24 +390,27 @@ type AdminDashboardView struct {
 }
 
 type UserRowView struct {
-	User      UserView
-	Pending   bool
-	LastUsed  string
-	Usage     UsageSummaryView
-	CanManage bool
+	User          UserView
+	Pending       bool
+	LastUsed      string
+	Usage         UsageSummaryView
+	CanManage     bool
+	CanChangeRole bool
+	NextRole      string
+	RoleAction    string
+	RoleConfirm   string
+	RoleHint      string
 }
 
 type AdminUsersView struct {
 	LayoutView
-	Query          string
-	Status         string
-	Statuses       []string
-	Users          []UserRowView
-	Page           int
-	PageCount      int
-	Total          string
-	Admins         []AdminRowView
-	CanCreateAdmin bool
+	Query     string
+	Status    string
+	Statuses  []string
+	Users     []UserRowView
+	Page      int
+	PageCount int
+	Total     string
 }
 
 type AdminUserDetailView struct {
@@ -444,14 +447,6 @@ type AdminApprovalsView struct {
 	Pending      []ApprovalView
 	Rejected     []ApprovalView
 	PendingCount string
-}
-
-type AdminRowView struct {
-	User        UserView
-	LastLoginAt string
-	CreatedAt   string
-	CanDisable  bool
-	IsLastAdmin bool
 }
 
 type UpstreamAccountView struct {

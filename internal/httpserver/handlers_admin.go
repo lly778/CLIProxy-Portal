@@ -182,14 +182,12 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		pages = 1
 	}
 	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
-	allUsers, _ := s.Store.ListUsers(r.Context(), "", "", 1000, 0)
 	adminCount, _ := s.Store.CountAdmins(r.Context())
-	v.CanCreateAdmin = true
-	for _, account := range allUsers {
-		if !account.IsAdmin() || account.Status == domain.StatusDeleted {
-			continue
-		}
-		v.Admins = append(v.Admins, webui.AdminRowView{User: s.userView(account), LastLoginAt: s.formatTime(account.LastLoginAt), CreatedAt: s.formatTime(account.CreatedAt), CanDisable: account.ID != u.ID && adminCount > 1, IsLastAdmin: adminCount == 1})
+	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
+		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("error")); msg != "" {
+		v.Error = msg
 	}
 	keyOwners := make(map[string]string)
 	lastUsedByUser := make(map[string]time.Time)
@@ -213,7 +211,9 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	stats, usageErr := s.Keys.APIKeyUsage(r.Context(), hashes, now.AddDate(0, 0, -30), now)
 	if usageErr != nil {
 		usageLoaded = false
-		v.Error = "用户用量暂时不可用，其他账号资料仍可正常查看"
+		if v.Error == "" {
+			v.Error = "用户用量暂时不可用，其他账号资料仍可正常查看"
+		}
 	} else {
 		for _, stat := range stats {
 			userID, ok := keyOwners[strings.ToLower(strings.TrimSpace(stat.APIKeyHash))]
@@ -240,6 +240,20 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 			usage.TotalTokens = compactNumber(summary.TotalTokens)
 		}
 		row := webui.UserRowView{User: s.userView(x), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(lastUsedByUser[x.ID]), CanManage: true, Usage: usage}
+		if x.IsAdmin() {
+			switch {
+			case x.ID == u.ID:
+				row.RoleHint = "当前账号"
+			case x.Status == domain.StatusApproved && adminCount <= 1:
+				row.RoleHint = "最后一位管理员"
+			default:
+				row.CanChangeRole, row.NextRole, row.RoleAction = true, string(domain.RoleUser), "转为普通用户"
+				row.RoleConfirm = "确定将该管理员转为普通用户吗？其现有登录会话将立即失效。"
+			}
+		} else if x.Status == domain.StatusApproved {
+			row.CanChangeRole, row.NextRole, row.RoleAction = true, string(domain.RoleAdmin), "设为管理员"
+			row.RoleConfirm = "确定将该用户设为管理员吗？其现有登录会话将立即失效。"
+		}
 		v.Users = append(v.Users, row)
 	}
 	_ = s.UI.Render(w, webui.PageAdminUsers, v)
@@ -335,8 +349,44 @@ func (s *Server) adminUserAction(w http.ResponseWriter, r *http.Request) {
 	case "change-phone":
 		err = s.Accounts.ChangePhone(r.Context(), actor, target, r.FormValue("phone"), r.FormValue("admin_password"), s.clientIP(r))
 		msg = "手机号已修改"
+	case "role":
+		nextRole := domain.Role(strings.TrimSpace(r.FormValue("role")))
+		switch {
+		case target.ID == actor.ID:
+			err = errors.New("不能修改当前登录账号的管理员角色")
+		case nextRole == domain.RoleAdmin && !target.IsAdmin() && target.Status == domain.StatusApproved:
+			err = s.Store.SetUserRole(r.Context(), target.ID, domain.RoleAdmin)
+			if err == nil {
+				_ = s.Store.DeleteUserSessions(r.Context(), target.ID, "")
+				s.audit(r, actor, "admin.promote", target.ID, "user -> admin")
+				msg = "该用户已设为管理员"
+			}
+		case nextRole == domain.RoleUser && target.IsAdmin():
+			var changed bool
+			changed, err = s.Store.DemoteAdmin(r.Context(), target.ID)
+			if err == nil && !changed {
+				err = errors.New("必须保留至少一位有效管理员")
+			}
+			if err == nil {
+				_ = s.Store.DeleteUserSessions(r.Context(), target.ID, "")
+				s.audit(r, actor, "admin.demote", target.ID, "admin -> user")
+				msg = "该管理员已转为普通用户"
+			}
+		default:
+			err = errors.New("当前账号状态不能变更角色")
+		}
 	default:
 		err = errors.New("未知操作")
+	}
+	if action == "role" {
+		query := url.Values{}
+		if err != nil {
+			query.Set("error", err.Error())
+		} else {
+			query.Set("msg", msg)
+		}
+		http.Redirect(w, r, "/admin/users?"+query.Encode(), http.StatusSeeOther)
+		return
 	}
 	if err != nil {
 		s.renderAdminUser(w, r, target, "", err)
@@ -395,40 +445,6 @@ func (s *Server) adminApprovals(w http.ResponseWriter, r *http.Request) {
 		v.Rejected = append(v.Rejected, webui.ApprovalView{ApplicationID: x.ID, User: s.userView(x), SubmittedAt: s.formatTime(x.UpdatedAt), RulesVersion: strconv.Itoa(x.PolicyVersion), Reason: x.RejectionReason})
 	}
 	_ = s.UI.Render(w, webui.PageAdminApprovals, v)
-}
-
-func (s *Server) adminCreate(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, 403, "请求已失效", nil)
-		return
-	}
-	actor := currentUser(r)
-	_, err := s.Accounts.CreateAdmin(r.Context(), r.FormValue("phone"), r.FormValue("name"), r.FormValue("password"), &actor, s.clientIP(r))
-	if err != nil {
-		s.errorPage(w, r, 400, err.Error(), nil)
-		return
-	}
-	http.Redirect(w, r, "/admin/users#administrators", http.StatusSeeOther)
-}
-func (s *Server) adminDisable(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, 403, "请求已失效", nil)
-		return
-	}
-	target, err := s.Store.UserByID(r.Context(), r.PathValue("id"))
-	if err != nil {
-		s.errorPage(w, r, 404, "管理员不存在", nil)
-		return
-	}
-	count, _ := s.Store.CountAdmins(r.Context())
-	if !target.IsAdmin() || count <= 1 || target.ID == currentUser(r).ID {
-		s.errorPage(w, r, 400, "必须保留至少一位有效管理员", nil)
-		return
-	}
-	_ = s.Store.SetUserStatus(r.Context(), target.ID, domain.StatusSuspended, "管理员停用")
-	_ = s.Store.DeleteUserSessions(r.Context(), target.ID, "")
-	s.audit(r, currentUser(r), "admin.disable", target.ID, "")
-	http.Redirect(w, r, "/admin/users#administrators", http.StatusSeeOther)
 }
 
 func (s *Server) adminPolicy(w http.ResponseWriter, r *http.Request) {

@@ -336,6 +336,20 @@ func (s *Store) SetUserRole(ctx context.Context, id string, role domain.Role) er
 	_, err := s.db.ExecContext(ctx, `UPDATE users SET role=?,updated_at_ms=? WHERE id=? AND status<>'deleted'`, role, nowMS(), id)
 	return err
 }
+
+// DemoteAdmin atomically preserves at least one approved administrator. The
+// conditional count prevents concurrent demotions from removing every active
+// administrator after both requests observe the same stale count.
+func (s *Store) DemoteAdmin(ctx context.Context, id string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `UPDATE users SET role='user',updated_at_ms=?
+		WHERE id=? AND role='admin' AND status<>'deleted'
+		AND (status<>'approved' OR (SELECT COUNT(*) FROM users WHERE role='admin' AND status='approved')>1)`, nowMS(), id)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	return changed == 1, err
+}
 func (s *Store) SetPassword(ctx context.Context, id, hash string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE users SET password_hash=?,updated_at_ms=? WHERE id=?`, hash, nowMS(), id)
 	return err

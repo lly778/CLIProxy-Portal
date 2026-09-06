@@ -83,8 +83,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/users/{id}/{action}", s.withAdmin(s.adminUserAction))
 	mux.HandleFunc("POST /admin/approvals/{id}/{action}", s.withAdmin(s.adminApprovalAction))
 	mux.HandleFunc("GET /admin/approvals", s.withAdmin(s.adminApprovals))
-	mux.HandleFunc("POST /admin/users/admins", s.withAdmin(s.adminCreate))
-	mux.HandleFunc("POST /admin/users/admins/{id}/disable", s.withAdmin(s.adminDisable))
 	mux.HandleFunc("GET /admin/admins", s.withAdmin(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
 	mux.HandleFunc("GET /admin/upstreams", s.withAdmin(s.adminUpstreams))
 	mux.HandleFunc("POST /admin/upstreams/{id}/status", s.withAdmin(s.adminUpstreamStatus))

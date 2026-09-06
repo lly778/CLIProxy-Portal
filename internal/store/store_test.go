@@ -64,6 +64,31 @@ func TestOnlyOneActiveKey(t *testing.T) {
 	}
 }
 
+func TestDemoteAdminPreservesOneApprovedAdministrator(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, user := range []domain.User{
+		{ID: "admin-one", Phone: "13900139001", Name: "管理员一", PasswordHash: "h", Role: domain.RoleAdmin, Status: domain.StatusApproved, CreatedAt: now, UpdatedAt: now},
+		{ID: "admin-two", Phone: "13900139002", Name: "管理员二", PasswordHash: "h", Role: domain.RoleAdmin, Status: domain.StatusApproved, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := s.CreateUser(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	changed, err := s.DemoteAdmin(ctx, "admin-two")
+	if err != nil || !changed {
+		t.Fatalf("first demotion changed=%v err=%v", changed, err)
+	}
+	changed, err = s.DemoteAdmin(ctx, "admin-one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed {
+		t.Fatal("last approved administrator was demoted")
+	}
+}
+
 func TestListAuditForUserExcludesOtherUsers(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
