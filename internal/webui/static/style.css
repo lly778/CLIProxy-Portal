@@ -232,6 +232,8 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-action-form label { display: grid; gap: 6px; color: #475467; font-size: 11px; font-weight: 650; }
 .admin-action-form input { min-height: 40px; }
 .admin-action-form .button { grid-column: 1 / -1; justify-self: start; }
+.admin-action-form.change-phone-form { grid-template-columns: repeat(2, minmax(0, 1fr)) auto; }
+.admin-action-form.change-phone-form .button { grid-column: auto; }
 .admin-action-form.delete-form { grid-template-columns: minmax(0, 1fr) auto; }
 .admin-action-form.delete-form .button { grid-column: auto; }
 .inline-form { display: inline-flex; }
@@ -493,6 +495,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .grid-3, .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-action-row, .admin-action-form, .admin-action-form.delete-form { grid-template-columns: 1fr; }
+  .admin-action-form.change-phone-form { grid-template-columns: 1fr; }
+  .admin-action-form.change-phone-form .button { grid-column: 1; }
   .admin-action-form.delete-form .button { grid-column: 1; justify-self: start; }
 }
 @media (max-width: 760px) {
