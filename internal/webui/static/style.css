@@ -187,6 +187,7 @@ td small, td .muted { display: block; margin-top: 2px; }
 .button-row.centered { justify-content: center; }
 .stack-actions { display: grid; gap: 9px; justify-items: start; }
 .account-actions-card { min-width: 0; }
+.account-actions-card .button { width: 116px; }
 .admin-user-overview { align-items: stretch; }
 .admin-user-summary { display: grid; min-width: 0; grid-template-rows: auto minmax(0, 1fr); gap: 18px; }
 .admin-user-summary > .metric-grid { height: 100%; }
