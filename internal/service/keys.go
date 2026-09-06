@@ -603,7 +603,8 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		k.putQuota(pool)
 		return pool, nil
 	}
-	result, err := typed.QueryQuotaSnapshots(ctx, cpamp.QuotaSnapshotQueryRequest{Accounts: accounts, NowMS: k.Now().UnixMilli()})
+	now := k.Now()
+	result, err := typed.QueryQuotaSnapshots(ctx, cpamp.QuotaSnapshotQueryRequest{Accounts: accounts, NowMS: now.UnixMilli()})
 	if err != nil {
 		return pool, err
 	}
@@ -614,7 +615,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	groups := make(map[string]*quotaAccumulator)
 	knownAccounts := make(map[string]struct{}, len(result.Items))
 	for _, item := range result.Items {
-		windows := currentQuotaWindows(item.Windows)
+		windows := currentQuotaWindows(item.Windows, now)
 		if len(windows) == 0 {
 			continue
 		}
@@ -673,13 +674,16 @@ type quotaWindowSelection struct {
 	Period string
 }
 
-func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow) []quotaWindowSelection {
+func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow, now time.Time) []quotaWindowSelection {
 	selected := make(map[string]cpamp.QuotaSnapshotWindow, 3)
 	for _, window := range windows {
 		scope := strings.ToLower(strings.TrimSpace(window.ModelScopeKind))
 		availability := strings.ToLower(strings.TrimSpace(window.Availability))
 		period := quotaWindowPeriod(window)
-		if window.Stale || period == "" || (scope != "" && scope != "all") || availability == "inactive" || availability == "pending_absent" {
+		if period == "" || (scope != "" && scope != "all") || availability == "inactive" || availability == "pending_absent" {
+			continue
+		}
+		if window.Stale && !freshQuotaWithObsoleteBoundary(window, availability, now) {
 			continue
 		}
 		if window.UsedPercent == nil && window.RemainingPercent == nil {
@@ -698,6 +702,26 @@ func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow) []quotaWindowSelec
 		}
 	}
 	return result
+}
+
+// freshQuotaWithObsoleteBoundary handles a CPAMP lifecycle edge case where a
+// newly observed quota value is paired with the previous cycle's already
+// expired boundary. The value is still useful, but only while the observation
+// is active, newer than that boundary, and younger than one full window.
+func freshQuotaWithObsoleteBoundary(window cpamp.QuotaSnapshotWindow, availability string, now time.Time) bool {
+	if availability != "active" || window.ObservedAtMS <= 0 || window.CycleEndMS == nil || window.DurationSeconds == nil {
+		return false
+	}
+	durationSeconds := *window.DurationSeconds
+	if durationSeconds <= 0 || durationSeconds > int64((31*24*time.Hour)/time.Second) {
+		return false
+	}
+	nowMS := now.UnixMilli()
+	if *window.CycleEndMS >= nowMS || window.ObservedAtMS <= *window.CycleEndMS || window.ObservedAtMS > nowMS {
+		return false
+	}
+	maxAgeMS := durationSeconds * 1000
+	return nowMS-window.ObservedAtMS < maxAgeMS
 }
 
 func quotaWindowPeriod(window cpamp.QuotaSnapshotWindow) string {

@@ -9,7 +9,7 @@
   <div class="quota-group-list">
   {{range .Groups}}<div class="quota-group">
     <div class="quota-pool-summary">
-      <div class="quota-pool-value"><span>{{.Label}}</span><strong>{{.RemainingPercent}}%</strong><span>额度剩余{{if .Estimated}}（按账号等权估算）{{end}}</span></div>
+      <div class="quota-pool-value"><span>{{.Label}}</span><strong>{{.RemainingPercent}}%</strong><span>额度剩余（按账号等权估算）</span></div>
       <dl class="quota-pool-meta"><div><dt>账号状态</dt><dd>{{.Accounts}}</dd></div><div><dt>最近一次重置</dt><dd>{{.ResetAt}}</dd></div><div><dt>数据更新</dt><dd>{{.ObservedAt}}</dd></div></dl>
     </div>
     <div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div>

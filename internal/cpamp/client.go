@@ -292,6 +292,7 @@ type QuotaSnapshotWindow struct {
 	ModelScopeKind   string   `json:"model_scope_kind"`
 	ObservedAtMS     int64    `json:"observed_at_ms"`
 	CycleEndMS       *int64   `json:"cycle_end_ms,omitempty"`
+	DurationSeconds  *int64   `json:"duration_seconds,omitempty"`
 	UsedPercent      *float64 `json:"used_percent,omitempty"`
 	RemainingPercent *float64 `json:"remaining_percent,omitempty"`
 	PlanType         string   `json:"plan_type,omitempty"`

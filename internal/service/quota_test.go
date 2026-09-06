@@ -115,12 +115,62 @@ func TestCurrentQuotaWindowsKeepsFreshestWindowPerPeriod(t *testing.T) {
 		{WindowKind: "five-hour", ModelScopeKind: "all", ObservedAtMS: 200, UsedPercent: &newUsed, Availability: "active"},
 		{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: 150, UsedPercent: &weeklyUsed, Availability: "active"},
 		{WindowKind: "five_hour", ModelScopeKind: "model", ObservedAtMS: 300, UsedPercent: &modelUsed, Availability: "active"},
-	})
+	}, time.UnixMilli(400))
 	if len(windows) != 2 || windows[0].Period != "five_hour" || windows[1].Period != "weekly" {
 		t.Fatalf("windows = %#v", windows)
 	}
 	if got := quotaRemaining(windows[0].Window); got != 80 {
 		t.Fatalf("five-hour remaining = %v", got)
+	}
+}
+
+func TestCurrentQuotaWindowsAcceptsFreshValueWithObsoleteBoundary(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	used := 93.0
+	weeklyDuration := int64(7 * 24 * 60 * 60)
+	oldEnd := now.Add(-5 * 24 * time.Hour).UnixMilli()
+	windows := currentQuotaWindows([]cpamp.QuotaSnapshotWindow{{
+		ProviderWindowID: "weekly",
+		WindowKind:       "weekly",
+		ModelScopeKind:   "all",
+		ObservedAtMS:     now.Add(-time.Minute).UnixMilli(),
+		CycleEndMS:       &oldEnd,
+		DurationSeconds:  &weeklyDuration,
+		UsedPercent:      &used,
+		PlanType:         "plus",
+		Stale:            true,
+		Availability:     "active",
+	}}, now)
+	if len(windows) != 1 || windows[0].Period != "weekly" || quotaRemaining(windows[0].Window) != 7 {
+		t.Fatalf("windows = %#v", windows)
+	}
+}
+
+func TestCurrentQuotaWindowsRejectsActuallyExpiredStaleValue(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	used := 93.0
+	weeklyDuration := int64(7 * 24 * 60 * 60)
+	oldEnd := now.Add(-time.Hour).UnixMilli()
+	for name, observedAt := range map[string]int64{
+		"observation belongs to old cycle": now.Add(-2 * time.Hour).UnixMilli(),
+		"observation is too old":           now.Add(-8 * 24 * time.Hour).UnixMilli(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			windows := currentQuotaWindows([]cpamp.QuotaSnapshotWindow{{
+				ProviderWindowID: "weekly",
+				WindowKind:       "weekly",
+				ModelScopeKind:   "all",
+				ObservedAtMS:     observedAt,
+				CycleEndMS:       &oldEnd,
+				DurationSeconds:  &weeklyDuration,
+				UsedPercent:      &used,
+				Stale:            true,
+				Availability:     "active",
+			}}, now)
+			if len(windows) != 0 {
+				t.Fatalf("windows = %#v", windows)
+			}
+		})
 	}
 }
 
