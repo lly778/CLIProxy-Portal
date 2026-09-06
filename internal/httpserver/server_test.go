@@ -368,6 +368,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminUserPage, "/admin/users/"+u.ID+"/role") || !strings.Contains(adminUserPage, "设为管理员") || !strings.Contains(adminUserPage, "角色权限") {
 		t.Fatalf("administrator role action was not rendered in user details: %s", adminUserPage)
 	}
+	if !strings.Contains(adminUserPage, "完整 Key 仅在用户领取时显示一次") {
+		t.Fatalf("administrator key visibility notice was not rendered: %s", adminUserPage)
+	}
 	adminUsagePage := getBody(t, adminClient, portal.URL+"/admin/usage?range=7d", http.StatusOK)
 	if !strings.Contains(adminUsagePage, "按用户") || !strings.Contains(adminUsagePage, "张三") || !strings.Contains(adminUsagePage, "2.3K 请求") || !strings.Contains(adminUsagePage, "5.1M tokens") {
 		t.Fatalf("admin global usage did not show per-user statistics: %s", adminUsagePage)

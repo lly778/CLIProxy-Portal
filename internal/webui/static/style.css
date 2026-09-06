@@ -206,6 +206,9 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-key-meta > div:last-child { padding-right: 0; }
 .admin-key-meta dt { margin-bottom: 6px; color: var(--muted); font-size: 11px; }
 .admin-key-meta dd { margin: 0; overflow-wrap: anywhere; font-size: 12px; font-weight: 600; }
+.admin-key-note { display: flex; gap: 10px; align-items: center; padding: 11px 13px; margin-top: 20px; color: #52627a; background: #f6f8fb; border-radius: 9px; font-size: 11px; line-height: 1.55; }
+.admin-key-note > span { display: inline-grid; flex: 0 0 auto; width: 22px; height: 22px; place-items: center; color: var(--success); background: var(--success-bg); border-radius: 50%; font-size: 13px; font-weight: 750; }
+.admin-key-note p { margin: 0; }
 .admin-key-empty { display: grid; justify-items: center; padding: 40px 28px 42px; color: var(--muted); text-align: center; }
 .admin-key-empty .admin-key-icon { margin-bottom: 15px; background: linear-gradient(135deg, #91a1ba, #6f7f98); box-shadow: 0 6px 14px rgba(70,84,105,.14); }
 .admin-key-empty strong { margin-bottom: 6px; color: var(--text); font-size: 15px; }

@@ -9,6 +9,7 @@
     {{if .Key.Last4}}
     <div class="admin-key-identity"><span class="admin-key-icon">K</span><div><span>已脱敏的当前凭据</span><strong class="admin-key-mask">•••• {{.Key.Last4}}</strong></div></div>
     <dl class="admin-key-meta"><div><dt>同步状态</dt><dd><span class="badge {{statusClass .Key.SyncStatus}}">{{.Key.SyncStatusLabel}}</span></dd></div><div><dt>创建时间</dt><dd>{{.Key.CreatedAt}}</dd></div><div><dt>最近使用</dt><dd>{{.Key.LastUsedAt}}</dd></div></dl>
+    <div class="admin-key-note"><span aria-hidden="true">✓</span><p>完整 Key 仅在用户领取时显示一次；管理员只能查看状态和末四位。</p></div>
     {{else}}
     <div class="admin-key-empty"><span class="admin-key-icon">K</span><strong>尚未领取 API Key</strong><p>该用户可在账号获批后自行领取；管理员不能代为生成或查看完整 Key。</p></div>
     {{end}}
