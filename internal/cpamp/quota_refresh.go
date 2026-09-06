@@ -74,24 +74,43 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 	if accountID := strings.TrimSpace(file.AccountID); accountID != "" {
 		headers["Chatgpt-Account-Id"] = accountID
 	}
-	payload, err := c.fetchCodexQuotaPayload(ctx, authIndex, headers)
+	requestBody, err := json.Marshal(map[string]any{
+		"authIndex": authIndex,
+		"method":    http.MethodGet,
+		"url":       codexUsageURL,
+		"header":    headers,
+	})
+	if err != nil {
+		return errors.New("cpamp quota refresh request encoding failed")
+	}
+	body, err := c.do(ctx, http.MethodPost, pathAPICall, requestBody, c.adminHeader)
 	if err != nil {
 		return err
+	}
+	var envelope struct {
+		StatusCode      int             `json:"status_code"`
+		StatusCodeCamel int             `json:"statusCode"`
+		Body            json.RawMessage `json:"body"`
+	}
+	if err := decodeJSON(pathAPICall, body, &envelope); err != nil {
+		return err
+	}
+	statusCode := envelope.StatusCode
+	if statusCode == 0 {
+		statusCode = envelope.StatusCodeCamel
+	}
+	if statusCode < 200 || statusCode >= 300 {
+		return &HTTPError{Operation: pathAPICall + " upstream", StatusCode: statusCode}
+	}
+	payload, err := decodeNestedObject(envelope.Body)
+	if err != nil {
+		return errors.New("cpamp quota refresh returned an invalid response")
 	}
 	observedAtMS := observedAt.UTC().UnixMilli()
 	observationID := quotaObservationID(file, observedAtMS)
 	windows := buildMainCodexWindows(payload, observedAt, observationID)
 	if len(windows) == 0 {
 		return ErrNoQuotaWindows
-	}
-	// Codex occasionally returns only one of the main windows even though a
-	// Plus/Pro account normally exposes both 5-hour and weekly quota. Retry a
-	// partial response once and merge the result so one transient omission does
-	// not silently remove that account from the pool average.
-	if shouldRetryMainCodexWindows(payload, windows) {
-		if retryPayload, retryErr := c.fetchCodexQuotaPayload(ctx, authIndex, headers); retryErr == nil {
-			windows = mergeQuotaRefreshWindows(windows, buildMainCodexWindows(retryPayload, observedAt, observationID))
-		}
 	}
 	target := QuotaAccountTarget{
 		AccountSnapshot:       file.AccountSnapshot,
@@ -120,72 +139,6 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 	}
 	_, err = c.do(ctx, http.MethodPost, pathQuotaWrite, writeBody, c.adminHeader)
 	return err
-}
-
-func (c *Client) fetchCodexQuotaPayload(ctx context.Context, authIndex string, headers map[string]string) (map[string]any, error) {
-	requestBody, err := json.Marshal(map[string]any{
-		"authIndex": authIndex,
-		"method":    http.MethodGet,
-		"url":       codexUsageURL,
-		"header":    headers,
-	})
-	if err != nil {
-		return nil, errors.New("cpamp quota refresh request encoding failed")
-	}
-	body, err := c.do(ctx, http.MethodPost, pathAPICall, requestBody, c.adminHeader)
-	if err != nil {
-		return nil, err
-	}
-	var envelope struct {
-		StatusCode      int             `json:"status_code"`
-		StatusCodeCamel int             `json:"statusCode"`
-		Body            json.RawMessage `json:"body"`
-	}
-	if err := decodeJSON(pathAPICall, body, &envelope); err != nil {
-		return nil, err
-	}
-	statusCode := envelope.StatusCode
-	if statusCode == 0 {
-		statusCode = envelope.StatusCodeCamel
-	}
-	if statusCode < 200 || statusCode >= 300 {
-		return nil, &HTTPError{Operation: pathAPICall + " upstream", StatusCode: statusCode}
-	}
-	payload, err := decodeNestedObject(envelope.Body)
-	if err != nil {
-		return nil, errors.New("cpamp quota refresh returned an invalid response")
-	}
-	return payload, nil
-}
-
-func shouldRetryMainCodexWindows(payload map[string]any, windows []QuotaRefreshWindow) bool {
-	if len(windows) != 1 {
-		return false
-	}
-	plan := strings.ToLower(strings.TrimSpace(textValue(payload, "plan_type", "planType")))
-	return plan != "team" && windows[0].WindowKind != "monthly"
-}
-
-func mergeQuotaRefreshWindows(first, second []QuotaRefreshWindow) []QuotaRefreshWindow {
-	merged := make(map[string]QuotaRefreshWindow, len(first)+len(second))
-	order := make([]string, 0, len(first)+len(second))
-	for _, windows := range [][]QuotaRefreshWindow{first, second} {
-		for _, window := range windows {
-			key := strings.TrimSpace(window.WindowKind)
-			if key == "" {
-				key = strings.TrimSpace(window.ProviderWindowID)
-			}
-			if _, exists := merged[key]; !exists {
-				order = append(order, key)
-			}
-			merged[key] = window
-		}
-	}
-	result := make([]QuotaRefreshWindow, 0, len(order))
-	for _, key := range order {
-		result = append(result, merged[key])
-	}
-	return result
 }
 
 func decodeNestedObject(raw json.RawMessage) (map[string]any, error) {
