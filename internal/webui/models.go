@@ -457,6 +457,16 @@ type UpstreamAccountView struct {
 	AuthIndex   string
 	Disabled    bool
 	StatusLabel string
+	Quotas      []UpstreamAccountQuotaView
+	QuotaStatus string
+}
+
+type UpstreamAccountQuotaView struct {
+	Label            string
+	Plan             string
+	RemainingPercent int
+	StatusClass      string
+	ResetAt          string
 }
 
 type AdminUpstreamsView struct {
@@ -465,6 +475,7 @@ type AdminUpstreamsView struct {
 	Models        []OAuthModelView
 	WildcardRules []string
 	ModelError    string
+	QuotaError    string
 	Enabled       int
 	Disabled      int
 }

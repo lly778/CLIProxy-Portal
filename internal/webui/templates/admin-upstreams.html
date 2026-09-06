@@ -3,11 +3,13 @@
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="card upstream-card">
   <div class="section-head compact"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><span class="badge neutral">{{len .Accounts}} 个账号</span></div>
+  {{if .QuotaError}}<p class="muted small upstream-quota-error">{{.QuotaError}}</p>{{end}}
   <div class="upstream-list">
     {{range .Accounts}}
     <article class="upstream-row">
       <span class="upstream-icon" aria-hidden="true">C</span>
       <div class="upstream-main"><strong>{{.Account}}</strong><span class="muted mono">{{.Name}}</span>{{if .AuthIndex}}<small class="muted">身份索引 {{.AuthIndex}}</small>{{end}}</div>
+      <div class="upstream-account-quotas">{{range .Quotas}}<div class="upstream-account-quota"><div><span class="badge neutral">{{.Label}}</span><strong>{{.RemainingPercent}}%</strong><small class="muted">{{.Plan}}</small></div><div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}额度剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div><small class="muted">重置 {{.ResetAt}}</small></div>{{else}}<span class="muted small">{{.QuotaStatus}}</span>{{end}}</div>
       {{if .Disabled}}<span class="badge danger">{{.StatusLabel}}</span>{{else}}<span class="badge success">{{.StatusLabel}}</span>{{end}}
       <form method="post" action="/admin/upstreams/{{.ID}}/status" data-confirm="{{if .Disabled}}确定启用该上游账号吗？{{else}}确定停用该上游账号吗？停用后新请求将不再调度到此账号。{{end}}">
         {{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}
@@ -40,5 +42,4 @@
     {{else}}{{if not $.ModelError}}<div class="empty-state compact"><strong>暂无模型定义</strong><p>CPAMP 当前未返回 Codex 模型定义。</p></div>{{end}}{{end}}
   </div>
 </section>
-<div class="callout warning"><strong>切换说明</strong><p>停用只改变 CPAMP 的调度状态，不会删除凭证文件；重新启用后可继续使用。停用最后一个可用账号会导致模型请求无法分配。</p></div>
 {{end}}

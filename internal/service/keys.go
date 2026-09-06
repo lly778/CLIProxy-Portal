@@ -81,6 +81,21 @@ type UpstreamAccount struct {
 	Disabled  bool
 }
 
+// UpstreamAccountQuota contains one credential's current provider quota
+// windows. It is keyed by the same opaque account ID used for status changes.
+type UpstreamAccountQuota struct {
+	AccountID string
+	Windows   []UpstreamAccountQuotaWindow
+}
+
+type UpstreamAccountQuotaWindow struct {
+	Period           string
+	PlanType         string
+	RemainingPercent int
+	ResetAt          time.Time
+	ObservedAt       time.Time
+}
+
 // OAuthModelSetting is one global OAuth model routing switch. A model disabled
 // by a wildcard rule is read-only here because removing that rule would affect
 // other models as well.
@@ -692,6 +707,82 @@ func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) 
 		return strings.ToLower(accounts[i].Account) < strings.ToLower(accounts[j].Account)
 	})
 	return accounts, nil
+}
+
+// UpstreamAccountQuotas returns current quota windows per enabled Codex
+// credential. It never exposes provider tokens or credential file contents.
+func (k *Keys) UpstreamAccountQuotas(ctx context.Context) (map[string]UpstreamAccountQuota, error) {
+	typed, ok := k.CPAMP.(interface {
+		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
+		QueryQuotaSnapshots(context.Context, cpamp.QuotaSnapshotQueryRequest) (cpamp.QuotaSnapshotQueryResponse, error)
+	})
+	if !ok {
+		return nil, errors.New("CPAMP 客户端不支持额度快照")
+	}
+	files, err := typed.ListAuthFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	queries := make([]cpamp.QuotaQueryAccount, 0, len(files))
+	accountIDByRowKey := make(map[string]string, len(files))
+	for _, file := range files {
+		if !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || file.Disabled || strings.TrimSpace(file.Name) == "" {
+			continue
+		}
+		rowKey := strings.TrimSpace(file.Name) + "\x00" + strings.TrimSpace(file.AuthIndex)
+		if _, exists := accountIDByRowKey[rowKey]; exists {
+			continue
+		}
+		accountIDByRowKey[rowKey] = upstreamAccountID(file)
+		queries = append(queries, cpamp.QuotaQueryAccount{
+			RowKey: rowKey, Provider: "codex",
+			Account: cpamp.QuotaAccountTarget{
+				AccountSnapshot:       file.AccountSnapshot,
+				AuthFileSnapshot:      file.Name,
+				AuthProviderSnapshot:  "codex",
+				AuthProjectIDSnapshot: file.ProjectID,
+				AuthIndex:             file.AuthIndex,
+				Source:                file.Name,
+			},
+		})
+		if len(queries) == 200 {
+			break
+		}
+	}
+	result := make(map[string]UpstreamAccountQuota, len(queries))
+	if len(queries) == 0 {
+		return result, nil
+	}
+	now := k.Now()
+	snapshots, err := typed.QueryQuotaSnapshots(ctx, cpamp.QuotaSnapshotQueryRequest{Accounts: queries, NowMS: now.UnixMilli()})
+	if err != nil {
+		return nil, err
+	}
+	snapshots.Items = k.mergeRefreshedQuota(snapshots.Items, now)
+	for _, item := range snapshots.Items {
+		accountID := accountIDByRowKey[item.RowKey]
+		if accountID == "" {
+			continue
+		}
+		selected := currentQuotaWindows(item.Windows, now)
+		quota := UpstreamAccountQuota{AccountID: accountID}
+		for _, selection := range selected {
+			plan := strings.ToUpper(strings.TrimSpace(selection.Window.PlanType))
+			if plan == "" {
+				plan = "套餐未知"
+			}
+			quota.Windows = append(quota.Windows, UpstreamAccountQuotaWindow{
+				Period: selection.Period, PlanType: plan,
+				RemainingPercent: int(math.Round(quotaRemaining(selection.Window))),
+				ResetAt:          quotaWindowEffectiveReset(selection.Period, selection.Window, selected, now),
+				ObservedAt:       time.UnixMilli(selection.Window.ObservedAtMS).UTC(),
+			})
+		}
+		if len(quota.Windows) > 0 {
+			result[accountID] = quota
+		}
+	}
+	return result, nil
 }
 
 // SetUpstreamAccountDisabled re-resolves the submitted opaque ID immediately

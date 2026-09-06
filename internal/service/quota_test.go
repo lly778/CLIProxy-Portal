@@ -96,6 +96,50 @@ func TestUpstreamAccountStatusIsVerifiedAndInvalidatesQuota(t *testing.T) {
 	}
 }
 
+func TestUpstreamAccountQuotasMatchOpaqueAccountIdentity(t *testing.T) {
+	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "runtime-1", "physicalName": "one.json", "provider": "codex", "auth_index": "auth-1", "account": "one@example.com"}}})
+		case "/v0/management/quota-snapshots/query":
+			shortEnd := now.Add(2 * time.Hour).UnixMilli()
+			weekEnd := now.Add(3 * 24 * time.Hour).UnixMilli()
+			fiveHour, weekly := 20.0, 40.0
+			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{Items: []cpamp.QuotaSnapshotItem{{
+				RowKey: "one.json\x00auth-1", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{
+					{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &shortEnd, UsedPercent: &fiveHour, PlanType: "plus", Availability: "active"},
+					{WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &weekEnd, UsedPercent: &weekly, PlanType: "plus", Availability: "active"},
+				},
+			}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, err := cpamp.New(server.URL, "admin-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := NewKeys(nil, client)
+	keys.Now = func() time.Time { return now }
+	accounts, err := keys.UpstreamAccounts(context.Background())
+	if err != nil || len(accounts) != 1 {
+		t.Fatalf("accounts=%#v err=%v", accounts, err)
+	}
+	quotas, err := keys.UpstreamAccountQuotas(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	quota, ok := quotas[accounts[0].ID]
+	if !ok || len(quota.Windows) != 2 {
+		t.Fatalf("account quota=%#v all=%#v", quota, quotas)
+	}
+	if quota.Windows[0].Period != "five_hour" || quota.Windows[0].RemainingPercent != 80 || quota.Windows[1].Period != "weekly" || quota.Windows[1].RemainingPercent != 60 {
+		t.Fatalf("quota windows=%#v", quota.Windows)
+	}
+}
+
 func TestOAuthModelRuleMatchingDistinguishesExactAndWildcard(t *testing.T) {
 	matched, wildcard := excludedModelRule("gpt-5.6-sol", []string{"gpt-old", "gpt-5.*"})
 	if matched != "gpt-5.*" || wildcard != "gpt-5.*" {

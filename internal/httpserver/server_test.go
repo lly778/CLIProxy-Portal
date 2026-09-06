@@ -102,7 +102,10 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			oauthStatusChanges++
 			_, _ = io.WriteString(w, `{"ok":true}`)
 		case r.URL.Path == "/v0/management/quota-snapshots/query" && r.Method == http.MethodPost:
-			_ = json.NewEncoder(w).Encode(map[string]any{"generated_at_ms": time.Now().UnixMilli(), "items": []any{}})
+			now := time.Now()
+			shortEnd, weekEnd := now.Add(2*time.Hour).UnixMilli(), now.Add(3*24*time.Hour).UnixMilli()
+			fiveHour, weekly := 20.0, 40.0
+			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{GeneratedAtMS: now.UnixMilli(), Items: []cpamp.QuotaSnapshotItem{{RowKey: "plus.json\x00auth-1", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &shortEnd, UsedPercent: &fiveHour, PlanType: "plus", Availability: "active"}, {WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &weekEnd, UsedPercent: &weekly, PlanType: "plus", Availability: "active"}}}}})
 		case r.URL.Path == "/v0/management/api-call" && r.Method == http.MethodPost:
 			_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"secondary_window":{"used_percent":5,"limit_window_seconds":2592000,"reset_after_seconds":1000}}}}`)
 		case r.URL.Path == "/v0/management/quota-snapshots" && r.Method == http.MethodPost:
@@ -295,7 +298,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
 	adminRequestsPage := getBody(t, adminClient, portal.URL+"/admin/requests", http.StatusOK)
-	if !strings.Contains(adminRequestsPage, "全局请求日志") || !strings.Contains(adminRequestsPage, "最近 100 条") || !strings.Contains(adminRequestsPage, "张三") || !strings.Contains(adminRequestsPage, "gpt-test") {
+	if !strings.Contains(adminRequestsPage, "全局日志") || strings.Contains(adminRequestsPage, "全局请求日志") || !strings.Contains(adminRequestsPage, "最近 100 条") || !strings.Contains(adminRequestsPage, "张三") || !strings.Contains(adminRequestsPage, "gpt-test") {
 		t.Fatalf("admin global request page missing linked request: %s", adminRequestsPage)
 	}
 	adminSystemPage := getBody(t, adminClient, portal.URL+"/admin/system", http.StatusOK)
@@ -308,6 +311,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	upstreamsPage := getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
 	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
 		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)
+	}
+	if !strings.Contains(upstreamsPage, ">5H<") || !strings.Contains(upstreamsPage, ">7D<") || !strings.Contains(upstreamsPage, ">80%<") || !strings.Contains(upstreamsPage, ">60%<") || strings.Contains(upstreamsPage, "切换说明") {
+		t.Fatalf("admin upstream account quotas were not rendered: %s", upstreamsPage)
 	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	upstreamID := extract(t, upstreamsPage, `/admin/upstreams/([a-f0-9]{64})/status`)

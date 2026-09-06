@@ -12,6 +12,7 @@ import (
 	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/security"
+	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/webui"
 )
 
@@ -501,10 +502,19 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游账号", "admin-upstreams")}
-	accounts, err := s.Keys.UpstreamAccounts(r.Context())
-	if err != nil {
+	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context())
+	quotas := map[string]service.UpstreamAccountQuota{}
+	if accountsErr == nil {
+		var quotaErr error
+		quotas, quotaErr = s.Keys.UpstreamAccountQuotas(r.Context())
+		if quotaErr != nil {
+			v.QuotaError = "单账号额度暂时不可用"
+			s.Logger.Error("list upstream account quotas", "error", quotaErr)
+		}
+	}
+	if accountsErr != nil {
 		v.Error = "上游账号暂时不可用"
-		s.Logger.Error("list upstream accounts", "error", err)
+		s.Logger.Error("list upstream accounts", "error", accountsErr)
 	} else {
 		for _, account := range accounts {
 			row := webui.UpstreamAccountView{
@@ -514,9 +524,30 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			}
 			if account.Disabled {
 				row.StatusLabel = "已停用"
+				row.QuotaStatus = "账号已停用"
 				v.Disabled++
 			} else {
+				row.QuotaStatus = "额度等待同步"
 				v.Enabled++
+			}
+			if quota, ok := quotas[account.ID]; ok {
+				row.QuotaStatus = ""
+				for _, window := range quota.Windows {
+					label := "7D"
+					switch window.Period {
+					case "five_hour":
+						label = "5H"
+					case "monthly":
+						label = "月"
+					}
+					statusClass := "success"
+					if window.RemainingPercent < 20 {
+						statusClass = "danger"
+					} else if window.RemainingPercent < 50 {
+						statusClass = "warning"
+					}
+					row.Quotas = append(row.Quotas, webui.UpstreamAccountQuotaView{Label: label, Plan: window.PlanType, RemainingPercent: window.RemainingPercent, StatusClass: statusClass, ResetAt: s.formatTime(window.ResetAt)})
+				}
 			}
 			v.Accounts = append(v.Accounts, row)
 		}
@@ -584,10 +615,10 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	events, err := s.Keys.GlobalRequests(r.Context(), 100)
 	if err != nil {
-		s.errorPage(w, r, http.StatusBadGateway, "全局请求日志暂时不可用", err)
+		s.errorPage(w, r, http.StatusBadGateway, "全局日志暂时不可用", err)
 		return
 	}
-	v := webui.AdminRequestsView{LayoutView: s.layout(u, currentToken(r), "全局请求日志", "admin-requests"), Shown: strconv.Itoa(len(events.Items)), Total: compactNumber(events.TotalCount)}
+	v := webui.AdminRequestsView{LayoutView: s.layout(u, currentToken(r), "全局日志", "admin-requests"), Shown: strconv.Itoa(len(events.Items)), Total: compactNumber(events.TotalCount)}
 	if events.TotalCount == 0 && len(events.Items) > 0 {
 		v.Total = strconv.Itoa(len(events.Items))
 	}
