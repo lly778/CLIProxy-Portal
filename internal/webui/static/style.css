@@ -225,9 +225,6 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-action-item.danger .admin-action-icon { color: var(--danger); background: var(--danger-bg); }
 .admin-action-item.role-management { padding-block: 13px; background: #fbfcfe; }
 .admin-action-item.role-management .admin-action-icon { color: #667085; background: #eef1f5; }
-.role-management .role-action { min-height: 30px; padding: 4px 8px; color: #667085; background: transparent; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; }
-.role-management .role-action:hover { color: var(--primary); border-color: #a9bdf4; }
-.role-management .role-action.demote:hover { color: var(--danger); border-color: #e7aab2; }
 .admin-action-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .admin-action-form label { display: grid; gap: 6px; color: #475467; font-size: 11px; font-weight: 650; }
 .admin-action-form input { min-height: 40px; }
