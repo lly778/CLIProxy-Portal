@@ -58,8 +58,12 @@ func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) 
 	})
 	file := AuthFile{Name: "plus.json", Provider: "codex", AuthIndex: "auth-7", AccountID: "acct-1", AccountSnapshot: "hidden@example.com"}
 	observedAt := time.Date(2026, 8, 21, 1, 2, 3, 0, time.UTC)
-	if err := client.RefreshCodexQuotaSnapshot(context.Background(), file, observedAt); err != nil {
+	refreshed, err := client.RefreshCodexQuotaSnapshot(context.Background(), file, observedAt)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(refreshed) != 2 || refreshed[1].PlanType != "plus" {
+		t.Fatalf("refreshed windows = %#v", refreshed)
 	}
 	if apiCall["authIndex"] != "auth-7" || apiCall["method"] != "GET" {
 		t.Fatalf("api call = %#v", apiCall)

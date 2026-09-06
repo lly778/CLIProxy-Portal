@@ -31,6 +31,7 @@ type Keys struct {
 	quota           quotaPoolCache
 	refreshMu       sync.Mutex
 	refresh         QuotaRefreshStatus
+	refreshedQuota  map[string][]cpamp.QuotaSnapshotWindow
 	reconcileMu     sync.Mutex
 	lastSeenSyncAt  time.Time
 	RefreshCooldown time.Duration
@@ -87,7 +88,8 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 	return &Keys{
 		Store: st, CPAMP: api, Now: func() time.Time { return time.Now().UTC() },
 		CacheTTL: 2 * time.Minute, RefreshCooldown: time.Minute, RefreshTimeout: 3 * time.Minute,
-		cache: make(map[string]analyticsCache),
+		cache:          make(map[string]analyticsCache),
+		refreshedQuota: make(map[string][]cpamp.QuotaSnapshotWindow),
 	}
 }
 
@@ -97,7 +99,7 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 func (k *Keys) StartQuotaRefresh() (QuotaRefreshStatus, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-		RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) error
+		RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.QuotaSnapshotWindow, error)
 	})
 	if !ok {
 		return QuotaRefreshStatus{}, errors.New("CPAMP 客户端不支持手动刷新额度")
@@ -139,7 +141,7 @@ func (k *Keys) QuotaRefreshStatus() QuotaRefreshStatus {
 
 func (k *Keys) runQuotaRefresh(client interface {
 	ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-	RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) error
+	RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.QuotaSnapshotWindow, error)
 }, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -173,7 +175,9 @@ func (k *Keys) runQuotaRefresh(client interface {
 		if ctx.Err() != nil {
 			break
 		}
-		if err := client.RefreshCodexQuotaSnapshot(ctx, file, k.Now()); err == nil {
+		windows, err := client.RefreshCodexQuotaSnapshot(ctx, file, k.Now())
+		if err == nil {
+			k.putRefreshedQuota(strings.TrimSpace(file.Name)+"\x00"+strings.TrimSpace(file.AuthIndex), windows)
 			succeeded++
 		}
 	}
@@ -189,6 +193,45 @@ func (k *Keys) runQuotaRefresh(client interface {
 		message = "额度刷新失败，请稍后再试"
 	}
 	k.finishQuotaRefresh(succeeded, failed, message)
+}
+
+func (k *Keys) putRefreshedQuota(rowKey string, windows []cpamp.QuotaSnapshotWindow) {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+	if k.refreshedQuota == nil {
+		k.refreshedQuota = make(map[string][]cpamp.QuotaSnapshotWindow)
+	}
+	k.refreshedQuota[rowKey] = append([]cpamp.QuotaSnapshotWindow(nil), windows...)
+}
+
+func (k *Keys) mergeRefreshedQuota(items []cpamp.QuotaSnapshotItem, now time.Time) []cpamp.QuotaSnapshotItem {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+	if len(k.refreshedQuota) == 0 {
+		return items
+	}
+	byRowKey := make(map[string]int, len(items))
+	for index := range items {
+		byRowKey[items[index].RowKey] = index
+	}
+	for rowKey, windows := range k.refreshedQuota {
+		active := make([]cpamp.QuotaSnapshotWindow, 0, len(windows))
+		for _, window := range windows {
+			if window.CycleEndMS == nil || *window.CycleEndMS > now.UnixMilli() {
+				active = append(active, window)
+			}
+		}
+		if len(active) == 0 {
+			delete(k.refreshedQuota, rowKey)
+			continue
+		}
+		if index, ok := byRowKey[rowKey]; ok {
+			items[index].Windows = append(items[index].Windows, active...)
+			continue
+		}
+		items = append(items, cpamp.QuotaSnapshotItem{RowKey: rowKey, Provider: "codex", Windows: active})
+	}
+	return items
 }
 
 func (k *Keys) finishQuotaRefresh(succeeded, failed int, message string) {
@@ -608,6 +651,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	if err != nil {
 		return pool, err
 	}
+	result.Items = k.mergeRefreshedQuota(result.Items, now)
 	type quotaAccumulator struct {
 		group          UpstreamQuotaGroup
 		remainingTotal float64
@@ -690,7 +734,8 @@ func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow, now time.Time) []q
 			continue
 		}
 		current, ok := selected[period]
-		if !ok || window.ObservedAtMS > current.ObservedAtMS {
+		if !ok || window.ObservedAtMS > current.ObservedAtMS ||
+			(window.ObservedAtMS == current.ObservedAtMS && current.Stale && !window.Stale) {
 			selected[period] = window
 		}
 	}

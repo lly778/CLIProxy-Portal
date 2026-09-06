@@ -58,10 +58,10 @@ type quotaRefreshEntry struct {
 // through CPAMP's read-only api-call proxy, then stores only the returned main
 // rate-limit windows as a partial quota observation. It never starts CPAMP's
 // credential inspection workflow and therefore cannot run inspection actions.
-func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, observedAt time.Time) error {
+func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, observedAt time.Time) ([]QuotaSnapshotWindow, error) {
 	authIndex := strings.TrimSpace(file.AuthIndex)
 	if authIndex == "" {
-		return errors.New("cpamp Codex auth file is missing auth index")
+		return nil, errors.New("cpamp Codex auth file is missing auth index")
 	}
 	if observedAt.IsZero() {
 		observedAt = time.Now().UTC()
@@ -81,11 +81,11 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 		"header":    headers,
 	})
 	if err != nil {
-		return errors.New("cpamp quota refresh request encoding failed")
+		return nil, errors.New("cpamp quota refresh request encoding failed")
 	}
 	body, err := c.do(ctx, http.MethodPost, pathAPICall, requestBody, c.adminHeader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var envelope struct {
 		StatusCode      int             `json:"status_code"`
@@ -93,24 +93,24 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 		Body            json.RawMessage `json:"body"`
 	}
 	if err := decodeJSON(pathAPICall, body, &envelope); err != nil {
-		return err
+		return nil, err
 	}
 	statusCode := envelope.StatusCode
 	if statusCode == 0 {
 		statusCode = envelope.StatusCodeCamel
 	}
 	if statusCode < 200 || statusCode >= 300 {
-		return &HTTPError{Operation: pathAPICall + " upstream", StatusCode: statusCode}
+		return nil, &HTTPError{Operation: pathAPICall + " upstream", StatusCode: statusCode}
 	}
 	payload, err := decodeNestedObject(envelope.Body)
 	if err != nil {
-		return errors.New("cpamp quota refresh returned an invalid response")
+		return nil, errors.New("cpamp quota refresh returned an invalid response")
 	}
 	observedAtMS := observedAt.UTC().UnixMilli()
 	observationID := quotaObservationID(file, observedAtMS)
 	windows := buildMainCodexWindows(payload, observedAt, observationID)
 	if len(windows) == 0 {
-		return ErrNoQuotaWindows
+		return nil, ErrNoQuotaWindows
 	}
 	target := QuotaAccountTarget{
 		AccountSnapshot:       file.AccountSnapshot,
@@ -135,10 +135,28 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 	}
 	writeBody, err := json.Marshal(map[string]any{"entries": []quotaRefreshEntry{entry}})
 	if err != nil {
-		return errors.New("cpamp quota snapshot encoding failed")
+		return nil, errors.New("cpamp quota snapshot encoding failed")
 	}
 	_, err = c.do(ctx, http.MethodPost, pathQuotaWrite, writeBody, c.adminHeader)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	refreshed := make([]QuotaSnapshotWindow, 0, len(windows))
+	for _, window := range windows {
+		refreshed = append(refreshed, QuotaSnapshotWindow{
+			ProviderWindowID: window.ProviderWindowID,
+			WindowKind:       window.WindowKind,
+			ModelScopeKind:   window.ModelScopeKind,
+			ObservedAtMS:     window.ObservedAtMS,
+			CycleEndMS:       window.CycleEndMS,
+			DurationSeconds:  window.DurationSeconds,
+			UsedPercent:      window.UsedPercent,
+			RemainingPercent: window.RemainingPercent,
+			PlanType:         window.PlanType,
+			Availability:     "active",
+		})
+	}
+	return refreshed, nil
 }
 
 func decodeNestedObject(raw json.RawMessage) (map[string]any, error) {

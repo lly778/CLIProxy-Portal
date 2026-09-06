@@ -146,6 +146,21 @@ func TestCurrentQuotaWindowsAcceptsFreshValueWithObsoleteBoundary(t *testing.T) 
 	}
 }
 
+func TestCurrentQuotaWindowsPrefersLiveRefreshAtSameObservationTime(t *testing.T) {
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	used := 64.0
+	duration := int64(7 * 24 * 60 * 60)
+	oldEnd := now.Add(-5 * 24 * time.Hour).UnixMilli()
+	newEnd := now.Add(23 * time.Hour).UnixMilli()
+	windows := currentQuotaWindows([]cpamp.QuotaSnapshotWindow{
+		{ProviderWindowID: "weekly", WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &oldEnd, DurationSeconds: &duration, UsedPercent: &used, Stale: true, Availability: "active"},
+		{ProviderWindowID: "weekly", WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &newEnd, DurationSeconds: &duration, UsedPercent: &used, Availability: "active"},
+	}, now)
+	if len(windows) != 1 || windows[0].Window.CycleEndMS == nil || *windows[0].Window.CycleEndMS != newEnd {
+		t.Fatalf("windows = %#v", windows)
+	}
+}
+
 func TestCurrentQuotaWindowsRejectsActuallyExpiredStaleValue(t *testing.T) {
 	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	used := 93.0
