@@ -471,6 +471,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }
 .detail-hero-main { flex: 1; min-width: 200px; }
 .detail-hero-main p { margin: 8px 0; color: var(--muted); }
+@media (min-width: 761px) {
+  .detail-hero .suspend-action { flex-wrap: nowrap; }
+  .detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }
+}
 .health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .health-card-head { display: flex; gap: 8px; align-items: center; }
 .health-card-head h2 { flex: 1; margin: 0; font-size: 15px; }
