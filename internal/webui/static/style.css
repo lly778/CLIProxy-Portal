@@ -465,7 +465,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
 .audit-result-cell { width: 1%; min-width: 100px; }
-.audit-detail-cell { width: 280px; max-width: 320px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
 .request-log-table table { min-width: 0; table-layout: fixed; }
 .request-log-table th, .request-log-table td { padding-right: 10px; padding-left: 10px; overflow: hidden; text-overflow: ellipsis; }
 .request-log-table th:nth-child(1) { width: 13%; }
@@ -487,6 +486,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .detail-hero .suspend-actions { align-self: center; }
   .detail-hero .suspend-action { flex-wrap: nowrap; }
   .detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }
+  .audit-detail-cell { width: 280px; max-width: 320px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
 }
 .health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .health-card-head { display: flex; gap: 8px; align-items: center; }
