@@ -542,6 +542,12 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .filter-inline, .filter-bar { align-items: stretch; }
   .filter-inline > *, .filter-bar > * { flex: 1 1 auto; width: 100% !important; }
   .filter-inline > span, .filter-bar > span { flex: 0 0 auto; width: auto !important; align-self: center; }
+  .request-log-table table { min-width: 1120px; table-layout: auto; }
+  .request-log-table th { width: auto !important; }
+  .request-log-table .request-status-cell, .request-detail-table .request-status-cell { width: 190px; min-width: 190px; }
+  .request-detail-table table { min-width: 980px; }
+  .audit-table table { min-width: 900px; }
+  .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td, .audit-table th, .audit-table td { padding: 10px 12px; }
   .usage-trend-head { gap: 12px; margin-bottom: 14px; }
   .usage-line-chart { min-height: 220px; }
   .usage-line-chart svg { min-width: 0; min-height: 220px; }
