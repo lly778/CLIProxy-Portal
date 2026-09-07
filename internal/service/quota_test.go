@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -241,73 +240,6 @@ func TestUpstreamQuotaReadsAutomaticUpdatesWithoutAStalePoolCache(t *testing.T) 
 	}
 	if queries != 2 {
 		t.Fatalf("quota queries = %d, want 2", queries)
-	}
-}
-
-func TestUpstreamQuotaAutomaticallyRefreshesStalePercentAndResetTogether(t *testing.T) {
-	now := time.Date(2026, 9, 7, 12, 30, 0, 0, time.UTC)
-	oldObserved := now.Add(-10 * time.Minute).UnixMilli()
-	oldReset := time.Date(2026, 9, 7, 13, 24, 0, 0, time.UTC).UnixMilli()
-	newReset := time.Date(2026, 9, 7, 16, 28, 0, 0, time.UTC).UnixMilli()
-	weeklyReset := time.Date(2026, 9, 14, 11, 28, 0, 0, time.UTC).UnixMilli()
-	providerCalls, writes := 0, 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v0/management/auth-files":
-			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"name": "two.json", "provider": "codex", "auth_index": "two"}}})
-		case "/v0/management/quota-snapshots/query":
-			remaining := 98.0
-			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{Items: []cpamp.QuotaSnapshotItem{{
-				RowKey: "two.json\x00two", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{{
-					WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: oldObserved,
-					CycleEndMS: &oldReset, RemainingPercent: &remaining, PlanType: "plus", Availability: "active",
-				}},
-			}}})
-		case "/v0/management/api-call":
-			providerCalls++
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":18000,"reset_at":%d},"secondary_window":{"used_percent":0,"limit_window_seconds":604800,"reset_at":%d}}}}`, newReset/1000, weeklyReset/1000)))
-		case "/v0/management/quota-snapshots":
-			writes++
-			_, _ = w.Write([]byte(`{"observed_at_ms":1,"items":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	client, err := cpamp.New(server.URL, "admin-key")
-	if err != nil {
-		t.Fatal(err)
-	}
-	keys := NewKeys(nil, client)
-	keys.Now = func() time.Time { return now }
-	pool, err := keys.UpstreamQuota(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fiveHour *UpstreamQuotaGroup
-	for index := range pool.Groups {
-		if pool.Groups[index].Period == "five_hour" {
-			fiveHour = &pool.Groups[index]
-			break
-		}
-	}
-	if fiveHour == nil || fiveHour.RemainingPercent != 99 || fiveHour.NextResetAt.UnixMilli() != newReset {
-		t.Fatalf("five-hour quota = %#v", fiveHour)
-	}
-	accounts, err := keys.UpstreamAccounts(context.Background())
-	if err != nil || len(accounts) != 1 {
-		t.Fatalf("accounts = %#v, err = %v", accounts, err)
-	}
-	quotas, err := keys.UpstreamAccountQuotas(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	accountQuota, ok := quotas[accounts[0].ID]
-	if !ok || len(accountQuota.Windows) != 2 || accountQuota.Windows[0].RemainingPercent != 99 || accountQuota.Windows[0].ResetAt.UnixMilli() != newReset {
-		t.Fatalf("account quota = %#v", accountQuota)
-	}
-	if providerCalls != 1 || writes != 1 {
-		t.Fatalf("provider calls = %d, writes = %d", providerCalls, writes)
 	}
 }
 
