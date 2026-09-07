@@ -29,7 +29,6 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var aliases []cpamp.APIKeyAlias
 	var aliasActiveHashes []string
 	var aliasCleanup bool
-	var quotaWrites int
 	var modelCalls int
 	var modelCatalogReads int
 	var lastSeenMS int64
@@ -101,16 +100,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			oauthExcluded = nil
 			oauthStatusChanges++
 			_, _ = io.WriteString(w, `{"ok":true}`)
-		case r.URL.Path == "/v0/management/quota-snapshots/query" && r.Method == http.MethodPost:
-			now := time.Now()
-			shortEnd, weekEnd := now.Add(2*time.Hour).UnixMilli(), now.Add(3*24*time.Hour).UnixMilli()
-			fiveHour, weekly := 20.0, 40.0
-			_ = json.NewEncoder(w).Encode(cpamp.QuotaSnapshotQueryResponse{GeneratedAtMS: now.UnixMilli(), Items: []cpamp.QuotaSnapshotItem{{RowKey: "plus.json\x00auth-1", Provider: "codex", Windows: []cpamp.QuotaSnapshotWindow{{WindowKind: "five_hour", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &shortEnd, UsedPercent: &fiveHour, PlanType: "plus", Availability: "active"}, {WindowKind: "weekly", ModelScopeKind: "all", ObservedAtMS: now.UnixMilli(), CycleEndMS: &weekEnd, UsedPercent: &weekly, PlanType: "plus", Availability: "active"}}}}})
 		case r.URL.Path == "/v0/management/api-call" && r.Method == http.MethodPost:
-			_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"secondary_window":{"used_percent":5,"limit_window_seconds":2592000,"reset_after_seconds":1000}}}}`)
-		case r.URL.Path == "/v0/management/quota-snapshots" && r.Method == http.MethodPost:
-			quotaWrites++
-			_, _ = io.WriteString(w, `{"observed_at_ms":1,"items":[]}`)
+			_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":7200},"secondary_window":{"used_percent":40,"limit_window_seconds":604800,"reset_after_seconds":259200}}}}`)
+		case (r.URL.Path == "/v0/management/quota-snapshots" || r.URL.Path == "/v0/management/quota-snapshots/query") && r.Method == http.MethodPost:
+			t.Errorf("portal unexpectedly called quota snapshot endpoint %s", r.URL.Path)
+			http.Error(w, "snapshot endpoint disabled", http.StatusInternalServerError)
 		case r.URL.Path == "/v0/management/monitoring/analytics" && r.Method == http.MethodPost:
 			var req cpamp.AnalyticsRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -226,20 +220,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	csrf = extract(t, dashboard, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, client, portal.URL+"/quota/refresh", url.Values{"csrf_token": {csrf}, "next": {"/dashboard"}}, http.StatusSeeOther)
 	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		written := quotaWrites
-		mu.Unlock()
-		if written == 1 {
-			break
-		}
+	for keysService.QuotaRefreshStatus().Running && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	mu.Lock()
-	written := quotaWrites
-	mu.Unlock()
-	if written != 1 {
-		t.Fatalf("quota snapshot writes = %d", written)
+	if status := keysService.QuotaRefreshStatus(); status.Running || status.Succeeded != 1 {
+		t.Fatalf("quota refresh status = %#v", status)
 	}
 	keyPage := getBody(t, client, portal.URL+"/key", http.StatusOK)
 	csrf = extract(t, keyPage, `name="csrf_token" value="([^"]+)"`)

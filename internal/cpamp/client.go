@@ -36,7 +36,6 @@ const (
 	pathModelDefinitions = "/v0/management/model-definitions"
 	pathAliases          = "/v0/management/api-key-aliases"
 	pathAnalytics        = "/v0/management/monitoring/analytics"
-	pathQuotaQuery       = "/v0/management/quota-snapshots/query"
 	pathModelCatalog     = "/v1/models"
 )
 
@@ -273,30 +272,7 @@ type OAuthModelDefinition struct {
 	DisplayName string
 }
 
-// QuotaAccountTarget is CPAMP's credential identity envelope. Callers should
-// only populate fields returned by the auth-file metadata endpoint.
-type QuotaAccountTarget struct {
-	AccountSnapshot       string `json:"account_snapshot,omitempty"`
-	AuthFileSnapshot      string `json:"auth_file_snapshot,omitempty"`
-	AuthProviderSnapshot  string `json:"auth_provider_snapshot,omitempty"`
-	AuthProjectIDSnapshot string `json:"auth_project_id_snapshot,omitempty"`
-	AuthIndex             string `json:"auth_index,omitempty"`
-	Source                string `json:"source,omitempty"`
-}
-
-type QuotaQueryAccount struct {
-	RowKey   string             `json:"row_key"`
-	Provider string             `json:"provider"`
-	Account  QuotaAccountTarget `json:"account"`
-}
-
-type QuotaSnapshotQueryRequest struct {
-	Accounts        []QuotaQueryAccount `json:"accounts"`
-	NowMS           int64               `json:"now_ms,omitempty"`
-	IncludeInactive bool                `json:"include_inactive,omitempty"`
-}
-
-type QuotaSnapshotWindow struct {
+type CodexQuotaWindow struct {
 	ProviderWindowID string   `json:"provider_window_id"`
 	WindowKind       string   `json:"window_kind"`
 	ModelScopeKind   string   `json:"model_scope_kind"`
@@ -306,19 +282,7 @@ type QuotaSnapshotWindow struct {
 	UsedPercent      *float64 `json:"used_percent,omitempty"`
 	RemainingPercent *float64 `json:"remaining_percent,omitempty"`
 	PlanType         string   `json:"plan_type,omitempty"`
-	Stale            bool     `json:"stale"`
 	Availability     string   `json:"availability,omitempty"`
-}
-
-type QuotaSnapshotItem struct {
-	RowKey   string                `json:"row_key"`
-	Provider string                `json:"provider"`
-	Windows  []QuotaSnapshotWindow `json:"windows"`
-}
-
-type QuotaSnapshotQueryResponse struct {
-	GeneratedAtMS int64               `json:"generated_at_ms"`
-	Items         []QuotaSnapshotItem `json:"items"`
 }
 
 // AnalyticsRequest selects a CPAMP monitoring analytics query. FromMS and
@@ -841,33 +805,6 @@ func rawNestedText(record map[string]json.RawMessage, parent string, keys ...str
 		return ""
 	}
 	return rawText(nested, keys...)
-}
-
-// QueryQuotaSnapshots reads CPAMP's persisted, allowlisted provider quota
-// observations. It does not query provider tokens or auth-file contents.
-func (c *Client) QueryQuotaSnapshots(ctx context.Context, req QuotaSnapshotQueryRequest) (QuotaSnapshotQueryResponse, error) {
-	if len(req.Accounts) == 0 {
-		return QuotaSnapshotQueryResponse{}, errors.New("cpamp quota query requires accounts")
-	}
-	if len(req.Accounts) > 200 {
-		return QuotaSnapshotQueryResponse{}, errors.New("cpamp quota query supports at most 200 accounts")
-	}
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return QuotaSnapshotQueryResponse{}, fmt.Errorf("cpamp %s request encoding failed", pathQuotaQuery)
-	}
-	body, err := c.do(ctx, http.MethodPost, pathQuotaQuery, payload, c.adminHeader)
-	if err != nil {
-		return QuotaSnapshotQueryResponse{}, err
-	}
-	var result QuotaSnapshotQueryResponse
-	if err := decodeJSON(pathQuotaQuery, body, &result); err != nil {
-		return QuotaSnapshotQueryResponse{}, err
-	}
-	if result.Items == nil {
-		result.Items = []QuotaSnapshotItem{}
-	}
-	return result, nil
 }
 
 func rawText(record map[string]json.RawMessage, keys ...string) string {

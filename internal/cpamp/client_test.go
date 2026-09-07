@@ -34,9 +34,9 @@ func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.S
 	return client, server
 }
 
-func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) {
+func TestFetchCodexQuotaReadsProviderWithoutSnapshotCalls(t *testing.T) {
 	var apiCall map[string]any
-	var snapshot map[string]any
+	var snapshotCalls int
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer "+testAdminKey {
 			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
@@ -47,18 +47,16 @@ func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) 
 				t.Errorf("decode api call: %v", err)
 			}
 			_, _ = io.WriteString(w, `{"status_code":200,"body":{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":20,"limit_window_seconds":18000,"reset_after_seconds":3600},"secondary_window":{"used_percent":5,"limit_window_seconds":2592000,"reset_at":1787500000}}}}`)
-		case pathQuotaWrite:
-			if err := json.NewDecoder(r.Body).Decode(&snapshot); err != nil {
-				t.Errorf("decode snapshot: %v", err)
-			}
-			_, _ = io.WriteString(w, `{"observed_at_ms":1,"items":[]}`)
+		case "/v0/management/quota-snapshots", "/v0/management/quota-snapshots/query":
+			snapshotCalls++
+			http.Error(w, "snapshot endpoint must not be called", http.StatusInternalServerError)
 		default:
 			http.NotFound(w, r)
 		}
 	})
 	file := AuthFile{Name: "plus.json", Provider: "codex", AuthIndex: "auth-7", AccountID: "acct-1", AccountSnapshot: "hidden@example.com"}
 	observedAt := time.Date(2026, 8, 21, 1, 2, 3, 0, time.UTC)
-	refreshed, err := client.RefreshCodexQuotaSnapshot(context.Background(), file, observedAt)
+	refreshed, err := client.FetchCodexQuota(context.Background(), file, observedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,33 +70,31 @@ func TestRefreshCodexQuotaSnapshotWritesMonthlyPartialObservation(t *testing.T) 
 	if !ok || headers["Chatgpt-Account-Id"] != "acct-1" || headers["Authorization"] != "Bearer $TOKEN$" {
 		t.Fatalf("api call headers = %#v", apiCall["header"])
 	}
-	entries, ok := snapshot["entries"].([]any)
-	if !ok || len(entries) != 1 {
-		t.Fatalf("snapshot entries = %#v", snapshot["entries"])
+	if snapshotCalls != 0 {
+		t.Fatalf("snapshot calls = %d", snapshotCalls)
 	}
-	entry := entries[0].(map[string]any)
-	observation := entry["observation"].(map[string]any)
-	if observation["inventory_mode"] != "partial" || observation["source"] != "api_query" {
-		t.Fatalf("observation = %#v", observation)
-	}
-	windows := entry["windows"].([]any)
-	if len(windows) != 2 {
-		t.Fatalf("windows = %#v", windows)
-	}
-	monthly := windows[1].(map[string]any)
-	if monthly["provider_window_id"] != "monthly" || monthly["window_kind"] != "monthly" || monthly["remaining_percent"] != float64(95) || monthly["plan_type"] != "plus" {
-		t.Fatalf("monthly window = %#v", monthly)
+	if refreshed[1].WindowKind != "monthly" || refreshed[1].RemainingPercent == nil || *refreshed[1].RemainingPercent != 95 || refreshed[1].CycleEndMS == nil || *refreshed[1].CycleEndMS != int64(1787500000)*1000 {
+		t.Fatalf("monthly window = %#v", refreshed[1])
 	}
 }
 
 func TestQuotaResetEndPrefersLiveCountdownOverExpiredTimestamp(t *testing.T) {
 	observedAt := time.Date(2026, 9, 6, 19, 27, 0, 0, time.UTC)
-	end, accuracy, ok := quotaResetEnd(map[string]any{
+	end, ok := quotaResetEnd(map[string]any{
 		"reset_at":            float64(observedAt.Add(-5 * 24 * time.Hour).Unix()),
 		"reset_after_seconds": float64(15 * 60 * 60),
 	}, observedAt)
-	if !ok || accuracy != "derived" || end != observedAt.Add(15*time.Hour).UnixMilli() {
-		t.Fatalf("quotaResetEnd() = (%d, %q, %v)", end, accuracy, ok)
+	if !ok || end != observedAt.Add(15*time.Hour).UnixMilli() {
+		t.Fatalf("quotaResetEnd() = (%d, %v)", end, ok)
+	}
+}
+
+func TestQuotaResetEndAcceptsMillisecondTimestamp(t *testing.T) {
+	observedAt := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	want := observedAt.Add(3*time.Hour + 28*time.Minute).UnixMilli()
+	end, ok := quotaResetEnd(map[string]any{"reset_at": float64(want)}, observedAt)
+	if !ok || end != want {
+		t.Fatalf("quotaResetEnd() = (%d, %v), want (%d, true)", end, ok, want)
 	}
 }
 
@@ -326,24 +322,14 @@ func TestListModelsUsesCPAAPIKey(t *testing.T) {
 	}
 }
 
-func TestQuotaSnapshotMetadataFlow(t *testing.T) {
+func TestAuthFileMetadataFlow(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		requireAdmin(t, r)
-		switch r.URL.Path {
-		case pathAuthFiles:
-			_, _ = io.WriteString(w, `{"files":[{"id":"runtime-7","physicalName":"codex.json","provider":"codex","auth_index":7,"account":"hidden@example.com","metadata":{"chatgpt_account_id":"acct-nested"}},{"name":"off.json","type":"codex","authIndex":"8","disabled":true}]}`)
-		case pathQuotaQuery:
-			var request QuotaSnapshotQueryRequest
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				t.Fatalf("decode quota query: %v", err)
-			}
-			if len(request.Accounts) != 1 || request.Accounts[0].Account.AuthIndex != "7" {
-				t.Fatalf("quota query = %#v", request)
-			}
-			_, _ = io.WriteString(w, `{"generated_at_ms":1000,"items":[{"row_key":"row-1","provider":"codex","windows":[{"provider_window_id":"weekly","window_kind":"weekly","model_scope_kind":"all","observed_at_ms":900,"cycle_end_ms":2000,"used_percent":5,"plan_type":"plus","stale":false,"availability":"active"}]}]}`)
-		default:
+		if r.URL.Path != pathAuthFiles {
 			http.NotFound(w, r)
+			return
 		}
+		_, _ = io.WriteString(w, `{"files":[{"id":"runtime-7","physicalName":"codex.json","provider":"codex","auth_index":7,"account":"hidden@example.com","metadata":{"chatgpt_account_id":"acct-nested"}},{"name":"off.json","type":"codex","authIndex":"8","disabled":true}]}`)
 	})
 	files, err := client.ListAuthFiles(context.Background())
 	if err != nil {
@@ -351,13 +337,6 @@ func TestQuotaSnapshotMetadataFlow(t *testing.T) {
 	}
 	if len(files) != 2 || files[0].RuntimeID != "runtime-7" || files[0].AuthIndex != "7" || files[0].AccountSnapshot != "hidden@example.com" || files[0].AccountID != "acct-nested" || !files[1].Disabled {
 		t.Fatalf("auth files = %#v", files)
-	}
-	result, err := client.QueryQuotaSnapshots(context.Background(), QuotaSnapshotQueryRequest{Accounts: []QuotaQueryAccount{{RowKey: "row-1", Provider: "codex", Account: QuotaAccountTarget{AuthFileSnapshot: files[0].Name, AuthIndex: files[0].AuthIndex}}}})
-	if err != nil {
-		t.Fatalf("query quota snapshots: %v", err)
-	}
-	if len(result.Items) != 1 || len(result.Items[0].Windows) != 1 || result.Items[0].Windows[0].UsedPercent == nil || *result.Items[0].Windows[0].UsedPercent != 5 {
-		t.Fatalf("quota result = %#v", result)
 	}
 }
 

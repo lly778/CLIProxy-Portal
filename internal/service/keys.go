@@ -31,7 +31,8 @@ type Keys struct {
 	quota           quotaPoolCache
 	refreshMu       sync.Mutex
 	refresh         QuotaRefreshStatus
-	refreshedQuota  map[string][]cpamp.QuotaSnapshotWindow
+	refreshedQuota  map[string][]cpamp.CodexQuotaWindow
+	quotaFetchMu    sync.Mutex
 	reconcileMu     sync.Mutex
 	lastSeenSyncAt  time.Time
 	RefreshCooldown time.Duration
@@ -48,9 +49,14 @@ type quotaPoolCache struct {
 	expiresAt time.Time
 }
 
-// UpstreamQuotaPool is a privacy-preserving summary of CPAMP's persisted
-// provider quota snapshots. Percentages are account-weighted because provider
-// plans do not expose a common absolute token capacity.
+type directQuotaItem struct {
+	RowKey  string
+	Windows []cpamp.CodexQuotaWindow
+}
+
+// UpstreamQuotaPool is a privacy-preserving summary of current provider quota.
+// Percentages are account-weighted because provider plans do not expose a
+// common absolute token capacity.
 type UpstreamQuotaPool struct {
 	Provider       string
 	TotalAccounts  int
@@ -126,7 +132,7 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 		Store: st, CPAMP: api, Now: func() time.Time { return time.Now().UTC() },
 		CacheTTL: 2 * time.Minute, RefreshCooldown: time.Minute, RefreshTimeout: 3 * time.Minute,
 		cache:          make(map[string]analyticsCache),
-		refreshedQuota: make(map[string][]cpamp.QuotaSnapshotWindow),
+		refreshedQuota: make(map[string][]cpamp.CodexQuotaWindow),
 	}
 }
 
@@ -136,7 +142,7 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 func (k *Keys) StartQuotaRefresh() (QuotaRefreshStatus, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-		RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.QuotaSnapshotWindow, error)
+		FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 	})
 	if !ok {
 		return QuotaRefreshStatus{}, errors.New("CPAMP 客户端不支持手动刷新额度")
@@ -178,10 +184,12 @@ func (k *Keys) QuotaRefreshStatus() QuotaRefreshStatus {
 
 func (k *Keys) runQuotaRefresh(client interface {
 	ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-	RefreshCodexQuotaSnapshot(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.QuotaSnapshotWindow, error)
+	FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 }, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	k.quotaFetchMu.Lock()
+	defer k.quotaFetchMu.Unlock()
 	files, err := client.ListAuthFiles(ctx)
 	if err != nil {
 		k.finishQuotaRefresh(0, 0, "无法读取上游账号，请稍后再试")
@@ -212,7 +220,7 @@ func (k *Keys) runQuotaRefresh(client interface {
 		if ctx.Err() != nil {
 			break
 		}
-		windows, err := client.RefreshCodexQuotaSnapshot(ctx, file, k.Now())
+		windows, err := client.FetchCodexQuota(ctx, file, k.Now())
 		if err == nil {
 			k.putRefreshedQuota(strings.TrimSpace(file.Name)+"\x00"+strings.TrimSpace(file.AuthIndex), windows)
 			succeeded++
@@ -232,29 +240,26 @@ func (k *Keys) runQuotaRefresh(client interface {
 	k.finishQuotaRefresh(succeeded, failed, message)
 }
 
-func (k *Keys) putRefreshedQuota(rowKey string, windows []cpamp.QuotaSnapshotWindow) {
+func (k *Keys) putRefreshedQuota(rowKey string, windows []cpamp.CodexQuotaWindow) {
 	k.refreshMu.Lock()
 	defer k.refreshMu.Unlock()
 	if k.refreshedQuota == nil {
-		k.refreshedQuota = make(map[string][]cpamp.QuotaSnapshotWindow)
+		k.refreshedQuota = make(map[string][]cpamp.CodexQuotaWindow)
 	}
-	k.refreshedQuota[rowKey] = append([]cpamp.QuotaSnapshotWindow(nil), windows...)
+	k.refreshedQuota[rowKey] = append([]cpamp.CodexQuotaWindow(nil), windows...)
 }
 
-func (k *Keys) mergeRefreshedQuota(items []cpamp.QuotaSnapshotItem, now time.Time) []cpamp.QuotaSnapshotItem {
+func (k *Keys) currentRefreshedQuota(now time.Time) []directQuotaItem {
 	k.refreshMu.Lock()
 	defer k.refreshMu.Unlock()
 	if len(k.refreshedQuota) == 0 {
-		return items
+		return nil
 	}
-	byRowKey := make(map[string]int, len(items))
-	for index := range items {
-		byRowKey[items[index].RowKey] = index
-	}
+	items := make([]directQuotaItem, 0, len(k.refreshedQuota))
 	for rowKey, windows := range k.refreshedQuota {
-		active := make([]cpamp.QuotaSnapshotWindow, 0, len(windows))
+		active := make([]cpamp.CodexQuotaWindow, 0, len(windows))
 		for _, window := range windows {
-			if window.CycleEndMS == nil || *window.CycleEndMS > now.UnixMilli() {
+			if quotaRefreshWindowFresh(window, now, k.CacheTTL) {
 				active = append(active, window)
 			}
 		}
@@ -262,13 +267,80 @@ func (k *Keys) mergeRefreshedQuota(items []cpamp.QuotaSnapshotItem, now time.Tim
 			delete(k.refreshedQuota, rowKey)
 			continue
 		}
-		if index, ok := byRowKey[rowKey]; ok {
-			items[index].Windows = append(items[index].Windows, active...)
-			continue
-		}
-		items = append(items, cpamp.QuotaSnapshotItem{RowKey: rowKey, Provider: "codex", Windows: active})
+		items = append(items, directQuotaItem{RowKey: rowKey, Windows: active})
 	}
 	return items
+}
+
+func quotaRefreshWindowFresh(window cpamp.CodexQuotaWindow, now time.Time, ttl time.Duration) bool {
+	if window.ObservedAtMS <= 0 || window.ObservedAtMS > now.UnixMilli() {
+		return false
+	}
+	if ttl <= 0 {
+		return window.ObservedAtMS == now.UnixMilli()
+	}
+	return now.UnixMilli()-window.ObservedAtMS <= ttl.Milliseconds()
+}
+
+// refreshCurrentCodexQuota reads current provider values through CPAMP's
+// read-only API proxy. A short in-process cache prevents the account and
+// shared-pool views from issuing duplicate provider requests.
+func (k *Keys) refreshCurrentCodexQuota(ctx context.Context, client interface {
+	FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
+}, files []cpamp.AuthFile, now time.Time) int {
+	k.quotaFetchMu.Lock()
+	defer k.quotaFetchMu.Unlock()
+
+	succeeded := 0
+	seen := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if file.Disabled || !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || strings.TrimSpace(file.Name) == "" {
+			continue
+		}
+		rowKey := strings.TrimSpace(file.Name) + "\x00" + strings.TrimSpace(file.AuthIndex)
+		if _, exists := seen[rowKey]; exists {
+			continue
+		}
+		seen[rowKey] = struct{}{}
+		if k.hasFreshRefreshedQuota(rowKey, now) {
+			continue
+		}
+		windows, err := client.FetchCodexQuota(ctx, file, now)
+		if err != nil {
+			k.dropRefreshedQuota(rowKey)
+			continue
+		}
+		k.putRefreshedQuota(rowKey, windows)
+		succeeded++
+		if len(seen) == 200 || ctx.Err() != nil {
+			break
+		}
+	}
+	if succeeded > 0 {
+		k.invalidateQuota()
+	}
+	return succeeded
+}
+
+func (k *Keys) hasFreshRefreshedQuota(rowKey string, now time.Time) bool {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+	windows := k.refreshedQuota[rowKey]
+	if len(windows) == 0 {
+		return false
+	}
+	for _, window := range windows {
+		if !quotaRefreshWindowFresh(window, now, k.CacheTTL) {
+			return false
+		}
+	}
+	return true
+}
+
+func (k *Keys) dropRefreshedQuota(rowKey string) {
+	k.refreshMu.Lock()
+	defer k.refreshMu.Unlock()
+	delete(k.refreshedQuota, rowKey)
 }
 
 func (k *Keys) finishQuotaRefresh(succeeded, failed int, message string) {
@@ -714,16 +786,15 @@ func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) 
 func (k *Keys) UpstreamAccountQuotas(ctx context.Context) (map[string]UpstreamAccountQuota, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-		QueryQuotaSnapshots(context.Context, cpamp.QuotaSnapshotQueryRequest) (cpamp.QuotaSnapshotQueryResponse, error)
+		FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 	})
 	if !ok {
-		return nil, errors.New("CPAMP 客户端不支持额度快照")
+		return nil, errors.New("CPAMP 客户端不支持实时额度查询")
 	}
 	files, err := typed.ListAuthFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	queries := make([]cpamp.QuotaQueryAccount, 0, len(files))
 	accountIDByRowKey := make(map[string]string, len(files))
 	for _, file := range files {
 		if !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || file.Disabled || strings.TrimSpace(file.Name) == "" {
@@ -734,32 +805,21 @@ func (k *Keys) UpstreamAccountQuotas(ctx context.Context) (map[string]UpstreamAc
 			continue
 		}
 		accountIDByRowKey[rowKey] = upstreamAccountID(file)
-		queries = append(queries, cpamp.QuotaQueryAccount{
-			RowKey: rowKey, Provider: "codex",
-			Account: cpamp.QuotaAccountTarget{
-				AccountSnapshot:       file.AccountSnapshot,
-				AuthFileSnapshot:      file.Name,
-				AuthProviderSnapshot:  "codex",
-				AuthProjectIDSnapshot: file.ProjectID,
-				AuthIndex:             file.AuthIndex,
-				Source:                file.Name,
-			},
-		})
-		if len(queries) == 200 {
+		if len(accountIDByRowKey) == 200 {
 			break
 		}
 	}
-	result := make(map[string]UpstreamAccountQuota, len(queries))
-	if len(queries) == 0 {
+	result := make(map[string]UpstreamAccountQuota, len(accountIDByRowKey))
+	if len(accountIDByRowKey) == 0 {
 		return result, nil
 	}
 	now := k.Now()
-	snapshots, err := typed.QueryQuotaSnapshots(ctx, cpamp.QuotaSnapshotQueryRequest{Accounts: queries, NowMS: now.UnixMilli()})
-	if err != nil {
-		return nil, err
+	k.refreshCurrentCodexQuota(ctx, typed, files, now)
+	items := k.currentRefreshedQuota(now)
+	if len(items) == 0 {
+		return nil, errors.New("无法从 CPAMP 获取当前额度")
 	}
-	snapshots.Items = k.mergeRefreshedQuota(snapshots.Items, now)
-	for _, item := range snapshots.Items {
+	for _, item := range items {
 		accountID := accountIDByRowKey[item.RowKey]
 		if accountID == "" {
 			continue
@@ -834,7 +894,7 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 	}
 	k.invalidateQuota()
 	k.refreshMu.Lock()
-	k.refreshedQuota = make(map[string][]cpamp.QuotaSnapshotWindow)
+	k.refreshedQuota = make(map[string][]cpamp.CodexQuotaWindow)
 	k.refreshMu.Unlock()
 	label := strings.TrimSpace(selected.AccountSnapshot)
 	if label == "" {
@@ -996,17 +1056,16 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-		QueryQuotaSnapshots(context.Context, cpamp.QuotaSnapshotQueryRequest) (cpamp.QuotaSnapshotQueryResponse, error)
+		FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 	})
 	if !ok {
-		return UpstreamQuotaPool{}, errors.New("CPAMP 客户端不支持额度快照")
+		return UpstreamQuotaPool{}, errors.New("CPAMP 客户端不支持实时额度查询")
 	}
 	files, err := typed.ListAuthFiles(ctx)
 	if err != nil {
 		return UpstreamQuotaPool{}, err
 	}
 	pool := UpstreamQuotaPool{Provider: "Codex"}
-	accounts := make([]cpamp.QuotaQueryAccount, 0, len(files))
 	seen := make(map[string]struct{}, len(files))
 	for _, file := range files {
 		provider := strings.ToLower(strings.TrimSpace(file.Provider))
@@ -1019,40 +1078,28 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		}
 		seen[rowKey] = struct{}{}
 		pool.TotalAccounts++
-		accounts = append(accounts, cpamp.QuotaQueryAccount{
-			RowKey:   rowKey,
-			Provider: "codex",
-			Account: cpamp.QuotaAccountTarget{
-				AccountSnapshot:       file.AccountSnapshot,
-				AuthFileSnapshot:      file.Name,
-				AuthProviderSnapshot:  "codex",
-				AuthProjectIDSnapshot: file.ProjectID,
-				AuthIndex:             file.AuthIndex,
-				Source:                file.Name,
-			},
-		})
-		if len(accounts) == 200 {
+		if len(seen) == 200 {
 			break
 		}
 	}
-	if len(accounts) == 0 {
+	if len(seen) == 0 {
 		k.putQuota(pool)
 		return pool, nil
 	}
 	now := k.Now()
-	result, err := typed.QueryQuotaSnapshots(ctx, cpamp.QuotaSnapshotQueryRequest{Accounts: accounts, NowMS: now.UnixMilli()})
-	if err != nil {
-		return pool, err
+	k.refreshCurrentCodexQuota(ctx, typed, files, now)
+	items := k.currentRefreshedQuota(now)
+	if len(items) == 0 {
+		return pool, errors.New("无法从 CPAMP 获取当前额度")
 	}
-	result.Items = k.mergeRefreshedQuota(result.Items, now)
 	type quotaAccumulator struct {
 		group            UpstreamQuotaGroup
 		remainingTotal   float64
 		includedAccounts int
 	}
 	groups := make(map[string]*quotaAccumulator)
-	knownAccounts := make(map[string]struct{}, len(result.Items))
-	for _, item := range result.Items {
+	knownAccounts := make(map[string]struct{}, len(items))
+	for _, item := range items {
 		windows := currentQuotaWindows(item.Windows, now)
 		if len(windows) == 0 {
 			continue
@@ -1133,7 +1180,7 @@ func quotaWindowIncludedInAverage(period string, windows []quotaWindowSelection)
 	return true
 }
 
-func quotaWindowEffectiveReset(period string, window cpamp.QuotaSnapshotWindow, windows []quotaWindowSelection, now time.Time) time.Time {
+func quotaWindowEffectiveReset(period string, window cpamp.CodexQuotaWindow, windows []quotaWindowSelection, now time.Time) time.Time {
 	reset := futureQuotaReset(window, now)
 	if period != "five_hour" {
 		return reset
@@ -1153,37 +1200,24 @@ func quotaWindowEffectiveReset(period string, window cpamp.QuotaSnapshotWindow, 
 	return reset
 }
 
-func futureQuotaReset(window cpamp.QuotaSnapshotWindow, now time.Time) time.Time {
+func futureQuotaReset(window cpamp.CodexQuotaWindow, now time.Time) time.Time {
 	if window.CycleEndMS == nil {
 		return time.Time{}
 	}
 	reset := time.UnixMilli(*window.CycleEndMS).UTC()
-	if reset.After(now) {
-		return reset
-	}
-	// CPAMP can pair a newly observed quota percentage with the preceding
-	// cycle boundary. When the duration confirms a regular bounded window,
-	// advance that boundary to the next occurrence instead of showing no
-	// reset time for an otherwise current observation.
-	availability := strings.ToLower(strings.TrimSpace(window.Availability))
-	if !freshQuotaWithObsoleteBoundary(window, availability, now) || window.DurationSeconds == nil {
+	if !reset.After(now) {
 		return time.Time{}
 	}
-	duration := time.Duration(*window.DurationSeconds) * time.Second
-	if duration <= 0 {
-		return time.Time{}
-	}
-	cycles := now.Sub(reset)/duration + 1
-	return reset.Add(cycles * duration)
+	return reset
 }
 
 type quotaWindowSelection struct {
-	Window cpamp.QuotaSnapshotWindow
+	Window cpamp.CodexQuotaWindow
 	Period string
 }
 
-func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow, now time.Time) []quotaWindowSelection {
-	selected := make(map[string]cpamp.QuotaSnapshotWindow, 3)
+func currentQuotaWindows(windows []cpamp.CodexQuotaWindow, _ time.Time) []quotaWindowSelection {
+	selected := make(map[string]cpamp.CodexQuotaWindow, 3)
 	for _, window := range windows {
 		scope := strings.ToLower(strings.TrimSpace(window.ModelScopeKind))
 		availability := strings.ToLower(strings.TrimSpace(window.Availability))
@@ -1191,15 +1225,11 @@ func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow, now time.Time) []q
 		if period == "" || (scope != "" && scope != "all") || availability == "inactive" || availability == "pending_absent" {
 			continue
 		}
-		if window.Stale && !freshQuotaWithObsoleteBoundary(window, availability, now) {
-			continue
-		}
 		if window.UsedPercent == nil && window.RemainingPercent == nil {
 			continue
 		}
 		current, ok := selected[period]
-		if !ok || window.ObservedAtMS > current.ObservedAtMS ||
-			(window.ObservedAtMS == current.ObservedAtMS && current.Stale && !window.Stale) {
+		if !ok || window.ObservedAtMS > current.ObservedAtMS {
 			selected[period] = window
 		}
 	}
@@ -1213,27 +1243,7 @@ func currentQuotaWindows(windows []cpamp.QuotaSnapshotWindow, now time.Time) []q
 	return result
 }
 
-// freshQuotaWithObsoleteBoundary handles a CPAMP lifecycle edge case where a
-// newly observed quota value is paired with the previous cycle's already
-// expired boundary. The value is still useful, but only while the observation
-// is active, newer than that boundary, and younger than one full window.
-func freshQuotaWithObsoleteBoundary(window cpamp.QuotaSnapshotWindow, availability string, now time.Time) bool {
-	if availability != "active" || window.ObservedAtMS <= 0 || window.CycleEndMS == nil || window.DurationSeconds == nil {
-		return false
-	}
-	durationSeconds := *window.DurationSeconds
-	if durationSeconds <= 0 || durationSeconds > int64((31*24*time.Hour)/time.Second) {
-		return false
-	}
-	nowMS := now.UnixMilli()
-	if *window.CycleEndMS >= nowMS || window.ObservedAtMS <= *window.CycleEndMS || window.ObservedAtMS > nowMS {
-		return false
-	}
-	maxAgeMS := durationSeconds * 1000
-	return nowMS-window.ObservedAtMS < maxAgeMS
-}
-
-func quotaWindowPeriod(window cpamp.QuotaSnapshotWindow) string {
+func quotaWindowPeriod(window cpamp.CodexQuotaWindow) string {
 	kind := strings.ToLower(strings.TrimSpace(window.WindowKind + " " + window.ProviderWindowID))
 	kind = strings.NewReplacer("-", "_", " ", "_").Replace(kind)
 	switch {
@@ -1248,7 +1258,7 @@ func quotaWindowPeriod(window cpamp.QuotaSnapshotWindow) string {
 	}
 }
 
-func quotaRemaining(window cpamp.QuotaSnapshotWindow) float64 {
+func quotaRemaining(window cpamp.CodexQuotaWindow) float64 {
 	value := float64(0)
 	if window.RemainingPercent != nil {
 		value = *window.RemainingPercent

@@ -2,8 +2,6 @@ package cpamp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,51 +12,17 @@ import (
 )
 
 const (
-	pathAPICall    = "/v0/management/api-call"
-	pathQuotaWrite = "/v0/management/quota-snapshots"
-	codexUsageURL  = "https://chatgpt.com/backend-api/wham/usage"
+	pathAPICall   = "/v0/management/api-call"
+	codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
 )
 
 var ErrNoQuotaWindows = errors.New("cpamp returned no supported Codex quota windows")
 
-type QuotaRefreshWindow struct {
-	ProviderWindowID    string   `json:"provider_window_id"`
-	WindowKind          string   `json:"window_kind"`
-	WindowMode          string   `json:"window_mode"`
-	ModelScopeKind      string   `json:"model_scope_kind"`
-	Source              string   `json:"source"`
-	SourceObservationID string   `json:"source_observation_id,omitempty"`
-	ObservedAtMS        int64    `json:"observed_at_ms"`
-	BoundaryAccuracy    string   `json:"boundary_accuracy"`
-	CycleStartMS        *int64   `json:"cycle_start_ms,omitempty"`
-	CycleEndMS          *int64   `json:"cycle_end_ms,omitempty"`
-	DurationSeconds     *int64   `json:"duration_seconds,omitempty"`
-	UsedPercent         *float64 `json:"used_percent,omitempty"`
-	RemainingPercent    *float64 `json:"remaining_percent,omitempty"`
-	PlanType            string   `json:"plan_type,omitempty"`
-}
-
-type quotaRefreshObservation struct {
-	Source              string `json:"source"`
-	SourceObservationID string `json:"source_observation_id"`
-	ObservedAtMS        int64  `json:"observed_at_ms"`
-	InventoryScopeKey   string `json:"inventory_scope_key"`
-	InventoryMode       string `json:"inventory_mode"`
-}
-
-type quotaRefreshEntry struct {
-	RowKey      string                  `json:"row_key,omitempty"`
-	Provider    string                  `json:"provider"`
-	Account     QuotaAccountTarget      `json:"account"`
-	Observation quotaRefreshObservation `json:"observation"`
-	Windows     []QuotaRefreshWindow    `json:"windows"`
-}
-
-// RefreshCodexQuotaSnapshot asks CPA for one credential's current Codex quota
-// through CPAMP's read-only api-call proxy, then stores only the returned main
-// rate-limit windows as a partial quota observation. It never starts CPAMP's
-// credential inspection workflow and therefore cannot run inspection actions.
-func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, observedAt time.Time) ([]QuotaSnapshotWindow, error) {
+// FetchCodexQuota asks CPA for one credential's current Codex quota through
+// CPAMP's read-only api-call proxy. It deliberately bypasses CPAMP's persisted
+// quota snapshots so lifecycle boundary normalization cannot replace the
+// provider's current reset_at value.
+func (c *Client) FetchCodexQuota(ctx context.Context, file AuthFile, observedAt time.Time) ([]CodexQuotaWindow, error) {
 	authIndex := strings.TrimSpace(file.AuthIndex)
 	if authIndex == "" {
 		return nil, errors.New("cpamp Codex auth file is missing auth index")
@@ -106,57 +70,11 @@ func (c *Client) RefreshCodexQuotaSnapshot(ctx context.Context, file AuthFile, o
 	if err != nil {
 		return nil, errors.New("cpamp quota refresh returned an invalid response")
 	}
-	observedAtMS := observedAt.UTC().UnixMilli()
-	observationID := quotaObservationID(file, observedAtMS)
-	windows := buildMainCodexWindows(payload, observedAt, observationID)
+	windows := buildMainCodexWindows(payload, observedAt)
 	if len(windows) == 0 {
 		return nil, ErrNoQuotaWindows
 	}
-	target := QuotaAccountTarget{
-		AccountSnapshot:       file.AccountSnapshot,
-		AuthFileSnapshot:      file.Name,
-		AuthProviderSnapshot:  "codex",
-		AuthProjectIDSnapshot: file.ProjectID,
-		AuthIndex:             authIndex,
-		Source:                file.Name,
-	}
-	entry := quotaRefreshEntry{
-		RowKey:   strings.TrimSpace(file.Name) + "\x00" + authIndex,
-		Provider: "codex",
-		Account:  target,
-		Observation: quotaRefreshObservation{
-			Source:              "api_query",
-			SourceObservationID: observationID,
-			ObservedAtMS:        observedAtMS,
-			InventoryScopeKey:   "codex:rate-limits",
-			InventoryMode:       "partial",
-		},
-		Windows: windows,
-	}
-	writeBody, err := json.Marshal(map[string]any{"entries": []quotaRefreshEntry{entry}})
-	if err != nil {
-		return nil, errors.New("cpamp quota snapshot encoding failed")
-	}
-	_, err = c.do(ctx, http.MethodPost, pathQuotaWrite, writeBody, c.adminHeader)
-	if err != nil {
-		return nil, err
-	}
-	refreshed := make([]QuotaSnapshotWindow, 0, len(windows))
-	for _, window := range windows {
-		refreshed = append(refreshed, QuotaSnapshotWindow{
-			ProviderWindowID: window.ProviderWindowID,
-			WindowKind:       window.WindowKind,
-			ModelScopeKind:   window.ModelScopeKind,
-			ObservedAtMS:     window.ObservedAtMS,
-			CycleEndMS:       window.CycleEndMS,
-			DurationSeconds:  window.DurationSeconds,
-			UsedPercent:      window.UsedPercent,
-			RemainingPercent: window.RemainingPercent,
-			PlanType:         window.PlanType,
-			Availability:     "active",
-		})
-	}
-	return refreshed, nil
+	return windows, nil
 }
 
 func decodeNestedObject(raw json.RawMessage) (map[string]any, error) {
@@ -181,7 +99,7 @@ func decodeNestedObject(raw json.RawMessage) (map[string]any, error) {
 	return object, nil
 }
 
-func buildMainCodexWindows(payload map[string]any, observedAt time.Time, observationID string) []QuotaRefreshWindow {
+func buildMainCodexWindows(payload map[string]any, observedAt time.Time) []CodexQuotaWindow {
 	plan := textValue(payload, "plan_type", "planType")
 	rateLimit := objectValue(payload, "rate_limit", "rateLimit")
 	if rateLimit == nil {
@@ -195,7 +113,7 @@ func buildMainCodexWindows(payload map[string]any, observedAt time.Time, observa
 		{name: "primary", raw: objectValue(rateLimit, "primary_window", "primaryWindow")},
 		{name: "secondary", raw: objectValue(rateLimit, "secondary_window", "secondaryWindow")},
 	}
-	windows := make([]QuotaRefreshWindow, 0, 2)
+	windows := make([]CodexQuotaWindow, 0, 2)
 	for _, item := range candidates {
 		if item.raw == nil {
 			continue
@@ -211,30 +129,21 @@ func buildMainCodexWindows(payload map[string]any, observedAt time.Time, observa
 		}
 		used = math.Max(0, math.Min(100, used))
 		remaining := 100 - used
-		window := QuotaRefreshWindow{
-			ProviderWindowID:    id,
-			WindowKind:          kind,
-			WindowMode:          "unknown",
-			ModelScopeKind:      "all",
-			Source:              "api_query",
-			SourceObservationID: observationID,
-			ObservedAtMS:        observedAt.UTC().UnixMilli(),
-			BoundaryAccuracy:    "unknown",
-			UsedPercent:         &used,
-			RemainingPercent:    &remaining,
-			PlanType:            plan,
+		window := CodexQuotaWindow{
+			ProviderWindowID: id,
+			WindowKind:       kind,
+			ModelScopeKind:   "all",
+			ObservedAtMS:     observedAt.UTC().UnixMilli(),
+			UsedPercent:      &used,
+			RemainingPercent: &remaining,
+			PlanType:         plan,
+			Availability:     "active",
 		}
 		if hasDuration && duration > 0 {
 			d := int64(math.Round(duration))
 			window.DurationSeconds = &d
-			if end, accuracy, ok := quotaResetEnd(item.raw, observedAt); ok {
-				start := end - d*1000
-				if start > 0 {
-					window.WindowMode = "fixed"
-					window.BoundaryAccuracy = accuracy
-					window.CycleStartMS = &start
-					window.CycleEndMS = &end
-				}
+			if end, ok := quotaResetEnd(item.raw, observedAt); ok {
+				window.CycleEndMS = &end
 			}
 		}
 		windows = append(windows, window)
@@ -265,18 +174,32 @@ func classifyMainCodexWindow(name string, duration float64, hasDuration bool, pl
 	return "weekly", "weekly"
 }
 
-func quotaResetEnd(raw map[string]any, observedAt time.Time) (int64, string, bool) {
+func quotaResetEnd(raw map[string]any, observedAt time.Time) (int64, bool) {
 	resetAt, hasResetAt := numberValue(raw, "reset_at", "resetAt")
-	if hasResetAt && resetAt > float64(observedAt.Unix()) {
-		return int64(math.Floor(resetAt)) * 1000, "exact", true
+	resetAtMS, validResetAt := quotaAbsoluteResetMS(resetAt)
+	if hasResetAt && validResetAt && resetAtMS > observedAt.UnixMilli() {
+		return resetAtMS, true
 	}
 	if after, ok := numberValue(raw, "reset_after_seconds", "resetAfterSeconds"); ok && after > 0 {
-		return observedAt.Add(time.Duration(after * float64(time.Second))).UnixMilli(), "derived", true
+		return observedAt.Add(time.Duration(after * float64(time.Second))).UnixMilli(), true
 	}
-	if hasResetAt && resetAt > 0 {
-		return int64(math.Floor(resetAt)) * 1000, "exact", true
+	if hasResetAt && validResetAt {
+		return resetAtMS, true
 	}
-	return 0, "unknown", false
+	return 0, false
+}
+
+func quotaAbsoluteResetMS(value float64) (int64, bool) {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, false
+	}
+	if value < 1e12 {
+		value *= 1000
+	}
+	if value > math.MaxInt64 {
+		return 0, false
+	}
+	return int64(math.Floor(value)), true
 }
 
 func objectValue(raw map[string]any, keys ...string) map[string]any {
@@ -315,9 +238,4 @@ func numberValue(raw map[string]any, keys ...string) (float64, bool) {
 		}
 	}
 	return 0, false
-}
-
-func quotaObservationID(file AuthFile, observedAtMS int64) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(file.Name) + "\x00" + strings.TrimSpace(file.AuthIndex) + fmt.Sprint(observedAtMS)))
-	return "portal-" + hex.EncodeToString(sum[:16])
 }
