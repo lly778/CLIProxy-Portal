@@ -72,15 +72,18 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 			ranks = append(ranks, *x)
 		}
 		sort.Slice(ranks, func(i, j int) bool { return ranks[i].calls > ranks[j].calls })
-		max := int64(1)
-		if len(ranks) > 0 && ranks[0].calls > 0 {
-			max = ranks[0].calls
+		totalCalls := int64(0)
+		for _, x := range ranks {
+			totalCalls += x.calls
+		}
+		if totalCalls <= 0 {
+			totalCalls = 1
 		}
 		for i, x := range ranks {
 			if i >= 10 {
 				break
 			}
-			v.TopUsers = append(v.TopUsers, webui.UserUsageRankView{Rank: i + 1, User: s.userView(x.user), Requests: compactNumber(x.calls), Tokens: compactNumber(x.tokens), Percent: int(x.calls * 100 / max)})
+			v.TopUsers = append(v.TopUsers, webui.UserUsageRankView{Rank: i + 1, User: s.userView(x.user), Requests: compactNumber(x.calls), Tokens: compactNumber(x.tokens), Percent: int(x.calls * 100 / totalCalls)})
 		}
 	}
 	audits, _ := s.Store.ListAudit(r.Context(), 8, 0)
@@ -172,7 +175,16 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	const size = 30
 	status, q := r.URL.Query().Get("status"), strings.TrimSpace(r.URL.Query().Get("q"))
-	sortOrder := normalizeAdminUserSort(r.URL.Query().Get("sort"))
+	sortValue := strings.TrimSpace(r.URL.Query().Get("sort"))
+	if sortValue == "" {
+		if cookie, cookieErr := r.Cookie("portal_admin_user_sort"); cookieErr == nil {
+			sortValue = cookie.Value
+		}
+	}
+	sortOrder := normalizeAdminUserSort(sortValue)
+	if strings.TrimSpace(r.URL.Query().Get("sort")) != "" {
+		http.SetCookie(w, &http.Cookie{Name: "portal_admin_user_sort", Value: sortOrder, Path: "/admin/users", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 60 * 60})
+	}
 	statusTotal, err := s.Store.CountUsers(r.Context(), status)
 	if err != nil {
 		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
@@ -221,7 +233,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	usageByUser := make(map[string]cpamp.UsageSummary)
 	usageLoaded := true
 	now := time.Now().UTC()
-	stats, usageErr := s.Keys.APIKeyUsage(r.Context(), hashes, now.AddDate(0, 0, -30), now)
+	stats, usageErr := s.Keys.APIKeyUsage(r.Context(), hashes, now.AddDate(0, 0, -7), now)
 	if usageErr != nil {
 		usageLoaded = false
 		if v.Error == "" {
@@ -257,6 +269,8 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		left, right := rows[i], rows[j]
 		switch sortOrder {
+		case "created_desc":
+			return left.user.CreatedAt.After(right.user.CreatedAt)
 		case "created_asc":
 			return left.user.CreatedAt.Before(right.user.CreatedAt)
 		case "last_used_desc":
@@ -302,10 +316,10 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 
 func normalizeAdminUserSort(value string) string {
 	switch value {
-	case "created_asc", "last_used_desc", "last_used_asc", "usage_desc", "usage_asc", "name_asc", "name_desc":
+	case "created_desc", "created_asc", "last_used_desc", "last_used_asc", "usage_desc", "usage_asc", "name_asc", "name_desc":
 		return value
 	default:
-		return "created_desc"
+		return "last_used_desc"
 	}
 }
 
@@ -333,10 +347,7 @@ func (s *Server) adminUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderAdminUser(w http.ResponseWriter, r *http.Request, target domain.User, msg string, errMsg error) {
 	actor := currentUser(r)
 	to := time.Now().UTC()
-	from := target.CreatedAt.UTC()
-	if from.IsZero() || !from.Before(to) {
-		from = to.AddDate(-10, 0, 0)
-	}
+	from := to.AddDate(0, 0, -7)
 	a, _ := s.Keys.Usage(r.Context(), target.ID, from, to, 100)
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	v := webui.AdminUserDetailView{LayoutView: s.layout(actor, currentToken(r), target.Name, "admin-users"), Target: s.userView(target), Key: s.keyView(target), StatusCard: s.adminStatusCard(target), Usage: summary, Daily: daily, ByModel: models, Requests: requests, CanApprove: target.Status == domain.StatusPending || target.Status == domain.StatusRejected, CanReject: target.Status == domain.StatusPending, CanSuspend: target.Status == domain.StatusApproved, CanUnsuspend: target.Status == domain.StatusSuspended, CanDelete: target.ID != actor.ID, CanReset: target.Status != domain.StatusDeleted, CanChangePhone: target.Status != domain.StatusDeleted, DeleteWarning: "将先撤销 API Key，再永久匿名化账号。此操作不可恢复。"}

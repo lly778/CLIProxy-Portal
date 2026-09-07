@@ -124,6 +124,17 @@
     });
   });
 
+  document.querySelectorAll("[data-user-sort]").forEach(function (select) {
+    select.addEventListener("change", function () {
+      if (!select.form) return;
+      if (select.form.requestSubmit) {
+        select.form.requestSubmit();
+      } else {
+        select.form.submit();
+      }
+    });
+  });
+
   document.addEventListener("submit", function (event) {
     var form = event.target;
     if (form.matches("[data-quota-refresh-form]")) {

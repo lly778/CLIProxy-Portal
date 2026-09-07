@@ -333,7 +333,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 	mu.Unlock()
 	adminUsersPage := getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
-	if !strings.Contains(adminUsersPage, `name="sort"`) || !strings.Contains(adminUsersPage, `<option value="created_desc" selected>注册时间：最新</option>`) {
+	if !strings.Contains(adminUsersPage, `name="sort"`) || !strings.Contains(adminUsersPage, `<option value="last_used_desc" selected>最近使用：最新</option>`) {
 		t.Fatalf("admin user sorting controls were not rendered: %s", adminUsersPage)
 	}
 	if !strings.Contains(adminUsersPage, "2.3K 请求") || !strings.Contains(adminUsersPage, "5.1M tokens") {
@@ -342,6 +342,18 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users?sort=usage_desc", http.StatusOK)
 	if !strings.Contains(adminUsersPage, `<option value="usage_desc" selected>用量：从高到低</option>`) {
 		t.Fatalf("admin user usage sort was not preserved: %s", adminUsersPage)
+	}
+	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
+	if !strings.Contains(adminUsersPage, `<option value="usage_desc" selected>用量：从高到低</option>`) {
+		t.Fatalf("admin user usage sort was not restored after returning to the page: %s", adminUsersPage)
+	}
+	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users?sort=created_desc", http.StatusOK)
+	if !strings.Contains(adminUsersPage, `<option value="created_desc" selected>注册时间：最新</option>`) {
+		t.Fatalf("admin user newest-registration sort was not accepted: %s", adminUsersPage)
+	}
+	adminUsersPage = getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
+	if !strings.Contains(adminUsersPage, `<option value="created_desc" selected>注册时间：最新</option>`) {
+		t.Fatalf("admin user newest-registration sort was not restored: %s", adminUsersPage)
 	}
 	if !strings.Contains(adminUsersPage, "最近使用") || !strings.Contains(adminUsersPage, usedAt.In(cfg.TimeZone).Format("2006-01-02 15:04")) {
 		t.Fatalf("admin user last-used time was not populated from model requests: %s", adminUsersPage)
@@ -606,6 +618,18 @@ func TestUserUsageChartsSortEachMetricIndependently(t *testing.T) {
 	byRequests, byTokens := userUsageCharts(users)
 	if byRequests[0].User.Name != "请求用户" || byRequests[0].RequestPercent != 100 || byTokens[0].User.Name != "Token 用户" || byTokens[0].TokenPercent != 100 {
 		t.Fatalf("user chart order requests=%#v tokens=%#v", byRequests, byTokens)
+	}
+}
+
+func TestNormalizeAdminUserSortAcceptsEveryRenderedOption(t *testing.T) {
+	options := []string{"created_desc", "created_asc", "last_used_desc", "last_used_asc", "usage_desc", "usage_asc", "name_asc", "name_desc"}
+	for _, option := range options {
+		if got := normalizeAdminUserSort(option); got != option {
+			t.Errorf("normalizeAdminUserSort(%q) = %q", option, got)
+		}
+	}
+	if got := normalizeAdminUserSort("unknown"); got != "last_used_desc" {
+		t.Errorf("invalid sort fallback = %q", got)
 	}
 }
 

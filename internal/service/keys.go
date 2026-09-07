@@ -26,6 +26,7 @@ type Keys struct {
 	CPAMP           cpamp.API
 	Now             func() time.Time
 	CacheTTL        time.Duration
+	QuotaCacheTTL   time.Duration
 	cacheMu         sync.Mutex
 	cache           map[string]analyticsCache
 	quota           quotaPoolCache
@@ -130,7 +131,7 @@ type QuotaRefreshStatus struct {
 func NewKeys(st *store.Store, api cpamp.API) *Keys {
 	return &Keys{
 		Store: st, CPAMP: api, Now: func() time.Time { return time.Now().UTC() },
-		CacheTTL: 2 * time.Minute, RefreshCooldown: time.Minute, RefreshTimeout: 3 * time.Minute,
+		CacheTTL: 2 * time.Minute, QuotaCacheTTL: 30 * time.Minute, RefreshCooldown: time.Minute, RefreshTimeout: 3 * time.Minute,
 		cache:          make(map[string]analyticsCache),
 		refreshedQuota: make(map[string][]cpamp.CodexQuotaWindow),
 	}
@@ -259,7 +260,7 @@ func (k *Keys) currentRefreshedQuota(now time.Time) []directQuotaItem {
 	for rowKey, windows := range k.refreshedQuota {
 		active := make([]cpamp.CodexQuotaWindow, 0, len(windows))
 		for _, window := range windows {
-			if quotaRefreshWindowFresh(window, now, k.CacheTTL) {
+			if quotaRefreshWindowFresh(window, now, k.QuotaCacheTTL) {
 				active = append(active, window)
 			}
 		}
@@ -283,8 +284,8 @@ func quotaRefreshWindowFresh(window cpamp.CodexQuotaWindow, now time.Time, ttl t
 }
 
 // refreshCurrentCodexQuota reads current provider values through CPAMP's
-// read-only API proxy. A short in-process cache prevents the account and
-// shared-pool views from issuing duplicate provider requests.
+// read-only API proxy when the 30-minute quota cache is stale. This keeps page
+// loads current without issuing duplicate provider requests on every visit.
 func (k *Keys) refreshCurrentCodexQuota(ctx context.Context, client interface {
 	FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 }, files []cpamp.AuthFile, now time.Time) int {
@@ -330,7 +331,7 @@ func (k *Keys) hasFreshRefreshedQuota(rowKey string, now time.Time) bool {
 		return false
 	}
 	for _, window := range windows {
-		if !quotaRefreshWindowFresh(window, now, k.CacheTTL) {
+		if !quotaRefreshWindowFresh(window, now, k.QuotaCacheTTL) {
 			return false
 		}
 	}
@@ -1100,6 +1101,9 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	groups := make(map[string]*quotaAccumulator)
 	knownAccounts := make(map[string]struct{}, len(items))
 	for _, item := range items {
+		if _, exists := seen[item.RowKey]; !exists {
+			continue
+		}
 		windows := currentQuotaWindows(item.Windows, now)
 		if len(windows) == 0 {
 			continue

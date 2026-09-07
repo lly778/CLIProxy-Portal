@@ -143,6 +143,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .callout.warning { margin-top: 20px; background: var(--warning-bg); border-color: #f2ddaa; }
 .table-card { overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; min-width: 650px; }
+.user-management-card table { min-width: 900px; }
 th, td { padding: 12px 15px; text-align: left; vertical-align: middle; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
 th { color: var(--muted); background: #fbfcfe; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
 tr:last-child td { border-bottom: 0; }

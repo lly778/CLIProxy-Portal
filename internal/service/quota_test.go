@@ -98,11 +98,14 @@ func TestUpstreamAccountStatusIsVerifiedAndInvalidatesQuota(t *testing.T) {
 
 func TestUpstreamAccountQuotasMatchOpaqueAccountIdentity(t *testing.T) {
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	refreshAt := now
+	apiCalls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/v0/management/auth-files":
 			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "runtime-1", "physicalName": "one.json", "provider": "codex", "auth_index": "auth-1", "account": "one@example.com"}}})
 		case "/v0/management/api-call":
+			apiCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"status_code": 200, "body": map[string]any{
 				"plan_type": "plus",
 				"rate_limit": map[string]any{
@@ -138,8 +141,22 @@ func TestUpstreamAccountQuotasMatchOpaqueAccountIdentity(t *testing.T) {
 	if quota.Windows[0].Period != "five_hour" || quota.Windows[0].RemainingPercent != 80 || quota.Windows[1].Period != "weekly" || quota.Windows[1].RemainingPercent != 60 {
 		t.Fatalf("quota windows=%#v", quota.Windows)
 	}
-	if !quota.Windows[0].ResetAt.Equal(now.Add(2*time.Hour)) || !quota.Windows[1].ResetAt.Equal(now.Add(3*24*time.Hour)) {
+	if !quota.Windows[0].ResetAt.Equal(refreshAt.Add(2*time.Hour)) || !quota.Windows[1].ResetAt.Equal(refreshAt.Add(3*24*time.Hour)) {
 		t.Fatalf("quota reset times=%#v", quota.Windows)
+	}
+	now = now.Add(3 * time.Minute)
+	if _, err := keys.UpstreamAccountQuotas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if apiCalls != 1 {
+		t.Fatalf("provider quota calls within 30-minute cache = %d, want 1", apiCalls)
+	}
+	now = refreshAt.Add(31 * time.Minute)
+	if _, err := keys.UpstreamAccountQuotas(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if apiCalls != 2 {
+		t.Fatalf("provider quota calls after cache expiry = %d, want 2", apiCalls)
 	}
 }
 
