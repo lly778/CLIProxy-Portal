@@ -28,6 +28,7 @@ type Keys struct {
 	CacheTTL        time.Duration
 	cacheMu         sync.Mutex
 	cache           map[string]analyticsCache
+	quota           quotaPoolCache
 	refreshMu       sync.Mutex
 	refresh         QuotaRefreshStatus
 	refreshedQuota  map[string][]cpamp.QuotaSnapshotWindow
@@ -39,6 +40,11 @@ type Keys struct {
 
 type analyticsCache struct {
 	value     cpamp.AnalyticsResponse
+	expiresAt time.Time
+}
+
+type quotaPoolCache struct {
+	value     UpstreamQuotaPool
 	expiresAt time.Time
 }
 
@@ -213,6 +219,9 @@ func (k *Keys) runQuotaRefresh(client interface {
 		}
 	}
 	failed := len(eligible) - succeeded
+	if succeeded > 0 {
+		k.invalidateQuota()
+	}
 	message := fmt.Sprintf("已刷新 %d 个账号", succeeded)
 	if failed > 0 {
 		message = fmt.Sprintf("已刷新 %d 个账号，%d 个失败", succeeded, failed)
@@ -243,50 +252,23 @@ func (k *Keys) mergeRefreshedQuota(items []cpamp.QuotaSnapshotItem, now time.Tim
 		byRowKey[items[index].RowKey] = index
 	}
 	for rowKey, windows := range k.refreshedQuota {
-		index, found := byRowKey[rowKey]
-		var persisted []cpamp.QuotaSnapshotWindow
-		if found {
-			persisted = items[index].Windows
-		}
 		active := make([]cpamp.QuotaSnapshotWindow, 0, len(windows))
 		for _, window := range windows {
-			if window.CycleEndMS != nil && *window.CycleEndMS <= now.UnixMilli() {
-				continue
+			if window.CycleEndMS == nil || *window.CycleEndMS > now.UnixMilli() {
+				active = append(active, window)
 			}
-			if quotaWindowSuperseded(window, persisted, now) {
-				continue
-			}
-			active = append(active, window)
 		}
 		if len(active) == 0 {
 			delete(k.refreshedQuota, rowKey)
 			continue
 		}
-		k.refreshedQuota[rowKey] = append([]cpamp.QuotaSnapshotWindow(nil), active...)
-		if found {
+		if index, ok := byRowKey[rowKey]; ok {
 			items[index].Windows = append(items[index].Windows, active...)
 			continue
 		}
 		items = append(items, cpamp.QuotaSnapshotItem{RowKey: rowKey, Provider: "codex", Windows: active})
 	}
 	return items
-}
-
-// quotaWindowSuperseded reports whether CPAMP already has an equally recent
-// persisted copy of a manual refresh, or a newer automatic observation. This
-// keeps the in-memory bridge from masking later provider percentages and reset
-// boundaries for the rest of the quota cycle.
-func quotaWindowSuperseded(refreshed cpamp.QuotaSnapshotWindow, persisted []cpamp.QuotaSnapshotWindow, now time.Time) bool {
-	period := quotaWindowPeriod(refreshed)
-	if period == "" {
-		return false
-	}
-	for _, selected := range currentQuotaWindows(persisted, now) {
-		if selected.Period == period && selected.Window.ObservedAtMS >= refreshed.ObservedAtMS {
-			return true
-		}
-	}
-	return false
 }
 
 func (k *Keys) finishQuotaRefresh(succeeded, failed int, message string) {
@@ -297,6 +279,12 @@ func (k *Keys) finishQuotaRefresh(succeeded, failed int, message string) {
 	k.refresh.Succeeded = succeeded
 	k.refresh.Failed = failed
 	k.refresh.Message = message
+}
+
+func (k *Keys) invalidateQuota() {
+	k.cacheMu.Lock()
+	defer k.cacheMu.Unlock()
+	k.quota = quotaPoolCache{}
 }
 
 func (k *Keys) Issue(ctx context.Context, user domain.User) (string, domain.APIKey, error) {
@@ -844,6 +832,7 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 			return UpstreamAccount{}, errors.New("状态变更后无法确认上游账号")
 		}
 	}
+	k.invalidateQuota()
 	k.refreshMu.Lock()
 	k.refreshedQuota = make(map[string][]cpamp.QuotaSnapshotWindow)
 	k.refreshMu.Unlock()
@@ -1002,6 +991,9 @@ func wildcardModelMatch(pattern, value string) bool {
 // UpstreamQuota returns the shared Codex account-pool quota windows without
 // exposing auth-file names, account labels, or provider credentials.
 func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
+	if value, ok := k.cachedQuota(); ok {
+		return value, nil
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 		QueryQuotaSnapshots(context.Context, cpamp.QuotaSnapshotQueryRequest) (cpamp.QuotaSnapshotQueryResponse, error)
@@ -1044,6 +1036,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		}
 	}
 	if len(accounts) == 0 {
+		k.putQuota(pool)
 		return pool, nil
 	}
 	now := k.Now()
@@ -1124,6 +1117,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	if pool.UnknownCount < 0 {
 		pool.UnknownCount = 0
 	}
+	k.putQuota(pool)
 	return pool, nil
 }
 
@@ -1298,6 +1292,28 @@ func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 		k.cache = make(map[string]analyticsCache)
 	}
 	k.cache[key] = analyticsCache{value: value, expiresAt: k.Now().Add(k.CacheTTL)}
+}
+
+func (k *Keys) cachedQuota() (UpstreamQuotaPool, bool) {
+	if k.CacheTTL <= 0 {
+		return UpstreamQuotaPool{}, false
+	}
+	k.cacheMu.Lock()
+	defer k.cacheMu.Unlock()
+	if k.quota.expiresAt.IsZero() || k.Now().After(k.quota.expiresAt) {
+		k.quota = quotaPoolCache{}
+		return UpstreamQuotaPool{}, false
+	}
+	return k.quota.value, true
+}
+
+func (k *Keys) putQuota(value UpstreamQuotaPool) {
+	if k.CacheTTL <= 0 {
+		return
+	}
+	k.cacheMu.Lock()
+	defer k.cacheMu.Unlock()
+	k.quota = quotaPoolCache{value: value, expiresAt: k.Now().Add(k.CacheTTL)}
 }
 
 func (k *Keys) hashesForUser(ctx context.Context, userID string) ([]string, error) {
