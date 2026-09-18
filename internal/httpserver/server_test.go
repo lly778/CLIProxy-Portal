@@ -633,6 +633,20 @@ func TestNormalizeAdminUserSortAcceptsEveryRenderedOption(t *testing.T) {
 	}
 }
 
+func TestAuditActorNameRemovesOnlyMaskedPhoneSuffix(t *testing.T) {
+	tests := map[string]string{
+		"蒋云龙(185****1578)": "蒋云龙",
+		"蒋云龙":              "蒋云龙",
+		"系统任务(worker)":     "系统任务(worker)",
+		"":                 "",
+	}
+	for input, want := range tests {
+		if got := auditActorName(input); got != want {
+			t.Errorf("auditActorName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestAdminStatusCardUsesAdministratorPerspective(t *testing.T) {
 	server := &Server{}
 	approved := server.adminStatusCard(domain.User{Status: domain.StatusApproved})

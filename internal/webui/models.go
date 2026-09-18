@@ -188,6 +188,7 @@ type RequestView struct {
 	TotalTokens     string
 	Latency         string
 	Error           string
+	ErrorFull       string
 }
 
 type ModelView struct {

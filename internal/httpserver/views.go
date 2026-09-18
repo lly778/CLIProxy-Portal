@@ -170,10 +170,11 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 	if e.LatencyMS != nil {
 		latency = fmt.Sprintf("%d ms", *e.LatencyMS)
 	}
-	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: requestFailureSummary(e)}
+	errorFull := requestFailureText(e)
+	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
 }
 
-func requestFailureSummary(e cpamp.EventRow) string {
+func requestFailureText(e cpamp.EventRow) string {
 	if !e.Failed {
 		return ""
 	}
@@ -186,26 +187,22 @@ func requestFailureSummary(e cpamp.EventRow) string {
 		return strings.Join(parts, " · ")
 	}
 
-	if code, message, structured := failureJSONSummary(summary); structured {
-		if message != "" {
-			parts = appendUnique(parts, message)
-		} else {
-			parts = appendUnique(parts, code)
-		}
-		return truncateFailureSummary(strings.Join(parts, " · "), 180)
+	code, message, plain := failureSummaryDetails(summary)
+	if message != "" {
+		parts = appendUnique(parts, message)
+	} else if plain != "" {
+		parts = appendUnique(parts, plain)
+	} else {
+		parts = appendUnique(parts, code)
 	}
-	if strings.ContainsAny(summary, "\r\n") || strings.HasPrefix(summary, "{") || strings.HasPrefix(summary, "[") || strings.HasPrefix(summary, "<") {
-		return strings.Join(parts, " · ")
-	}
-	parts = appendUnique(parts, summary)
-	return truncateFailureSummary(strings.Join(parts, " · "), 180)
+	return strings.Join(parts, " · ")
 }
 
-func failureJSONSummary(summary string) (string, string, bool) {
+func failureSummaryDetails(summary string) (string, string, string) {
 	decoder := json.NewDecoder(strings.NewReader(summary))
 	decoder.UseNumber()
 	var code, message string
-	structured := false
+	var consumed int64
 	for {
 		var payload any
 		err := decoder.Decode(&payload)
@@ -213,12 +210,12 @@ func failureJSONSummary(summary string) (string, string, bool) {
 			break
 		}
 		if err != nil {
-			break
+			return code, message, plainFailureSummary(summary[consumed:])
 		}
-		structured = true
+		consumed = decoder.InputOffset()
 		object, ok := payload.(map[string]any)
 		if !ok {
-			continue
+			break
 		}
 		objectCode, objectMessage := failureJSONDetails(object)
 		if code == "" {
@@ -228,7 +225,37 @@ func failureJSONSummary(summary string) (string, string, bool) {
 			message = objectMessage
 		}
 	}
-	return code, message, structured
+	return code, message, ""
+}
+
+func plainFailureSummary(summary string) string {
+	lines := strings.FieldsFunc(summary, func(char rune) bool { return char == '\r' || char == '\n' })
+	plain := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "{") || strings.HasPrefix(line, "[") || strings.HasPrefix(line, "<") || failureHeaderLine(line) {
+			break
+		}
+		plain = append(plain, line)
+	}
+	return strings.Join(plain, " ")
+}
+
+func failureHeaderLine(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	for _, prefix := range []string{
+		"authorization:", "proxy-authorization:", "cookie:", "set-cookie:",
+		"cf-ray:", "cf-cache-status:", "content-type:", "content-length:",
+		"date:", "server:", "strict-transport-security:",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func failureJSONDetails(object map[string]any) (string, string) {
@@ -280,14 +307,6 @@ func appendUnique(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
-}
-
-func truncateFailureSummary(value string, limit int) string {
-	runes := []rune(strings.TrimSpace(value))
-	if limit < 1 || len(runes) <= limit {
-		return string(runes)
-	}
-	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
 
 func modelUsageCharts(models []webui.ModelUsageView) ([]webui.ModelUsageView, []webui.ModelUsageView) {
@@ -469,9 +488,34 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 func (s *Server) auditViews(items []domain.AuditEvent) []webui.AuditView {
 	out := make([]webui.AuditView, 0, len(items))
 	for _, e := range items {
-		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: emptyDash(e.ActorLabel), Action: e.Action, Target: emptyDash(e.TargetLabel), Result: "success", IP: e.IP, Details: e.Detail})
+		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: emptyDash(auditActorName(e.ActorLabel)), Action: e.Action, Target: emptyDash(e.TargetLabel), Result: "success", IP: e.IP, Details: e.Detail})
 	}
 	return out
+}
+
+func auditActorName(label string) string {
+	label = strings.TrimSpace(label)
+	open := strings.LastIndex(label, "(")
+	if open < 0 || !strings.HasSuffix(label, ")") {
+		return label
+	}
+	phone := label[open+1 : len(label)-1]
+	if len(phone) != 11 || phone[3:7] != "****" || !asciiDigits(phone[:3]) || !asciiDigits(phone[7:]) {
+		return label
+	}
+	return strings.TrimSpace(label[:open])
+}
+
+func asciiDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) formatTime(t time.Time) string {

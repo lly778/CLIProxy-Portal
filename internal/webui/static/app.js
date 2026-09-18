@@ -49,6 +49,60 @@
     }
   }
 
+  var requestStatusDetails = Array.prototype.slice.call(document.querySelectorAll(".request-status-detail"));
+  var requestStatusResizeFrame = 0;
+
+  function fitRequestStatusDetail(detail) {
+    if (!detail.dataset.fullText) {
+      detail.dataset.fullText = detail.getAttribute("title") || detail.textContent.trim();
+    }
+    var fullText = detail.dataset.fullText;
+    var characters = Array.from(fullText);
+
+    detail.removeAttribute("title");
+    detail.textContent = fullText;
+    detail.style.display = "block";
+    detail.style.webkitLineClamp = "unset";
+
+    if (detail.scrollHeight <= detail.clientHeight + 1) {
+      detail.style.display = "";
+      detail.style.webkitLineClamp = "";
+      return;
+    }
+
+    var low = 0;
+    var high = characters.length;
+    while (low < high) {
+      var middle = Math.ceil((low + high) / 2);
+      detail.textContent = characters.slice(0, middle).join("").replace(/\s+$/, "") + "…";
+      if (detail.scrollHeight <= detail.clientHeight + 1) {
+        low = middle;
+      } else {
+        high = middle - 1;
+      }
+    }
+    detail.textContent = characters.slice(0, low).join("").replace(/\s+$/, "") + "…";
+    detail.setAttribute("title", fullText);
+    detail.style.display = "";
+    detail.style.webkitLineClamp = "";
+  }
+
+  function fitRequestStatusDetails() {
+    requestStatusDetails.forEach(fitRequestStatusDetail);
+  }
+
+  if (requestStatusDetails.length) {
+    fitRequestStatusDetails();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitRequestStatusDetails);
+    window.addEventListener("resize", function () {
+      if (requestStatusResizeFrame) window.cancelAnimationFrame(requestStatusResizeFrame);
+      requestStatusResizeFrame = window.requestAnimationFrame(function () {
+        requestStatusResizeFrame = 0;
+        fitRequestStatusDetails();
+      });
+    });
+  }
+
   function copyText(text) {
     if (navigator.clipboard && window.isSecureContext) {
       return navigator.clipboard.writeText(text);

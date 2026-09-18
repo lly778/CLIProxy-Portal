@@ -77,6 +77,30 @@ func TestRepresentativePagesRenderEscapedViewData(t *testing.T) {
 	}
 }
 
+func TestRequestFailureRendersFullTextTooltip(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := ActivityView{Requests: []RequestView{{
+		Status:      "failed",
+		StatusLabel: "失败",
+		Error:       "HTTP 503 · shortened…",
+		ErrorFull:   `HTTP 503 · full "detail" <safe>`,
+	}}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageActivity, view); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, `title="HTTP 503 · full &#34;detail&#34; &lt;safe&gt;"`) {
+		t.Fatalf("request failure tooltip missing or unescaped: %s", got)
+	}
+	if !strings.Contains(got, ">HTTP 503 · shortened…</div>") {
+		t.Fatalf("request failure summary missing: %s", got)
+	}
+}
+
 func TestAllPagesExecuteWithZeroViews(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

@@ -477,7 +477,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-log-table th:nth-child(11) { width: 11%; }
 .request-log-table .request-status-cell { width: 11%; min-width: 0; }
 .request-status-cell { width: 1%; min-width: 180px; }
-.request-status-detail { max-width: 210px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; }
+.request-status-detail { display: -webkit-box; max-width: 210px; max-height: 7em; margin-top: 4px; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
+.request-status-detail[title] { cursor: help; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
 .page-number { display: inline-block; min-width: 100px; margin: 0 9px; color: var(--muted); text-align: center; font-size: 12px; }
 .detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }
@@ -487,7 +488,19 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .detail-hero .suspend-actions { align-self: center; }
   .detail-hero .suspend-action { flex-wrap: nowrap; }
   .detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }
-  .audit-detail-cell { width: 280px; max-width: 320px; line-height: 1.45; overflow-wrap: anywhere; white-space: normal; }
+  .audit-table { overflow-x: hidden; }
+  .audit-table table { min-width: 0; table-layout: fixed; }
+  .audit-table th, .audit-table td { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .audit-table th:nth-child(1) { width: 13%; }
+  .audit-table th:nth-child(2) { width: 14%; }
+  .audit-table th:nth-child(3) { width: 15%; }
+  .audit-table th:nth-child(4) { width: 22%; }
+  .audit-table th:nth-child(5) { width: 8%; }
+  .audit-table th:nth-child(6) { width: 13%; }
+  .audit-table th:nth-child(7) { width: 15%; }
+  .audit-table .audit-result-cell { min-width: 0; }
+  .audit-target-cell, .audit-detail-cell { min-width: 0; line-height: 1.45; white-space: normal; }
+  .audit-target-text, .audit-detail-text { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 }
 .health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .health-card-head { display: flex; gap: 8px; align-items: center; }

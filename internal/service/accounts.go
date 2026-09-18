@@ -103,7 +103,7 @@ func (a *Accounts) Resubmit(ctx context.Context, user domain.User, name, passwor
 	if err := a.Store.ResubmitRejectedUser(ctx, user.ID, name, hash, policy.Version, a.Now()); err != nil {
 		return err
 	}
-	return a.audit(ctx, domain.AuditEvent{ActorUserID: user.ID, ActorLabel: maskedUser(user), Action: "user.resubmit", TargetID: user.ID, TargetLabel: maskedUser(user), IP: ip, CreatedAt: a.Now()})
+	return a.audit(ctx, domain.AuditEvent{ActorUserID: user.ID, ActorLabel: user.Name, Action: "user.resubmit", TargetID: user.ID, TargetLabel: maskedUser(user), IP: ip, CreatedAt: a.Now()})
 }
 
 func (a *Accounts) Authenticate(ctx context.Context, phoneInput, password string) (domain.User, error) {
@@ -193,7 +193,7 @@ func (a *Accounts) ChangePassword(ctx context.Context, u domain.User, current, n
 	if err = a.Store.DeleteUserSessions(ctx, u.ID, currentSessionHash); err != nil {
 		return err
 	}
-	return a.audit(ctx, domain.AuditEvent{ActorUserID: u.ID, ActorLabel: maskedUser(u), Action: "user.password.change", TargetID: u.ID, TargetLabel: maskedUser(u), IP: ip, CreatedAt: a.Now()})
+	return a.audit(ctx, domain.AuditEvent{ActorUserID: u.ID, ActorLabel: u.Name, Action: "user.password.change", TargetID: u.ID, TargetLabel: maskedUser(u), IP: ip, CreatedAt: a.Now()})
 }
 
 func (a *Accounts) CreateAdmin(ctx context.Context, phoneInput, name, password string, actor *domain.User, ip string) (domain.User, error) {
@@ -225,7 +225,7 @@ func (a *Accounts) CreateAdmin(ctx context.Context, phoneInput, name, password s
 	e := domain.AuditEvent{Action: "admin.create", TargetID: u.ID, TargetLabel: maskedUser(u), IP: ip, CreatedAt: now}
 	if actor != nil {
 		e.ActorUserID = actor.ID
-		e.ActorLabel = maskedUser(*actor)
+		e.ActorLabel = actor.Name
 	}
 	_ = a.audit(ctx, e)
 	return u, nil
@@ -241,7 +241,7 @@ func (a *Accounts) GenerateReset(ctx context.Context, actor, target domain.User,
 	if err = a.Store.CreatePasswordReset(ctx, v); err != nil {
 		return "", err
 	}
-	_ = a.audit(ctx, domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: maskedUser(actor), Action: "user.password.reset_issued", TargetID: target.ID, TargetLabel: maskedUser(target), IP: ip, CreatedAt: now})
+	_ = a.audit(ctx, domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: actor.Name, Action: "user.password.reset_issued", TargetID: target.ID, TargetLabel: maskedUser(target), IP: ip, CreatedAt: now})
 	return code, nil
 }
 
@@ -309,7 +309,7 @@ func (a *Accounts) ChangePhone(ctx context.Context, actor, target domain.User, p
 }
 
 func event(actor, target domain.User, action, detail, ip string, at time.Time) domain.AuditEvent {
-	return domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: maskedUser(actor), Action: action, TargetID: target.ID, TargetLabel: maskedUser(target), Detail: truncate(detail, 500), IP: ip, CreatedAt: at}
+	return domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: actor.Name, Action: action, TargetID: target.ID, TargetLabel: maskedUser(target), Detail: truncate(detail, 500), IP: ip, CreatedAt: at}
 }
 func (a *Accounts) audit(ctx context.Context, e domain.AuditEvent) error {
 	return a.Store.Audit(ctx, e)
