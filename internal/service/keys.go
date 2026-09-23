@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,7 @@ type Keys struct {
 	refresh         QuotaRefreshStatus
 	refreshedQuota  map[string][]cpamp.CodexQuotaWindow
 	quotaFetchMu    sync.Mutex
+	modelAliasMu    sync.Mutex
 	reconcileMu     sync.Mutex
 	lastSeenSyncAt  time.Time
 	RefreshCooldown time.Duration
@@ -112,6 +114,16 @@ type OAuthModelSetting struct {
 	Enabled      bool
 	WildcardRule string
 }
+
+// OAuthModelAliasInput is one editable Codex model mapping. Aliases is a
+// comma-separated list of client-visible IDs for the upstream model.
+type OAuthModelAliasInput struct {
+	Model        string
+	Aliases      string
+	KeepOriginal bool
+}
+
+var oauthAliasIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 
 var (
 	ErrQuotaRefreshRunning  = errors.New("额度正在刷新")
@@ -944,12 +956,237 @@ func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []s
 	return models, wildcards, nil
 }
 
+// OAuthModelAliases returns CPA's current Codex mappings and a revision token
+// so a stale browser form cannot silently overwrite changes made elsewhere.
+func (k *Keys) OAuthModelAliases(ctx context.Context) ([]cpamp.OAuthModelAlias, string, error) {
+	typed, ok := k.CPAMP.(interface {
+		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
+	})
+	if !ok {
+		return nil, "", errors.New("CPAMP 客户端不支持 OAuth 模型别名")
+	}
+	aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+	if err != nil {
+		return nil, "", err
+	}
+	return aliases, oauthAliasRevision(aliases), nil
+}
+
+func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
+	canonical := append([]cpamp.OAuthModelAlias(nil), aliases...)
+	sort.Slice(canonical, func(i, j int) bool {
+		left, right := strings.ToLower(canonical[i].Name), strings.ToLower(canonical[j].Name)
+		if left != right {
+			return left < right
+		}
+		return strings.ToLower(canonical[i].Alias) < strings.ToLower(canonical[j].Alias)
+	})
+	data, _ := json.Marshal(canonical)
+	return security.SHA256(string(data))
+}
+
+// SetOAuthModelAliases replaces the known Codex model mappings while keeping
+// mappings for models not in the current static catalog. Fork retains the
+// original ID alongside aliases; force-mapping keeps alias responses labelled
+// with the client-facing name.
+func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string) error {
+	k.modelAliasMu.Lock()
+	defer k.modelAliasMu.Unlock()
+	typed, ok := k.CPAMP.(interface {
+		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
+		SetOAuthModelAliases(context.Context, string, []cpamp.OAuthModelAlias) error
+	})
+	if !ok {
+		return errors.New("CPAMP 客户端不支持 OAuth 模型别名")
+	}
+	models, _, err := k.OAuthModelSettings(ctx)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		return errors.New("尚无 Codex 模型定义，不能保存别名")
+	}
+	current, err := typed.ListOAuthModelAliases(ctx, "codex")
+	if err != nil {
+		return err
+	}
+	if revision != oauthAliasRevision(current) {
+		return errors.New("模型别名已由其他操作修改，请刷新页面后重试")
+	}
+	known := make(map[string]OAuthModelSetting, len(models))
+	activeCount := 0
+	for _, model := range models {
+		known[strings.ToLower(model.ID)] = model
+		if model.Enabled {
+			activeCount++
+		}
+	}
+	if len(inputs) != activeCount {
+		return errors.New("模型列表已变化，请刷新页面后重试")
+	}
+	type selection struct {
+		aliases      []string
+		keepOriginal bool
+	}
+	selected := make(map[string]selection, len(inputs))
+	seen := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		modelID := strings.ToLower(strings.TrimSpace(input.Model))
+		model, exists := known[modelID]
+		if !exists || !model.Enabled || seen[modelID] {
+			return errors.New("模型列表包含未知或重复项，请刷新页面后重试")
+		}
+		seen[modelID] = true
+		if len(input.Aliases) > 4096 {
+			return fmt.Errorf("模型 %s 的别名列表过长", model.ID)
+		}
+		choice := selection{keepOriginal: input.KeepOriginal}
+		local := make(map[string]bool)
+		for _, part := range strings.FieldsFunc(input.Aliases, func(r rune) bool { return r == ',' || r == '，' }) {
+			alias := strings.TrimSpace(part)
+			if alias == "" {
+				continue
+			}
+			if len(alias) > 128 || !oauthAliasIDPattern.MatchString(alias) {
+				return fmt.Errorf("模型 %s 的别名只能使用英文字母、数字、点、下划线、冒号、斜杠和连字符，最多 128 字符", model.ID)
+			}
+			aliasID := strings.ToLower(alias)
+			if local[aliasID] {
+				return fmt.Errorf("模型 %s 的别名 %s 重复", model.ID, alias)
+			}
+			local[aliasID] = true
+			if aliasID == modelID {
+				choice.keepOriginal = true
+				continue
+			}
+			choice.aliases = append(choice.aliases, alias)
+			if len(choice.aliases) > 32 {
+				return fmt.Errorf("模型 %s 最多设置 32 个别名", model.ID)
+			}
+		}
+		if len(choice.aliases) == 0 {
+			choice.keepOriginal = true
+		}
+		selected[modelID] = choice
+	}
+	next := make([]cpamp.OAuthModelAlias, 0, len(current)+len(inputs))
+	for _, existing := range current {
+		if model, exists := known[strings.ToLower(strings.TrimSpace(existing.Name))]; exists && model.Enabled {
+			continue
+		}
+		next = append(next, existing)
+	}
+	for _, model := range models {
+		if !model.Enabled {
+			continue
+		}
+		choice := selected[strings.ToLower(model.ID)]
+		for _, alias := range choice.aliases {
+			next = append(next, cpamp.OAuthModelAlias{Name: model.ID, Alias: alias, Fork: choice.keepOriginal, DisplayName: alias, ForceMapping: true})
+		}
+	}
+	if err := validateOAuthAliasNames(models, next); err != nil {
+		return err
+	}
+	if oauthAliasRevision(next) == oauthAliasRevision(current) {
+		return nil
+	}
+	if err := typed.SetOAuthModelAliases(ctx, "codex", next); err != nil {
+		return err
+	}
+	confirmed, err := typed.ListOAuthModelAliases(ctx, "codex")
+	if err != nil {
+		return fmt.Errorf("别名已提交，但无法确认结果：%w", err)
+	}
+	if oauthAliasRevision(confirmed) != oauthAliasRevision(next) {
+		return errors.New("CPAMP 未确认模型别名变更，请检查 CPA 当前配置")
+	}
+	return nil
+}
+
+// validateOAuthAliasNames checks only model IDs that CPA can currently expose.
+// CPA excludes disabled models before applying OAuth aliases, so their names
+// remain available to aliases of enabled models.
+func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthModelAlias) error {
+	known := make(map[string]bool, len(models))
+	grouped := make(map[string][]cpamp.OAuthModelAlias, len(aliases))
+	for _, model := range models {
+		known[strings.ToLower(model.ID)] = true
+	}
+	for _, entry := range aliases {
+		key := strings.ToLower(strings.TrimSpace(entry.Name))
+		grouped[key] = append(grouped[key], entry)
+	}
+	used := make(map[string]string, len(models)+len(aliases))
+	claim := func(name, owner string) error {
+		key := strings.ToLower(strings.TrimSpace(name))
+		if key == "" {
+			return nil
+		}
+		if previous := used[key]; previous != "" && !strings.EqualFold(previous, owner) {
+			return fmt.Errorf("用户侧名称 %s 同时指向 %s 和 %s，请调整别名或原名设置", name, previous, owner)
+		}
+		used[key] = owner
+		return nil
+	}
+	for _, model := range models {
+		if !model.Enabled {
+			continue
+		}
+		entries := grouped[strings.ToLower(model.ID)]
+		keepOriginal := true
+		for _, entry := range entries {
+			if alias := strings.TrimSpace(entry.Alias); alias != "" && !strings.EqualFold(alias, model.ID) {
+				keepOriginal = false
+				break
+			}
+		}
+		for _, entry := range entries {
+			if entry.Fork {
+				keepOriginal = true
+			}
+		}
+		if keepOriginal {
+			if err := claim(model.ID, model.ID); err != nil {
+				return err
+			}
+		}
+		for _, entry := range entries {
+			if strings.EqualFold(strings.TrimSpace(entry.Alias), model.ID) {
+				continue
+			}
+			if err := claim(entry.Alias, model.ID); err != nil {
+				return err
+			}
+		}
+	}
+	for modelID, entries := range grouped {
+		if known[modelID] {
+			continue
+		}
+		for _, entry := range entries {
+			if err := claim(entry.Alias, entry.Name); err != nil {
+				return err
+			}
+			if entry.Fork {
+				if err := claim(entry.Name, entry.Name); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
 // remain untouched because changing one would alter multiple model switches.
 func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool) error {
+	k.modelAliasMu.Lock()
+	defer k.modelAliasMu.Unlock()
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
+		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 		SetOAuthExcludedModels(context.Context, string, []string) error
 	})
 	if !ok {
@@ -977,6 +1214,24 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 	matched, wildcard := excludedModelRule(canonical, rules)
 	if enabled && wildcard != "" {
 		return fmt.Errorf("该模型由通配规则 %q 禁用，请在 CPAMP 中调整该规则", wildcard)
+	}
+	if enabled {
+		aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+		if err != nil {
+			return err
+		}
+		settings := make([]OAuthModelSetting, 0, len(definitions))
+		for _, definition := range definitions {
+			id := strings.TrimSpace(definition.ID)
+			if id == "" {
+				continue
+			}
+			excluded, _ := excludedModelRule(id, rules)
+			settings = append(settings, OAuthModelSetting{ID: id, Enabled: excluded == "" || strings.EqualFold(id, canonical)})
+		}
+		if err := validateOAuthAliasNames(settings, aliases); err != nil {
+			return fmt.Errorf("无法启用模型：%w", err)
+		}
 	}
 	next := make([]string, 0, len(rules)+1)
 	for _, rule := range rules {

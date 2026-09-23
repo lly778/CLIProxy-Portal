@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>{{if .Title}}{{.Title}} · {{end}}{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=20260908-2">
+  <link rel="stylesheet" href="/static/style.css?v=20260923-6">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -40,10 +40,10 @@
   <div class="shell">
     <aside class="sidebar" aria-label="主导航">
       <nav data-mobile-nav>
-        <a class="nav-item{{if eq .ActiveNav "dashboard"}} active{{end}}" href="/dashboard"><span>⌂</span>概览</a>
+        <a class="nav-item{{if eq .ActiveNav "dashboard"}} active{{end}}" href="/dashboard"><span>⌂</span>门户概览</a>
         <a class="nav-item{{if eq .ActiveNav "status"}} active{{end}}" href="/status"><span>◌</span>账号状态</a>
         <a class="nav-item{{if eq .ActiveNav "key"}} active{{end}}" href="/key"><span>▣</span>API Key</a>
-        <a class="nav-item{{if eq .ActiveNav "usage"}} active{{end}}" href="/usage"><span>▥</span>使用量</a>
+        <a class="nav-item{{if eq .ActiveNav "usage"}} active{{end}}" href="/usage"><span>▥</span>使用统计</a>
         <a class="nav-item{{if eq .ActiveNav "models"}} active{{end}}" href="/models"><span>◇</span>可用模型</a>
         <a class="nav-item{{if eq .ActiveNav "profile"}} active{{end}}" href="/profile"><span>◎</span>个人资料</a>
         <a class="nav-item{{if eq .ActiveNav "activity"}} active{{end}}" href="/activity"><span>≡</span>请求日志</a>
@@ -54,7 +54,7 @@
         <a class="nav-item{{if eq .ActiveNav "admin-usage"}} active{{end}}" href="/admin/usage"><span>▥</span>全局用量</a>
         <a class="nav-item{{if eq .ActiveNav "admin-approvals"}} active{{end}}" href="/admin/approvals"><span>✓</span>审批队列</a>
         <a class="nav-item{{if eq .ActiveNav "admin-users"}} active{{end}}" href="/admin/users"><span>♙</span>用户管理</a>
-        <a class="nav-item{{if eq .ActiveNav "admin-upstreams"}} active{{end}}" href="/admin/upstreams"><span>⇄</span>上游账号</a>
+        <a class="nav-item{{if eq .ActiveNav "admin-upstreams"}} active{{end}}" href="/admin/upstreams"><span>⇄</span>上游管理</a>
         <a class="nav-item{{if eq .ActiveNav "admin-policy"}} active{{end}}" href="/admin/policy"><span>☷</span>使用规则</a>
         <a class="nav-item{{if eq .ActiveNav "admin-requests"}} active{{end}}" href="/admin/requests"><span>≋</span>全局日志</a>
         <a class="nav-item{{if eq .ActiveNav "admin-system"}} active{{end}}" href="/admin/system"><span>♥</span>系统管理</a>
@@ -71,7 +71,7 @@
   </main>
   {{end}}
   <footer class="footer">{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}} · 内部服务</footer>
-  <script src="/static/app.js?v=20260908-2" defer></script>
+  <script src="/static/app.js?v=20260923-2" defer></script>
 </body>
 </html>
 {{end}}

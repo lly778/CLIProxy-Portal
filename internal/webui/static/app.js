@@ -49,6 +49,62 @@
     }
   }
 
+  document.addEventListener("click", function (event) {
+    var addButton = event.target.closest("[data-alias-add]");
+    if (addButton) {
+      var controls = addButton.closest(".oauth-alias-controls");
+      var entries = controls && controls.querySelector("[data-alias-entries]");
+      var template = controls && controls.querySelector("[data-alias-template]");
+      if (!entries || !template || entries.children.length >= 32) return;
+      var entry = template.content.firstElementChild.cloneNode(true);
+      entries.appendChild(entry);
+      entry.querySelector("input").focus();
+      addButton.disabled = entries.children.length >= 32;
+      return;
+    }
+    var removeButton = event.target.closest("[data-alias-remove]");
+    if (!removeButton) return;
+    var removedEntry = removeButton.closest(".oauth-alias-entry");
+    var removedControls = removeButton.closest(".oauth-alias-controls");
+    if (!removedEntry || !removedControls) return;
+    removedEntry.remove();
+    var nextAddButton = removedControls.querySelector("[data-alias-add]");
+    if (nextAddButton) nextAddButton.disabled = false;
+  });
+
+  document.querySelectorAll(".oauth-alias-controls").forEach(function (controls) {
+    var addButton = controls.querySelector("[data-alias-add]");
+    var entries = controls.querySelector("[data-alias-entries]");
+    if (addButton && entries) addButton.disabled = entries.children.length >= 32;
+  });
+
+  var requestModelTexts = Array.prototype.slice.call(document.querySelectorAll(".request-model-text"));
+  var requestModelResizeFrame = 0;
+
+  function fitRequestModelTitles() {
+    requestModelTexts.forEach(function (model) {
+      if (!model.dataset.fullText) {
+        model.dataset.fullText = model.getAttribute("title") || model.textContent.trim();
+      }
+      model.removeAttribute("title");
+      if (model.scrollHeight > model.clientHeight + 1) {
+        model.setAttribute("title", model.dataset.fullText);
+      }
+    });
+  }
+
+  if (requestModelTexts.length) {
+    fitRequestModelTitles();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitRequestModelTitles);
+    window.addEventListener("resize", function () {
+      if (requestModelResizeFrame) window.cancelAnimationFrame(requestModelResizeFrame);
+      requestModelResizeFrame = window.requestAnimationFrame(function () {
+        requestModelResizeFrame = 0;
+        fitRequestModelTitles();
+      });
+    });
+  }
+
   var requestStatusDetails = Array.prototype.slice.call(document.querySelectorAll(".request-status-detail"));
   var requestStatusResizeFrame = 0;
 

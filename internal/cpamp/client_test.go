@@ -426,6 +426,58 @@ func TestOAuthExcludedModelsAndDefinitions(t *testing.T) {
 	}
 }
 
+func TestOAuthModelAliases(t *testing.T) {
+	aliases := []OAuthModelAlias{{Name: "gpt-6-luna", Alias: "gpt-5.6-luna", DisplayName: "gpt-5.6-luna", ForceMapping: true}}
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requireAdmin(t, r)
+		if r.URL.Path != pathOAuthModelAlias {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode(map[string]any{"oauth-model-alias": map[string]any{"codex": aliases, "other": []any{}}})
+		case http.MethodPatch:
+			var body struct {
+				Channel string            `json:"channel"`
+				Aliases []OAuthModelAlias `json:"aliases"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Channel != "codex" {
+				t.Errorf("channel = %q", body.Channel)
+			}
+			aliases = body.Aliases
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		case http.MethodDelete:
+			if r.URL.Query().Get("channel") != "codex" {
+				t.Errorf("delete channel = %q", r.URL.Query().Get("channel"))
+			}
+			aliases = nil
+			_, _ = io.WriteString(w, `{"ok":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	got, err := client.ListOAuthModelAliases(context.Background(), "Codex")
+	if err != nil || len(got) != 1 || got[0].Alias != "gpt-5.6-luna" || !got[0].ForceMapping {
+		t.Fatalf("aliases = %#v, err = %v", got, err)
+	}
+	if err := client.SetOAuthModelAliases(context.Background(), "codex", []OAuthModelAlias{{Name: "gpt-6-luna", Alias: "new-alias"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 1 || aliases[0].Alias != "new-alias" {
+		t.Fatalf("patched aliases = %#v", aliases)
+	}
+	if err := client.SetOAuthModelAliases(context.Background(), "codex", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(aliases) != 0 {
+		t.Fatalf("aliases after delete = %#v", aliases)
+	}
+}
+
 func TestHTTPErrorDoesNotExposeSecret(t *testing.T) {
 	secret := "secret-api-key-value"
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

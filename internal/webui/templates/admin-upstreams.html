@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游账号</h1><p class="muted">启用或停用 CPAMP 中的 Codex 凭证。状态变更会影响后续请求调度与共享额度统计。</p></div></div>
+<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">管理 Codex 上游凭证、模型启停及用户侧别名映射。更改会影响后续请求调度。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="card upstream-card">
   <div class="section-head compact"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><span class="badge neutral">{{len .Accounts}} 个账号</span></div>
@@ -41,5 +41,31 @@
     </article>
     {{else}}{{if not $.ModelError}}<div class="empty-state compact"><strong>暂无模型定义</strong><p>CPAMP 当前未返回 Codex 模型定义。</p></div>{{end}}{{end}}
   </div>
+</section>
+<section class="card upstream-card section-gap">
+  <div class="section-head compact"><div><h2>模型别名映射</h2><p class="muted small">仅显示已启用的 Codex 模型：卡片下方的用户侧别名会路由至上方实际模型，可增删；不添加别名时使用原名，也可同时保留原名。停用模型的映射保留。</p></div><span class="badge neutral">全局生效</span></div>
+  {{if .AliasError}}<div class="alert danger" role="alert">{{.AliasError}}</div>{{end}}
+  {{if .AliasReady}}{{if .AliasModels}}
+  <form method="post" action="/admin/upstreams/models/aliases" class="oauth-alias-form" data-confirm="确定保存所有 Codex 模型别名吗？保存后将影响所有用户的新请求。">
+    {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+    <input type="hidden" name="revision" value="{{.AliasRevision}}">
+    <div class="oauth-alias-list">
+      {{range $index, $model := .AliasModels}}
+      <div class="oauth-alias-row">
+        <div class="oauth-alias-model"><div><span class="muted small">实际模型</span><strong class="mono" title="实际模型：{{$model.ID}}">{{$model.ID}}</strong></div><span class="badge success">已启用</span></div>
+        <div class="oauth-alias-controls">
+          <span class="oauth-alias-caption">用户侧别名</span>
+          <div class="oauth-alias-entries" data-alias-entries>{{range $model.AliasList}}<div class="oauth-alias-entry"><label class="oauth-alias-field"><span class="sr-only">{{$model.ID}} 的用户侧别名</span><input type="text" name="alias_{{$index}}" value="{{.}}" maxlength="128" placeholder="用户侧模型名" autocomplete="off"></label><button class="oauth-alias-icon-button" type="button" data-alias-remove aria-label="删除 {{$model.ID}} 的这个别名" title="删除别名">−</button></div>{{end}}</div>
+          <button class="oauth-alias-add" type="button" data-alias-add aria-label="为 {{$model.ID}} 新增别名">＋ 添加别名</button>
+          <template data-alias-template><div class="oauth-alias-entry"><label class="oauth-alias-field"><span class="sr-only">{{$model.ID}} 的用户侧别名</span><input type="text" name="alias_{{$index}}" maxlength="128" placeholder="用户侧模型名" autocomplete="off"></label><button class="oauth-alias-icon-button" type="button" data-alias-remove aria-label="删除 {{$model.ID}} 的这个别名" title="删除别名">−</button></div></template>
+        </div>
+        <label class="oauth-alias-original"><input type="checkbox" name="keep_original" value="{{$model.ID}}" {{if $model.KeepOriginal}}checked{{end}}>同时保留原名</label>
+        <input type="hidden" name="model" value="{{$model.ID}}">
+      </div>
+      {{end}}
+    </div>
+    <div class="oauth-alias-actions"><button class="button primary" type="submit">保存模型别名</button></div>
+  </form>
+  {{else}}<div class="empty-state compact"><strong>暂无已启用的可映射模型</strong></div>{{end}}{{end}}
 </section>
 {{end}}

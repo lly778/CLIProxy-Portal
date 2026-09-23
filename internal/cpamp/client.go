@@ -33,6 +33,7 @@ const (
 	pathAPIKeys          = "/v0/management/api-keys"
 	pathAuthFiles        = "/v0/management/auth-files"
 	pathOAuthExcluded    = "/v0/management/oauth-excluded-models"
+	pathOAuthModelAlias  = "/v0/management/oauth-model-alias"
 	pathModelDefinitions = "/v0/management/model-definitions"
 	pathAliases          = "/v0/management/api-key-aliases"
 	pathAnalytics        = "/v0/management/monitoring/analytics"
@@ -132,6 +133,16 @@ type API interface {
 	DeleteAlias(context.Context, string) error
 	Analytics(context.Context, AnalyticsRequest) (AnalyticsResponse, error)
 	ListModels(context.Context) (ModelListResponse, error)
+}
+
+// OAuthModelAlias maps one client-visible OAuth model ID to its upstream model.
+// Fork keeps the upstream model visible alongside its client-facing alias.
+type OAuthModelAlias struct {
+	Name         string `json:"name"`
+	Alias        string `json:"alias"`
+	Fork         bool   `json:"fork,omitempty"`
+	DisplayName  string `json:"display-name,omitempty"`
+	ForceMapping bool   `json:"force-mapping,omitempty"`
 }
 
 // HTTPError describes a non-2xx response without retaining the response body.
@@ -485,6 +496,8 @@ type EventRow struct {
 	EventHash           string `json:"event_hash"`
 	TimestampMS         int64  `json:"timestamp_ms"`
 	Model               string `json:"model"`
+	RequestedModel      string `json:"requested_model,omitempty"`
+	ResolvedModel       string `json:"resolved_model,omitempty"`
 	Endpoint            string `json:"endpoint"`
 	Method              string `json:"method"`
 	Path                string `json:"path"`
@@ -738,6 +751,51 @@ func (c *Client) SetOAuthExcludedModels(ctx context.Context, provider string, mo
 		return fmt.Errorf("cpamp %s request encoding failed", pathOAuthExcluded)
 	}
 	_, err = c.do(ctx, http.MethodPatch, pathOAuthExcluded, payload, c.adminHeader)
+	return err
+}
+
+// ListOAuthModelAliases reads one channel from CPA's global OAuth mapping.
+// CPAMP forwards this management endpoint to CPA.
+func (c *Client) ListOAuthModelAliases(ctx context.Context, channel string) ([]OAuthModelAlias, error) {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel == "" {
+		return nil, errors.New("cpamp OAuth channel is required")
+	}
+	body, err := c.do(ctx, http.MethodGet, pathOAuthModelAlias, nil, c.adminHeader)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		Channels map[string][]OAuthModelAlias `json:"oauth-model-alias"`
+	}
+	if err := decodeJSON(pathOAuthModelAlias, body, &envelope); err != nil {
+		return nil, err
+	}
+	for key, aliases := range envelope.Channels {
+		if strings.EqualFold(key, channel) {
+			return aliases, nil
+		}
+	}
+	return []OAuthModelAlias{}, nil
+}
+
+// SetOAuthModelAliases replaces only one OAuth channel. Other channels retain
+// their existing CPA settings. An empty list removes this channel's mappings.
+func (c *Client) SetOAuthModelAliases(ctx context.Context, channel string, aliases []OAuthModelAlias) error {
+	channel = strings.ToLower(strings.TrimSpace(channel))
+	if channel == "" {
+		return errors.New("cpamp OAuth channel is required")
+	}
+	if len(aliases) == 0 {
+		query := url.Values{"channel": []string{channel}}
+		_, err := c.do(ctx, http.MethodDelete, pathOAuthModelAlias+"?"+query.Encode(), nil, c.adminHeader)
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"channel": channel, "aliases": aliases})
+	if err != nil {
+		return fmt.Errorf("cpamp %s request encoding failed", pathOAuthModelAlias)
+	}
+	_, err = c.do(ctx, http.MethodPatch, pathOAuthModelAlias, payload, c.adminHeader)
 	return err
 }
 

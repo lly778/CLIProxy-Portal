@@ -370,14 +370,16 @@ type UserUsageRankView struct {
 }
 
 type AuditView struct {
-	At        string
-	Actor     string
-	Action    string
-	Target    string
-	Result    string
-	IP        string
-	RequestID string
-	Details   string
+	At         string
+	Actor      string
+	ActorName  string
+	ActorPhone string
+	Action     string
+	Target     string
+	Result     string
+	IP         string
+	RequestID  string
+	Details    string
 }
 
 type AdminDashboardView struct {
@@ -474,8 +476,12 @@ type AdminUpstreamsView struct {
 	LayoutView
 	Accounts      []UpstreamAccountView
 	Models        []OAuthModelView
+	AliasModels   []OAuthModelView
 	WildcardRules []string
 	ModelError    string
+	AliasError    string
+	AliasRevision string
+	AliasReady    bool
 	QuotaError    string
 	Enabled       int
 	Disabled      int
@@ -484,6 +490,8 @@ type AdminUpstreamsView struct {
 type OAuthModelView struct {
 	ID           string
 	DisplayName  string
+	AliasList    []string
+	KeepOriginal bool
 	Enabled      bool
 	WildcardRule string
 }

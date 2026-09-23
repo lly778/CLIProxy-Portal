@@ -496,5 +496,5 @@ func (s *Server) passwordPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) audit(r *http.Request, actor domain.User, action, target, detail string) {
-	_ = s.Store.Audit(r.Context(), domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: actor.Name, Action: action, TargetID: target, TargetLabel: target, Detail: detail, IP: s.clientIP(r), CreatedAt: time.Now().UTC()})
+	_ = s.Store.Audit(r.Context(), domain.AuditEvent{ActorUserID: actor.ID, ActorLabel: auditActorLabel(actor.Name, actor.Phone), Action: action, TargetID: target, TargetLabel: target, Detail: detail, IP: s.clientIP(r), CreatedAt: time.Now().UTC()})
 }

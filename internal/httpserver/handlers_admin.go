@@ -87,7 +87,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	audits, _ := s.Store.ListAudit(r.Context(), 8, 0)
-	v.RecentAudit = s.auditViews(audits)
+	v.RecentAudit = s.auditViews(r.Context(), audits)
 	_ = s.UI.Render(w, webui.PageAdminDashboard, v)
 }
 
@@ -588,7 +588,7 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游账号", "admin-upstreams")}
+	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游管理", "admin-upstreams")}
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context())
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil {
@@ -640,13 +640,33 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
+	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context())
+	aliasByModel := make(map[string][]string, len(aliases))
+	keepOriginalByModel := make(map[string]bool, len(aliases))
+	if aliasErr != nil {
+		v.AliasError = "模型别名暂时不可用"
+		s.Logger.Error("list OAuth model aliases", "error", aliasErr)
+	} else {
+		v.AliasReady = true
+		v.AliasRevision = revision
+		for _, alias := range aliases {
+			modelID := strings.ToLower(alias.Name)
+			aliasByModel[modelID] = append(aliasByModel[modelID], alias.Alias)
+			keepOriginalByModel[modelID] = keepOriginalByModel[modelID] || alias.Fork
+		}
+	}
 	if modelErr != nil {
 		v.ModelError = "OAuth 模型状态暂时不可用"
 		s.Logger.Error("list OAuth model settings", "error", modelErr)
 	} else {
 		v.WildcardRules = wildcards
 		for _, model := range models {
-			v.Models = append(v.Models, webui.OAuthModelView{ID: model.ID, DisplayName: model.DisplayName, Enabled: model.Enabled, WildcardRule: model.WildcardRule})
+			modelAliases := aliasByModel[strings.ToLower(model.ID)]
+			row := webui.OAuthModelView{ID: model.ID, DisplayName: model.DisplayName, AliasList: modelAliases, KeepOriginal: len(modelAliases) == 0 || keepOriginalByModel[strings.ToLower(model.ID)], Enabled: model.Enabled, WildcardRule: model.WildcardRule}
+			v.Models = append(v.Models, row)
+			if model.Enabled {
+				v.AliasModels = append(v.AliasModels, row)
+			}
 		}
 	}
 	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
@@ -655,7 +675,37 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	if msg := strings.TrimSpace(r.URL.Query().Get("error")); msg != "" {
 		v.ModelError = msg
 	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("alias_error")); msg != "" {
+		v.AliasError = msg
+	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		s.errorPage(w, r, http.StatusBadRequest, "模型别名表单无效", nil)
+		return
+	}
+	models := r.PostForm["model"]
+	inputs := make([]service.OAuthModelAliasInput, 0, len(models))
+	keepOriginal := make(map[string]bool, len(r.PostForm["keep_original"]))
+	for _, model := range r.PostForm["keep_original"] {
+		keepOriginal[strings.ToLower(strings.TrimSpace(model))] = true
+	}
+	for i, model := range models {
+		inputs = append(inputs, service.OAuthModelAliasInput{Model: model, Aliases: strings.Join(r.PostForm["alias_"+strconv.Itoa(i)], ","), KeepOriginal: keepOriginal[strings.ToLower(strings.TrimSpace(model))]})
+	}
+	if err := s.Keys.SetOAuthModelAliases(r.Context(), inputs, r.PostForm.Get("revision")); err != nil {
+		s.Logger.Error("update OAuth model aliases", "error", err)
+		http.Redirect(w, r, "/admin/upstreams?alias_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.audit(r, currentUser(r), "oauth_model.aliases.update", "codex", "Codex")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("模型别名已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
@@ -756,7 +806,7 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 		v.AuditError = "操作日志暂时不可用"
 		s.Logger.Error("list audit log", "error", auditErr)
 	} else {
-		v.Entries = s.auditViews(items)
+		v.Entries = s.auditViews(r.Context(), items)
 		v.Total = strconv.Itoa(len(items))
 	}
 	_ = s.UI.Render(w, webui.PageAdminSystem, v)

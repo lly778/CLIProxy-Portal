@@ -171,7 +171,25 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 		latency = fmt.Sprintf("%d ms", *e.LatencyMS)
 	}
 	errorFull := requestFailureText(e)
-	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: e.Model, Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
+	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: requestModelLabel(e), Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
+}
+
+// requestModelLabel shows what the client requested and where CPA routed it.
+// Older CPAMP records may not have either dedicated field, so fall back to
+// their existing display model without inventing a resolved target.
+func requestModelLabel(e cpamp.EventRow) string {
+	requested := strings.TrimSpace(e.RequestedModel)
+	if requested == "" {
+		requested = strings.TrimSpace(e.Model)
+	}
+	resolved := strings.TrimSpace(e.ResolvedModel)
+	if requested == "" {
+		return resolved
+	}
+	if resolved == "" || requested == resolved {
+		return requested
+	}
+	return requested + " → " + resolved
 }
 
 func requestFailureText(e cpamp.EventRow) string {
@@ -485,25 +503,58 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 	return v
 }
 
-func (s *Server) auditViews(items []domain.AuditEvent) []webui.AuditView {
+func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []webui.AuditView {
 	out := make([]webui.AuditView, 0, len(items))
+	actors := make(map[string]domain.User)
 	for _, e := range items {
-		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: emptyDash(auditActorName(e.ActorLabel)), Action: e.Action, Target: emptyDash(e.TargetLabel), Result: "success", IP: e.IP, Details: e.Detail})
+		name, phone := auditActorParts(e.ActorLabel)
+		if e.ActorUserID != "" && s.Store != nil && (name == "" || phone == "") {
+			actor, cached := actors[e.ActorUserID]
+			if !cached {
+				actor, _ = s.Store.UserByID(ctx, e.ActorUserID)
+				actors[e.ActorUserID] = actor
+			}
+			if name == "" {
+				name = actor.Name
+			}
+			if phone == "" {
+				phone = maskedAuditPhone(actor.Phone)
+			}
+		}
+		label := emptyDash(name)
+		if phone != "" {
+			label += "(" + phone + ")"
+		}
+		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: label, ActorName: emptyDash(name), ActorPhone: phone, Action: e.Action, Target: emptyDash(e.TargetLabel), Result: "success", IP: e.IP, Details: e.Detail})
 	}
 	return out
 }
 
-func auditActorName(label string) string {
+func auditActorParts(label string) (string, string) {
 	label = strings.TrimSpace(label)
 	open := strings.LastIndex(label, "(")
 	if open < 0 || !strings.HasSuffix(label, ")") {
-		return label
+		return label, ""
 	}
 	phone := label[open+1 : len(label)-1]
 	if len(phone) != 11 || phone[3:7] != "****" || !asciiDigits(phone[:3]) || !asciiDigits(phone[7:]) {
-		return label
+		return label, ""
 	}
-	return strings.TrimSpace(label[:open])
+	return strings.TrimSpace(label[:open]), phone
+}
+
+func auditActorLabel(name, phone string) string {
+	if masked := maskedAuditPhone(phone); masked != "" {
+		return name + "(" + masked + ")"
+	}
+	return name
+}
+
+func maskedAuditPhone(phone string) string {
+	if len(phone) != 11 || !asciiDigits(phone) {
+		return ""
+	}
+	return phone[:3] + "****" + phone[7:]
 }
 
 func asciiDigits(value string) bool {

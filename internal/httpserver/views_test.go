@@ -14,6 +14,27 @@ func TestRequestFailureSummaryHidesSuccessMetadata(t *testing.T) {
 	}
 }
 
+func TestRequestModelLabel(t *testing.T) {
+	tests := []struct {
+		name  string
+		event cpamp.EventRow
+		want  string
+	}{
+		{"alias routed to real model", cpamp.EventRow{Model: "gpt-5.6-luna", RequestedModel: "gpt-5.6-luna", ResolvedModel: "gpt-6-luna"}, "gpt-5.6-luna → gpt-6-luna"},
+		{"same name is not repeated", cpamp.EventRow{Model: "gpt-6-luna", RequestedModel: "gpt-6-luna", ResolvedModel: "gpt-6-luna"}, "gpt-6-luna"},
+		{"older event without route", cpamp.EventRow{Model: "gpt-5.6-luna"}, "gpt-5.6-luna"},
+		{"missing requested model", cpamp.EventRow{ResolvedModel: "gpt-6-luna"}, "gpt-6-luna"},
+		{"model fallback retains route", cpamp.EventRow{Model: "gpt-5.6-luna", ResolvedModel: "gpt-6-luna"}, "gpt-5.6-luna → gpt-6-luna"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := requestModelLabel(tt.event); got != tt.want {
+				t.Fatalf("requestModelLabel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRequestFailureSummaryExtractsUsefulFailureDetails(t *testing.T) {
 	status := int64(429)
 	event := cpamp.EventRow{
