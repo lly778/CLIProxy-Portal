@@ -337,9 +337,19 @@ func adminUserTimeBefore(left, right time.Time, descending bool) bool {
 }
 
 func (s *Server) adminUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	target, err := s.Store.UserByID(r.Context(), r.PathValue("id"))
 	if err != nil {
 		s.errorPage(w, r, 404, "用户不存在", nil)
+		return
+	}
+	if r.URL.Query().Get("refresh") == "1" {
+		to := time.Now().UTC()
+		if _, err := s.Keys.RefreshUsage(r.Context(), target.ID, to.AddDate(0, 0, -7), to, 100); err != nil {
+			s.errorPage(w, r, http.StatusBadGateway, "刷新模型请求日志失败", err)
+			return
+		}
+		http.Redirect(w, r, r.URL.Path+"#requests", http.StatusSeeOther)
 		return
 	}
 	s.renderAdminUser(w, r, target, "", nil)
@@ -641,6 +651,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	}
 	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
 	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context())
+	reasoningCaps, reasoningRevision, reasoningErr := s.Keys.OAuthReasoningCaps(r.Context())
 	aliasByModel := make(map[string][]string, len(aliases))
 	keepOriginalByModel := make(map[string]bool, len(aliases))
 	if aliasErr != nil {
@@ -655,6 +666,13 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			keepOriginalByModel[modelID] = keepOriginalByModel[modelID] || alias.Fork
 		}
 	}
+	if reasoningErr != nil {
+		v.ReasoningError = "思考强度配置暂时不可用"
+		s.Logger.Error("list OAuth reasoning caps", "error", reasoningErr)
+	} else {
+		v.ReasoningReady = true
+		v.ReasoningRevision = reasoningRevision
+	}
 	if modelErr != nil {
 		v.ModelError = "OAuth 模型状态暂时不可用"
 		s.Logger.Error("list OAuth model settings", "error", modelErr)
@@ -666,6 +684,25 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			v.Models = append(v.Models, row)
 			if model.Enabled {
 				v.AliasModels = append(v.AliasModels, row)
+				if len(model.ThinkingLevels) > 0 {
+					cap := reasoningCaps[strings.ToLower(model.ID)]
+					capRow := webui.ReasoningCapModelView{ID: model.ID}
+					capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: "", Label: "不限制", Selected: cap == ""})
+					found := cap == ""
+					for _, level := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
+						for _, supported := range model.ThinkingLevels {
+							if strings.EqualFold(supported, level) {
+								capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: level, Label: level, Selected: cap == level})
+								found = found || cap == level
+								break
+							}
+						}
+					}
+					if !found {
+						capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: cap, Label: cap + "（当前模型未声明）", Selected: true})
+					}
+					v.ReasoningModels = append(v.ReasoningModels, capRow)
+				}
 			}
 		}
 	}
@@ -677,6 +714,9 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg := strings.TrimSpace(r.URL.Query().Get("alias_error")); msg != "" {
 		v.AliasError = msg
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("reasoning_error")); msg != "" {
+		v.ReasoningError = msg
 	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
 }
@@ -706,6 +746,34 @@ func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) 
 	}
 	s.audit(r, currentUser(r), "oauth_model.aliases.update", "codex", "Codex")
 	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("模型别名已保存"), http.StatusSeeOther)
+}
+
+func (s *Server) adminReasoningCaps(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		s.errorPage(w, r, http.StatusBadRequest, "思考强度表单无效", nil)
+		return
+	}
+	models := r.PostForm["model"]
+	inputs := make([]service.ReasoningCapInput, 0, len(models))
+	for i, model := range models {
+		values := r.PostForm["cap_"+strconv.Itoa(i)]
+		if len(values) != 1 {
+			http.Redirect(w, r, "/admin/upstreams?reasoning_error="+url.QueryEscape("思考强度表单已变化，请刷新页面后重试"), http.StatusSeeOther)
+			return
+		}
+		inputs = append(inputs, service.ReasoningCapInput{Model: model, Cap: values[0]})
+	}
+	if err := s.Keys.SetOAuthReasoningCaps(r.Context(), inputs, r.PostForm.Get("reasoning_revision")); err != nil {
+		s.Logger.Error("update OAuth reasoning caps", "error", err)
+		http.Redirect(w, r, "/admin/upstreams?reasoning_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", "codex", "Codex")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("思考强度上限已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
@@ -749,7 +817,16 @@ func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	u := currentUser(r)
+	if r.URL.Query().Get("refresh") == "1" {
+		if _, err := s.Keys.RefreshGlobalRequests(r.Context(), 100); err != nil {
+			s.errorPage(w, r, http.StatusBadGateway, "刷新全局日志失败", err)
+			return
+		}
+		http.Redirect(w, r, "/admin/requests", http.StatusSeeOther)
+		return
+	}
 	events, err := s.Keys.GlobalRequests(r.Context(), 100)
 	if err != nil {
 		s.errorPage(w, r, http.StatusBadGateway, "全局日志暂时不可用", err)
@@ -785,6 +862,11 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Method == http.MethodGet && r.URL.Query().Get("refresh") == "1" {
+		http.Redirect(w, r, "/admin/system#audit", http.StatusSeeOther)
+		return
+	}
 	if r.Method == http.MethodPost && !s.verifyCSRF(r) {
 		s.errorPage(w, r, 403, "请求已失效", nil)
 		return

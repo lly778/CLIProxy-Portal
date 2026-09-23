@@ -35,7 +35,7 @@ type Keys struct {
 	refresh         QuotaRefreshStatus
 	refreshedQuota  map[string][]cpamp.CodexQuotaWindow
 	quotaFetchMu    sync.Mutex
-	modelAliasMu    sync.Mutex
+	modelConfigMu   sync.Mutex
 	reconcileMu     sync.Mutex
 	lastSeenSyncAt  time.Time
 	RefreshCooldown time.Duration
@@ -109,10 +109,11 @@ type UpstreamAccountQuotaWindow struct {
 // by a wildcard rule is read-only here because removing that rule would affect
 // other models as well.
 type OAuthModelSetting struct {
-	ID           string
-	DisplayName  string
-	Enabled      bool
-	WildcardRule string
+	ID             string
+	DisplayName    string
+	ThinkingLevels []string
+	Enabled        bool
+	WildcardRule   string
 }
 
 // OAuthModelAliasInput is one editable Codex model mapping. Aliases is a
@@ -632,9 +633,21 @@ func (k *Keys) upsertAlias(ctx context.Context, hash, alias string) error {
 }
 
 func (k *Keys) Usage(ctx context.Context, userID string, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
+	return k.usage(ctx, userID, from, to, events, false)
+}
+
+// RefreshUsage bypasses the portal cache once and replaces its entry with the
+// latest CPAMP response. Subsequent ordinary page loads still use CacheTTL.
+func (k *Keys) RefreshUsage(ctx context.Context, userID string, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
+	return k.usage(ctx, userID, from, to, events, true)
+}
+
+func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, events int, refresh bool) (cpamp.AnalyticsResponse, error) {
 	cacheKey := fmt.Sprintf("user:%s:%d:%d:%d", userID, from.Unix()/60, to.Unix()/60, events)
-	if value, ok := k.cached(cacheKey); ok {
-		return value, nil
+	if !refresh {
+		if value, ok := k.cached(cacheKey); ok {
+			return value, nil
+		}
 	}
 	hashes, err := k.hashesForUser(ctx, userID)
 	if err != nil {
@@ -673,6 +686,16 @@ func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) 
 // GlobalRequests returns the latest sanitized model-request metadata across
 // every API key. Prompt and response bodies are never requested or exposed.
 func (k *Keys) GlobalRequests(ctx context.Context, limit int) (cpamp.EventsResponse, error) {
+	return k.globalRequests(ctx, limit, false)
+}
+
+// RefreshGlobalRequests bypasses the portal cache once and primes it with the
+// latest global request events for subsequent normal page loads.
+func (k *Keys) RefreshGlobalRequests(ctx context.Context, limit int) (cpamp.EventsResponse, error) {
+	return k.globalRequests(ctx, limit, true)
+}
+
+func (k *Keys) globalRequests(ctx context.Context, limit int, refresh bool) (cpamp.EventsResponse, error) {
 	if limit < 1 {
 		limit = 1
 	}
@@ -682,8 +705,10 @@ func (k *Keys) GlobalRequests(ctx context.Context, limit int) (cpamp.EventsRespo
 	now := k.Now()
 	from := now.AddDate(-10, 0, 0)
 	cacheKey := fmt.Sprintf("global-requests:%d:%d", now.Unix()/60, limit)
-	if value, ok := k.cached(cacheKey); ok && value.Events != nil {
-		return *value.Events, nil
+	if !refresh {
+		if value, ok := k.cached(cacheKey); ok && value.Events != nil {
+			return *value.Events, nil
+		}
 	}
 	req := cpamp.AnalyticsRequest{
 		FromMS: from.UnixMilli(), ToMS: now.UnixMilli(), NowMS: now.UnixMilli(), TimeZone: "Asia/Shanghai",
@@ -944,7 +969,7 @@ func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []s
 	models := make([]OAuthModelSetting, 0, len(definitions))
 	for _, definition := range definitions {
 		matched, wildcard := excludedModelRule(definition.ID, rules)
-		models = append(models, OAuthModelSetting{ID: definition.ID, DisplayName: definition.DisplayName, Enabled: matched == "", WildcardRule: wildcard})
+		models = append(models, OAuthModelSetting{ID: definition.ID, DisplayName: definition.DisplayName, ThinkingLevels: definition.ThinkingLevels, Enabled: matched == "", WildcardRule: wildcard})
 	}
 	sort.SliceStable(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
 	wildcards := make([]string, 0)
@@ -990,8 +1015,8 @@ func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 // original ID alongside aliases; force-mapping keeps alias responses labelled
 // with the client-facing name.
 func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string) error {
-	k.modelAliasMu.Lock()
-	defer k.modelAliasMu.Unlock()
+	k.modelConfigMu.Lock()
+	defer k.modelConfigMu.Unlock()
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 		SetOAuthModelAliases(context.Context, string, []cpamp.OAuthModelAlias) error
@@ -1181,8 +1206,8 @@ func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthMo
 // SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
 // remain untouched because changing one would alter multiple model switches.
 func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool) error {
-	k.modelAliasMu.Lock()
-	defer k.modelAliasMu.Unlock()
+	k.modelConfigMu.Lock()
+	defer k.modelConfigMu.Unlock()
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)

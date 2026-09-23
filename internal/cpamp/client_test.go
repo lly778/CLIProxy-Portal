@@ -19,6 +19,43 @@ const (
 	testCPAKey   = "cpa_portal_test-key"
 )
 
+func TestConfigYAMLTransport(t *testing.T) {
+	config := []byte("api-keys:\n  - secret-value\n")
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != pathConfigYAML || r.Header.Get("Authorization") != "Bearer "+testAdminKey {
+			t.Errorf("unexpected config request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/yaml")
+			_, _ = w.Write(config)
+		case http.MethodPut:
+			if r.Header.Get("Content-Type") != "application/yaml" {
+				t.Errorf("config content type = %q", r.Header.Get("Content-Type"))
+			}
+			body, _ := io.ReadAll(r.Body)
+			config = body
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	got, err := client.GetConfigYAML(context.Background())
+	if err != nil || string(got) != string(config) {
+		t.Fatalf("GetConfigYAML returned %q, %v", got, err)
+	}
+	if err := client.PutConfigYAML(context.Background(), []byte("payload: {}\n")); err != nil {
+		t.Fatalf("PutConfigYAML: %v", err)
+	}
+	got, err = client.GetConfigYAML(context.Background())
+	if err != nil || string(got) != "payload: {}\n" {
+		t.Fatalf("updated YAML = %q, %v", got, err)
+	}
+}
+
 func newTestClient(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
 	server := httptest.NewServer(handler)

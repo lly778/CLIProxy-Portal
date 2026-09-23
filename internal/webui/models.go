@@ -474,17 +474,21 @@ type UpstreamAccountQuotaView struct {
 
 type AdminUpstreamsView struct {
 	LayoutView
-	Accounts      []UpstreamAccountView
-	Models        []OAuthModelView
-	AliasModels   []OAuthModelView
-	WildcardRules []string
-	ModelError    string
-	AliasError    string
-	AliasRevision string
-	AliasReady    bool
-	QuotaError    string
-	Enabled       int
-	Disabled      int
+	Accounts          []UpstreamAccountView
+	Models            []OAuthModelView
+	AliasModels       []OAuthModelView
+	ReasoningModels   []ReasoningCapModelView
+	WildcardRules     []string
+	ModelError        string
+	AliasError        string
+	AliasRevision     string
+	AliasReady        bool
+	ReasoningError    string
+	ReasoningRevision string
+	ReasoningReady    bool
+	QuotaError        string
+	Enabled           int
+	Disabled          int
 }
 
 type OAuthModelView struct {
@@ -494,6 +498,17 @@ type OAuthModelView struct {
 	KeepOriginal bool
 	Enabled      bool
 	WildcardRule string
+}
+
+type ReasoningCapModelView struct {
+	ID      string
+	Options []ReasoningCapOptionView
+}
+
+type ReasoningCapOptionView struct {
+	Value    string
+	Label    string
+	Selected bool
 }
 
 type PolicyView struct {

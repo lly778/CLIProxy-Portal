@@ -478,6 +478,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-alias-original { display: inline-flex; align-items: center; gap: 7px; width: 100%; padding-top: 12px; margin-top: 14px; color: var(--muted); border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
 .oauth-alias-original input { width: auto; margin: 0; }
 .oauth-alias-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin: 15px 0 4px; }
+.reasoning-cap-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.reasoning-cap-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px); align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.reasoning-cap-row .mono { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
+.reasoning-cap-row select { width: 100%; min-width: 0; }
 .policy-body { color: #3c4859; line-height: 1.75; white-space: pre-wrap; }
 .policy-publisher { margin: 16px 0 0; }
 .rule-display { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
@@ -572,11 +576,13 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .oauth-rule-note { align-items: flex-start; flex-direction: column; }
   .oauth-rule-note > div { justify-content: flex-start; }
   .oauth-alias-list { grid-template-columns: 1fr; }
+  .reasoning-cap-list { grid-template-columns: 1fr; }
+  .reasoning-cap-row { grid-template-columns: minmax(0, 1fr) minmax(120px, 150px); }
   .oauth-alias-row { padding: 15px; }
   .oauth-alias-actions { align-items: stretch; flex-direction: column; }
   .main { padding: 27px 16px 48px; margin-left: 0; }
   .page-head { display: block; margin-bottom: 22px; }
-  .page-head > .button, .page-head > form, .page-head > .muted { margin-top: 15px; }
+  .page-head > .button, .page-head > .button-row, .page-head > form, .page-head > .muted { margin-top: 15px; }
   .grid-2, .grid-3, .model-grid, .model-usage-grid, .approval-grid, .health-grid { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .quota-pool-summary { grid-template-columns: 1fr; gap: 16px; }

@@ -35,6 +35,21 @@ func TestRequestModelLabel(t *testing.T) {
 	}
 }
 
+func TestReasoningEffortLabelKeepsXHighBelowMax(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{input: "high", want: "高"},
+		{input: "xhigh", want: "极高"},
+		{input: "max", want: "最高"},
+	} {
+		if got := reasoningEffortLabel(test.input); got != test.want {
+			t.Errorf("reasoningEffortLabel(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
 func TestRequestFailureSummaryExtractsUsefulFailureDetails(t *testing.T) {
 	status := int64(429)
 	event := cpamp.EventRow{

@@ -262,11 +262,20 @@ func (s *Server) quotaRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	u := currentUser(r)
 	to := time.Now().UTC()
 	from := u.CreatedAt.UTC()
 	if from.IsZero() || !from.Before(to) {
 		from = to.AddDate(-10, 0, 0)
+	}
+	if r.URL.Query().Get("refresh") == "1" {
+		if _, err := s.Keys.RefreshUsage(r.Context(), u.ID, from, to, 100); err != nil {
+			s.errorPage(w, r, http.StatusBadGateway, "刷新模型请求日志失败", err)
+			return
+		}
+		http.Redirect(w, r, "/activity", http.StatusSeeOther)
+		return
 	}
 	a, err := s.Keys.Usage(r.Context(), u.ID, from, to, 100)
 	_, _, _, requests := s.usageViews(a, from, to)

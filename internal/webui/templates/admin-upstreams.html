@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">管理 Codex 上游凭证、模型启停及用户侧别名映射。更改会影响后续请求调度。</p></div></div>
+<div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">管理 Codex 上游凭证、模型启停、用户侧别名及思考强度上限。更改会影响后续请求调度。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="card upstream-card">
   <div class="section-head compact"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><span class="badge neutral">{{len .Accounts}} 个账号</span></div>
@@ -67,5 +67,21 @@
     <div class="oauth-alias-actions"><button class="button primary" type="submit">保存模型别名</button></div>
   </form>
   {{else}}<div class="empty-state compact"><strong>暂无已启用的可映射模型</strong></div>{{end}}{{end}}
+</section>
+<section class="card upstream-card section-gap">
+  <div class="section-head compact"><div><h2>思考强度上限</h2><p class="muted small">按实际模型全局生效，别名共享上限。高于上限的显式请求降至上限；低于上限或未指定强度的请求保持原样。</p></div><span class="badge neutral">全局生效</span></div>
+  {{if .ReasoningError}}<div class="alert danger" role="alert">{{.ReasoningError}}</div>{{end}}
+  {{if .ReasoningReady}}{{if .ReasoningModels}}
+  <form method="post" action="/admin/upstreams/models/reasoning" data-confirm="确定保存 Codex 模型思考强度上限吗？保存后将影响所有用户的新请求。">
+    {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+    <input type="hidden" name="reasoning_revision" value="{{.ReasoningRevision}}">
+    <div class="reasoning-cap-list">
+      {{range $index, $model := .ReasoningModels}}
+      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></label>
+      {{end}}
+    </div>
+    <div class="oauth-alias-actions"><button class="button primary" type="submit">保存强度上限</button></div>
+  </form>
+  {{else}}<div class="empty-state compact"><strong>暂无可设置强度的已启用模型</strong></div>{{end}}{{end}}
 </section>
 {{end}}

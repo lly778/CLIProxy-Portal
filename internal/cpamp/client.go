@@ -34,6 +34,7 @@ const (
 	pathAuthFiles        = "/v0/management/auth-files"
 	pathOAuthExcluded    = "/v0/management/oauth-excluded-models"
 	pathOAuthModelAlias  = "/v0/management/oauth-model-alias"
+	pathConfigYAML       = "/v0/management/config.yaml"
 	pathModelDefinitions = "/v0/management/model-definitions"
 	pathAliases          = "/v0/management/api-key-aliases"
 	pathAnalytics        = "/v0/management/monitoring/analytics"
@@ -279,8 +280,9 @@ type AuthFile struct {
 
 // OAuthModelDefinition is a sanitized static model entry returned by CPAMP.
 type OAuthModelDefinition struct {
-	ID          string
-	DisplayName string
+	ID             string
+	DisplayName    string
+	ThinkingLevels []string
 }
 
 type CodexQuotaWindow struct {
@@ -829,7 +831,16 @@ func (c *Client) ListOAuthModelDefinitions(ctx context.Context, provider string)
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, OAuthModelDefinition{ID: id, DisplayName: rawText(raw, "display_name", "displayName")})
+		definition := OAuthModelDefinition{ID: id, DisplayName: rawText(raw, "display_name", "displayName")}
+		if thinkingRaw, ok := raw["thinking"]; ok {
+			var thinking struct {
+				Levels []string `json:"levels"`
+			}
+			if json.Unmarshal(thinkingRaw, &thinking) == nil {
+				definition.ThinkingLevels = thinking.Levels
+			}
+		}
+		result = append(result, definition)
 	}
 	return result, nil
 }
@@ -1239,7 +1250,27 @@ func (c *Client) Analytics(ctx context.Context, req AnalyticsRequest) (Analytics
 	return result, nil
 }
 
+// GetConfigYAML reads CPA's raw configuration through CPAMP. Callers must keep
+// the result server-side because it can contain credentials and other secrets.
+func (c *Client) GetConfigYAML(ctx context.Context) ([]byte, error) {
+	return c.doWithContentType(ctx, http.MethodGet, pathConfigYAML, nil, c.adminHeader, "", "application/yaml")
+}
+
+// PutConfigYAML replaces CPA's configuration after the caller has validated
+// and merged a current copy. CPA validates the YAML before accepting it.
+func (c *Client) PutConfigYAML(ctx context.Context, data []byte) error {
+	if len(data) == 0 || len(data) > maxResponseSize {
+		return errors.New("cpamp config YAML size is invalid")
+	}
+	_, err := c.doWithContentType(ctx, http.MethodPut, pathConfigYAML, data, c.adminHeader, "application/yaml", "application/json")
+	return err
+}
+
 func (c *Client) do(ctx context.Context, method, requestPath string, body []byte, authorization string) ([]byte, error) {
+	return c.doWithContentType(ctx, method, requestPath, body, authorization, "application/json", "application/json")
+}
+
+func (c *Client) doWithContentType(ctx context.Context, method, requestPath string, body []byte, authorization, contentType, accept string) ([]byte, error) {
 	if c == nil || c.baseURL == nil || c.httpClient == nil {
 		return nil, errors.New("cpamp client is not initialized")
 	}
@@ -1259,9 +1290,9 @@ func (c *Client) do(ctx context.Context, method, requestPath string, body []byte
 	if err != nil {
 		return nil, fmt.Errorf("cpamp request construction failed")
 	}
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set("Accept", accept)
 	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Content-Type", contentType)
 	}
 	if authorization != "" {
 		request.Header.Set("Authorization", authorization)

@@ -589,7 +589,9 @@ func reasoningEffortLabel(value string) string {
 		return "中"
 	case "high":
 		return "高"
-	case "xhigh", "max":
+	case "xhigh":
+		return "极高"
+	case "max":
 		return "最高"
 	case "":
 		return "—"

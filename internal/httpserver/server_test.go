@@ -33,11 +33,13 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var modelCatalogReads int
 	var lastSeenMS int64
 	var lastSeenAnalyticsCalls int
+	var eventAnalyticsCalls int
 	var upstreamDisabled bool
 	var upstreamStatusChanges int
 	var oauthExcluded = []string{"gpt-disabled"}
 	var oauthModelAliases []cpamp.OAuthModelAlias
 	var oauthStatusChanges int
+	configYAML := []byte("api-keys: []\n")
 	cpampServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -80,7 +82,19 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			upstreamStatusChanges++
 			_, _ = io.WriteString(w, `{"ok":true}`)
 		case r.URL.Path == "/v0/management/model-definitions/codex" && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{{"id": "gpt-disabled", "display_name": "Disabled model"}, {"id": "gpt-enabled", "display_name": "Enabled model"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []map[string]any{
+				{"id": "gpt-disabled", "display_name": "Disabled model", "thinking": map[string]any{"levels": []string{"low", "medium", "high"}}},
+				{"id": "gpt-enabled", "display_name": "Enabled model", "thinking": map[string]any{"levels": []string{"low", "medium", "high", "xhigh", "max"}}},
+			}})
+		case r.URL.Path == "/v0/management/config.yaml" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/yaml")
+			_, _ = w.Write(configYAML)
+		case r.URL.Path == "/v0/management/config.yaml" && r.Method == http.MethodPut:
+			if r.Header.Get("Content-Type") != "application/yaml" {
+				t.Errorf("config YAML content type = %q", r.Header.Get("Content-Type"))
+			}
+			configYAML, _ = io.ReadAll(r.Body)
+			_, _ = io.WriteString(w, `{"ok":true}`)
 		case r.URL.Path == "/v0/management/oauth-excluded-models" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{"oauth-excluded-models": map[string]any{"codex": oauthExcluded}})
 		case r.URL.Path == "/v0/management/oauth-excluded-models" && r.Method == http.MethodPatch:
@@ -142,6 +156,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 				response["api_key_stats"] = stats
 			}
 			if req.Include.EventsPage != nil {
+				eventAnalyticsCalls++
 				event := map[string]any{"timestamp_ms": time.Now().UnixMilli(), "model": "gpt-test", "requested_model": "gpt-test", "resolved_model": "gpt-upstream", "reasoning_effort": "high", "input_tokens": 120, "output_tokens": 30, "cached_tokens": 20, "cache_read_tokens": 40, "cache_creation_tokens": 10, "reasoning_tokens": 25, "total_tokens": 150, "latency_ms": 1_200, "failed": false}
 				if len(keys) > 0 {
 					event["api_key_hash"] = cpamp.HashAPIKey(keys[0])
@@ -300,6 +315,26 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if strings.Contains(activityPage, "账号获批") || strings.Contains(activityPage, "领取 API Key") {
 		t.Fatalf("user activity page exposed account or security operations: %s", activityPage)
 	}
+	if !strings.Contains(activityPage, `href="/activity?refresh=1"`) {
+		t.Fatal("user activity page missing manual refresh button")
+	}
+	mu.Lock()
+	eventsBeforeRefresh := eventAnalyticsCalls
+	mu.Unlock()
+	refreshResponse, err := client.Get(portal.URL + "/activity?refresh=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusSeeOther || refreshResponse.Header.Get("Location") != "/activity" {
+		t.Fatalf("activity refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
+	}
+	mu.Lock()
+	eventsAfterRefresh := eventAnalyticsCalls
+	mu.Unlock()
+	if eventsAfterRefresh != eventsBeforeRefresh+1 {
+		t.Fatalf("manual activity refresh analytics calls = %d, want %d", eventsAfterRefresh, eventsBeforeRefresh+1)
+	}
 	usagePage := getBody(t, client, portal.URL+"/usage?range=7d", http.StatusOK)
 	if strings.Contains(usagePage, "逐请求记录") {
 		t.Fatalf("usage page still rendered request records: %s", usagePage)
@@ -313,9 +348,40 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminRequestsPage, "全局日志") || strings.Contains(adminRequestsPage, "全局请求日志") || !strings.Contains(adminRequestsPage, "最近 100 条") || !strings.Contains(adminRequestsPage, "张三") || !strings.Contains(adminRequestsPage, modelRoute) {
 		t.Fatalf("admin global request page missing linked request: %s", adminRequestsPage)
 	}
+	if !strings.Contains(adminRequestsPage, `href="/admin/requests?refresh=1"`) {
+		t.Fatal("admin global request page missing manual refresh button")
+	}
+	mu.Lock()
+	eventsBeforeRefresh = eventAnalyticsCalls
+	mu.Unlock()
+	refreshResponse, err = adminClient.Get(portal.URL + "/admin/requests?refresh=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusSeeOther || refreshResponse.Header.Get("Location") != "/admin/requests" {
+		t.Fatalf("admin request refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
+	}
+	mu.Lock()
+	eventsAfterRefresh = eventAnalyticsCalls
+	mu.Unlock()
+	if eventsAfterRefresh != eventsBeforeRefresh+1 {
+		t.Fatalf("manual global refresh analytics calls = %d, want %d", eventsAfterRefresh, eventsBeforeRefresh+1)
+	}
 	adminSystemPage := getBody(t, adminClient, portal.URL+"/admin/system", http.StatusOK)
 	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "操作日志") {
 		t.Fatalf("admin system page did not merge health and operation logs: %s", adminSystemPage)
+	}
+	if !strings.Contains(adminSystemPage, `href="/admin/system?refresh=1#audit"`) {
+		t.Fatal("admin operation log missing refresh button")
+	}
+	refreshResponse, err = adminClient.Get(portal.URL + "/admin/system?refresh=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusSeeOther || refreshResponse.Header.Get("Location") != "/admin/system#audit" {
+		t.Fatalf("operation log refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
 	}
 	auditTable := strings.SplitN(adminSystemPage, `class="table-card audit-table"`, 2)[1]
 	if !strings.Contains(auditTable, "139****9000") || !strings.Contains(auditTable, "138****8000") || strings.Contains(auditTable, "13900139000") || strings.Contains(auditTable, "13800138000") {
@@ -370,6 +436,22 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
 	if !strings.Contains(upstreamsPage, "模型别名映射") || !strings.Contains(upstreamsPage, `name="revision"`) || !strings.Contains(upstreamsPage, `data-alias-add`) || !strings.Contains(upstreamsPage, `data-alias-remove`) || !strings.Contains(upstreamsPage, `name="keep_original"`) {
 		t.Fatalf("admin upstream page missing alias card: %s", upstreamsPage)
+	}
+	if !strings.Contains(upstreamsPage, "思考强度上限") || !strings.Contains(upstreamsPage, `name="reasoning_revision"`) {
+		t.Fatalf("admin upstream page missing reasoning cap controls: %s", upstreamsPage)
+	}
+	reasoningRevision := extract(t, upstreamsPage, `name="reasoning_revision" value="([^"]+)"`)
+	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/reasoning", url.Values{"csrf_token": {adminCSRF}, "reasoning_revision": {reasoningRevision}, "model": {"gpt-enabled"}, "cap_0": {"high"}}, http.StatusSeeOther)
+	mu.Lock()
+	if !strings.Contains(string(configYAML), "cliproxy-portal:reasoning-cap:v1") || !strings.Contains(string(configYAML), "configuration_update") {
+		mu.Unlock()
+		t.Fatal("reasoning cap was not persisted to CPA config")
+	}
+	mu.Unlock()
+	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
+	if !strings.Contains(upstreamsPage, `<option value="high" selected>high</option>`) {
+		t.Fatal("saved reasoning cap was not selected")
 	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	revision := extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
@@ -501,6 +583,26 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminUserPage := getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
 	if !strings.Contains(adminUserPage, "最近 100 条模型请求") || !strings.Contains(adminUserPage, modelRoute) || strings.Contains(adminUserPage, "最近操作") {
 		t.Fatalf("admin user detail did not show model request records: %s", adminUserPage)
+	}
+	if !strings.Contains(adminUserPage, "/admin/users/"+u.ID+"?refresh=1#requests") {
+		t.Fatal("admin user request log missing refresh button")
+	}
+	mu.Lock()
+	eventsBeforeRefresh = eventAnalyticsCalls
+	mu.Unlock()
+	refreshResponse, err = adminClient.Get(portal.URL + "/admin/users/" + u.ID + "?refresh=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusSeeOther || refreshResponse.Header.Get("Location") != "/admin/users/"+u.ID+"#requests" {
+		t.Fatalf("admin user refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
+	}
+	mu.Lock()
+	eventsAfterRefresh = eventAnalyticsCalls
+	mu.Unlock()
+	if eventsAfterRefresh != eventsBeforeRefresh+1 {
+		t.Fatalf("manual admin user refresh analytics calls = %d, want %d", eventsAfterRefresh, eventsBeforeRefresh+1)
 	}
 	if !strings.Contains(adminUserPage, "/admin/users/"+u.ID+"/role") || !strings.Contains(adminUserPage, "设为管理员") || !strings.Contains(adminUserPage, "角色权限") {
 		t.Fatalf("administrator role action was not rendered in user details: %s", adminUserPage)
