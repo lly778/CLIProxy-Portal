@@ -494,10 +494,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .audit-actor-cell span, .audit-actor-cell small { display: block; }
 .audit-actor-cell small { white-space: nowrap; }
 .request-log-table table { min-width: 0; table-layout: fixed; }
-.request-log-table th, .request-log-table td { padding-right: 10px; padding-left: 10px; overflow: hidden; text-overflow: ellipsis; }
-.request-log-table th:nth-child(1) { width: 11%; }
+.request-log-table th, .request-log-table td { padding-right: 8px; padding-left: 8px; overflow: hidden; text-overflow: ellipsis; }
+.request-log-table th:nth-child(1) { width: 12%; }
 .request-log-table th:nth-child(2) { width: 10%; }
-.request-log-table th:nth-child(3) { width: 18%; }
+.request-log-table th:nth-child(3) { width: 17%; }
 .request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 6%; }
 .request-log-table th:nth-child(9) { width: 8%; }
 .request-log-table th:nth-child(10) { width: 8%; }
@@ -505,6 +505,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-log-table th:nth-child(12) { width: 8%; }
 .request-log-table .request-status-cell { width: 7%; min-width: 0; }
 .request-log-table .request-download-cell { width: 8%; min-width: 0; }
+.request-log-table .request-time-cell, .request-log-table td:nth-child(2) { line-height: 1.45; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
+.request-log-table td:nth-child(2) .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
+.request-log-table th:nth-child(n+4):nth-child(-n+10), .request-log-table td:nth-child(n+4):nth-child(-n+10) { text-align: center; }
 .request-model-cell { min-width: 0; white-space: normal; }
 .request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .request-detail-table .request-model-cell { width: 20%; }
@@ -513,7 +516,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-status-download { color: var(--primary); font-weight: 600; }
 .request-status-download:hover { color: var(--primary-dark); text-decoration: underline; }
 .request-status-detail { display: -webkit-box; max-width: 210px; max-height: 7em; margin-top: 4px; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
-.request-status-detail[title] { cursor: help; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
 .page-number { display: inline-block; min-width: 100px; margin: 0 9px; color: var(--muted); text-align: center; font-size: 12px; }
 .detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }
