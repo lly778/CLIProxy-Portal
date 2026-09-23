@@ -997,6 +997,52 @@ func (k *Keys) OAuthModelAliases(ctx context.Context) ([]cpamp.OAuthModelAlias, 
 	return aliases, oauthAliasRevision(aliases), nil
 }
 
+// HiddenModelAliases returns client-visible alias IDs that should not appear
+// in model catalogs. An alias that is also an enabled real model stays visible.
+func (k *Keys) HiddenModelAliases(ctx context.Context) (map[string]bool, error) {
+	aliases, _, err := k.OAuthModelAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(aliases) == 0 {
+		return map[string]bool{}, nil
+	}
+	models, _, err := k.OAuthModelSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visibleReal := make(map[string]bool, len(models))
+	for _, model := range models {
+		if model.Enabled {
+			visibleReal[strings.ToLower(model.ID)] = true
+		}
+	}
+	hidden := make(map[string]bool, len(aliases))
+	for _, alias := range aliases {
+		name := strings.TrimSpace(alias.Alias)
+		if name != "" && !strings.EqualFold(name, strings.TrimSpace(alias.Name)) && !visibleReal[strings.ToLower(name)] {
+			hidden[strings.ToLower(name)] = true
+		}
+	}
+	return hidden, nil
+}
+
+// VisibleModels applies the same catalog policy to models read through CPAMP
+// as the public gateway applies to GET /v1/models.
+func (k *Keys) VisibleModels(ctx context.Context, models []cpamp.Model) ([]cpamp.Model, error) {
+	hidden, err := k.HiddenModelAliases(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]cpamp.Model, 0, len(models))
+	for _, model := range models {
+		if !hidden[strings.ToLower(model.ID)] {
+			visible = append(visible, model)
+		}
+	}
+	return visible, nil
+}
+
 func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 	canonical := append([]cpamp.OAuthModelAlias(nil), aliases...)
 	sort.Slice(canonical, func(i, j int) bool {
@@ -1641,7 +1687,7 @@ func (k *Keys) Models(ctx context.Context) ([]cpamp.Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	return result.Data, nil
+	return k.VisibleModels(ctx, result.Data)
 }
 
 func (k *Keys) Reconcile(ctx context.Context) error {

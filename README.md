@@ -102,7 +102,7 @@ docker compose -f compose.prebuilt.yaml up -d
 
 ## 可选模型网关
 
-门户可以在独立监听地址上运行模型网关。`GET /v1/models` 会移除在门户中配置的、仅作为 Codex 别名的模型 ID；其他允许的模型 API 路径原样转发给 CPA，别名请求仍由 CPA 路由。若别名恰好也是一个已启用的真实 Codex 模型名，模型列表会保留该真实名称。CPA 管理路径不会被网关代理。
+门户可以在独立监听地址上运行模型网关。`GET /v1/models`、账户概览和“可用模型”页面都会移除在门户中配置的、仅作为 Codex 别名的模型 ID；其他允许的模型 API 路径原样转发给 CPA，别名请求仍由 CPA 路由。若别名恰好也是一个已启用的真实 Codex 模型名，模型列表会保留该真实名称。CPA 管理路径不会被网关代理。
 
 本机使用本项目配套的 CPA Manager Plus Compose 时，可以叠加 `compose.gateway.yaml`：它把网关发布到宿主机 `8317`，并将门户加入 `cpamp_default` 网络，通过容器名直连 CPA。须先把 CPA 原有的宿主机 `8317` 映射改为仅本机的其他端口（例如 `.env` 中的 `CPA_PORT=127.0.0.1:18319`），再运行 `docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml up -d`；`CPA_API_BASE_URL` 保持用户原来的公网地址，不用改客户端 URL。若 CPA 不在该 Docker 网络或已有其他反代，应按实际拓扑修改网关的内部上游和端口绑定。**不要把 `CPA_UPSTREAM_URL` 指回网关自身**；仅启用环境变量不会自动完成入口切换。
 

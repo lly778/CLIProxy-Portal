@@ -364,25 +364,9 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 	if err != nil || len(data) > modelListLimit {
 		return errors.New("model list exceeds filtering limit")
 	}
-	aliases, _, err := g.keys.OAuthModelAliases(resp.Request.Context())
+	hidden, err := g.keys.HiddenModelAliases(resp.Request.Context())
 	if err != nil {
-		return fmt.Errorf("read model aliases: %w", err)
-	}
-	models, _, err := g.keys.OAuthModelSettings(resp.Request.Context())
-	if err != nil {
-		return fmt.Errorf("read active models: %w", err)
-	}
-	visibleReal := make(map[string]bool)
-	for _, model := range models {
-		if model.Enabled {
-			visibleReal[strings.ToLower(model.ID)] = true
-		}
-	}
-	hidden := make(map[string]bool)
-	for _, alias := range aliases {
-		if alias.Alias != "" && !strings.EqualFold(alias.Alias, alias.Name) && !visibleReal[strings.ToLower(alias.Alias)] {
-			hidden[strings.ToLower(alias.Alias)] = true
-		}
+		return fmt.Errorf("read visible models: %w", err)
 	}
 	var payload struct {
 		Data []json.RawMessage `json:"data"`

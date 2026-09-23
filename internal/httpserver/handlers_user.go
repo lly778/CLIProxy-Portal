@@ -338,6 +338,9 @@ func (s *Server) usageRangeFormDates(from, to time.Time, name string) (string, s
 func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	items, err := s.Keys.TestKey(r.Context(), u.ID)
+	if err == nil {
+		items, err = s.Keys.VisibleModels(r.Context(), items)
+	}
 	s.renderModels(w, r, items, err)
 }
 

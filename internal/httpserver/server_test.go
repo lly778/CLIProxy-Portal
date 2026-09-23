@@ -664,6 +664,18 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatal("model order was not stable and case-insensitive")
 	}
 	mu.Lock()
+	oauthModelAliases = []cpamp.OAuthModelAlias{{Name: "gpt-enabled", Alias: "gpt-test", Fork: true}}
+	mu.Unlock()
+	dashboard = getBody(t, client, portal.URL+"/dashboard", http.StatusOK)
+	if strings.Contains(dashboard, `<span class="chip mono">gpt-test</span>`) || !strings.Contains(dashboard, `<span class="chip mono">gpt-fail</span>`) {
+		t.Fatal("dashboard did not hide the configured model alias")
+	}
+	modelsPage = getBody(t, client, portal.URL+"/models", http.StatusOK)
+	if strings.Contains(modelsPage, `<h2 class="mono">gpt-test</h2>`) || !strings.Contains(modelsPage, `<h2 class="mono">gpt-fail</h2>`) {
+		t.Fatal("models page did not hide the configured model alias")
+	}
+	mu.Lock()
+	oauthModelAliases = nil
 	keys = nil // Simulate an administrator deleting the key directly in CPA.
 	mu.Unlock()
 
