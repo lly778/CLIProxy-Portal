@@ -1,0 +1,15 @@
+services:
+  cliproxy-portal:
+    environment:
+      PORTAL_GATEWAY_LISTEN_ADDR: ":18318"
+      CPA_UPSTREAM_URL: "http://cli-proxy-api:8317"
+    ports:
+      - "8317:18318"
+    networks:
+      - default
+      - cpamp
+
+networks:
+  cpamp:
+    external: true
+    name: cpamp_default

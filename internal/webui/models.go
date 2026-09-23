@@ -177,6 +177,7 @@ type ModelUsageView struct {
 
 type RequestView struct {
 	At              string
+	CaptureID       string
 	Model           string
 	Status          string
 	StatusLabel     string

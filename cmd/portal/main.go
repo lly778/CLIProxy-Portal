@@ -16,6 +16,7 @@ import (
 
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/cpamp"
+	"cliproxy-portal/internal/gateway"
 	"cliproxy-portal/internal/httpserver"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
@@ -93,16 +94,41 @@ func serve(cfg config.Config, st *store.Store) error {
 		return err
 	}
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
+	var gatewayServer *http.Server
+	var captureVault *gateway.Vault
+	if cfg.GatewayListenAddr != "" {
+		vault, err := gateway.NewVault(cfg.GatewayCaptureDir, secret)
+		if err != nil {
+			return fmt.Errorf("initialize gateway capture storage: %w", err)
+		}
+		proxy, err := gateway.New(cfg.CPAUpstreamURL, keys, st, vault, logger)
+		if err != nil {
+			return fmt.Errorf("initialize CPA gateway: %w", err)
+		}
+		captureVault = vault
+		app.CaptureVault = vault
+		gatewayServer = &http.Server{Addr: cfg.GatewayListenAddr, Handler: proxy.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	go background(ctx, st, keys, cfg, logger)
+	go background(ctx, st, keys, cfg, logger, captureVault)
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("portal listening", "address", cfg.ListenAddr, "external_url", cfg.ExternalURL)
 		errCh <- server.ListenAndServe()
 	}()
+	if gatewayServer != nil {
+		go func() {
+			logger.Info("CPA gateway listening", "address", cfg.GatewayListenAddr)
+			errCh <- gatewayServer.ListenAndServe()
+		}()
+	}
 	select {
 	case err := <-errCh:
+		if gatewayServer != nil {
+			_ = gatewayServer.Close()
+		}
+		_ = server.Close()
 		if !errors.Is(err, http.ErrServerClosed) {
 			return err
 		}
@@ -110,11 +136,14 @@ func serve(cfg config.Config, st *store.Store) error {
 	case <-ctx.Done():
 		shutdownCtx, done := context.WithTimeout(context.Background(), 15*time.Second)
 		defer done()
+		if gatewayServer != nil {
+			_ = gatewayServer.Shutdown(shutdownCtx)
+		}
 		return server.Shutdown(shutdownCtx)
 	}
 }
 
-func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg config.Config, logger *slog.Logger) {
+func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg config.Config, logger *slog.Logger, vault *gateway.Vault) {
 	reconcile := time.NewTicker(cfg.ReconcileInterval)
 	jobs := time.NewTicker(cfg.PendingRetry)
 	cleanup := time.NewTicker(time.Hour)
@@ -124,6 +153,7 @@ func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg co
 	if err := keys.Reconcile(ctx); err != nil {
 		logger.Warn("initial key reconciliation failed", "error", err)
 	}
+	cleanupGatewayCaptures(ctx, st, vault, logger)
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,6 +170,42 @@ func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg co
 			if err := st.CleanupSessions(ctx); err != nil {
 				logger.Warn("session cleanup failed", "error", err)
 			}
+			cleanupGatewayCaptures(ctx, st, vault, logger)
 		}
+	}
+}
+
+func cleanupGatewayCaptures(ctx context.Context, st *store.Store, vault *gateway.Vault, logger *slog.Logger) {
+	if vault == nil {
+		return
+	}
+	vault.LockSharedMessages()
+	defer vault.UnlockSharedMessages()
+	deleted, err := st.DeleteExpiredGatewayCaptures(ctx, time.Now().Add(-7*24*time.Hour))
+	if err != nil {
+		logger.Warn("gateway capture retention cleanup failed", "error", err)
+		return
+	}
+	for _, id := range deleted.CaptureIDs {
+		vault.Delete(id)
+	}
+	for _, id := range deleted.MessageIDs {
+		vault.DeleteSharedMessage(id)
+	}
+	indexed, err := st.GatewayCaptureIDs(ctx)
+	if err != nil {
+		logger.Warn("gateway capture orphan scan failed", "error", err)
+		return
+	}
+	if err := vault.PruneOrphans(indexed, time.Now().Add(-time.Hour)); err != nil {
+		logger.Warn("gateway capture orphan cleanup failed", "error", err)
+	}
+	referenced, err := st.ReferencedGatewayMessageIDs(ctx)
+	if err != nil {
+		logger.Warn("gateway shared message orphan scan failed", "error", err)
+		return
+	}
+	if err := vault.PruneSharedOrphans(referenced, time.Now().Add(-time.Hour)); err != nil {
+		logger.Warn("gateway shared message orphan cleanup failed", "error", err)
 	}
 }

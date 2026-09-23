@@ -101,6 +101,39 @@ func TestRequestFailureRendersFullTextTooltip(t *testing.T) {
 	}
 }
 
+func TestDialogueDownloadHasAdjacentTableColumn(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RequestView{Status: "success", StatusLabel: "成功", CaptureID: "capture123"}
+	for _, tc := range []struct {
+		name string
+		page string
+		view any
+		href string
+	}{
+		{"user activity", PageActivity, ActivityView{Requests: []RequestView{request}}, "/logs/dialogue/capture123"},
+		{"admin requests", PageAdminRequests, AdminRequestsView{Requests: []GlobalRequestView{{RequestView: request}}}, "/admin/logs/dialogue/capture123"},
+		{"admin user", PageAdminUser, AdminUserDetailView{Requests: []RequestView{request}}, "/admin/logs/dialogue/capture123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := r.Execute(&out, tc.page, tc.view); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			if !strings.Contains(got, `<th class="request-status-cell">状态</th><th class="request-download-cell">对话记录</th>`) ||
+				!strings.Contains(got, `class="request-download-cell"><a class="request-status-download" href="`+tc.href+`"`) {
+				t.Fatalf("download link does not have a column beside status: %s", got)
+			}
+			if strings.Contains(got, "可下载的对话</h2>") {
+				t.Fatal("separate dialogue download card remains")
+			}
+		})
+	}
+}
+
 func TestAllPagesExecuteWithZeroViews(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

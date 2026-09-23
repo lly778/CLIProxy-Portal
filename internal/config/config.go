@@ -14,6 +14,9 @@ type Config struct {
 	DatabasePath        string
 	ExternalURL         string
 	CPAAPIBaseURL       string
+	CPAUpstreamURL      string
+	GatewayListenAddr   string
+	GatewayCaptureDir   string
 	CPAMPBaseURL        string
 	CPAMPAdminKeyFile   string
 	AppSecretFile       string
@@ -37,6 +40,9 @@ func Load() (Config, error) {
 		DatabasePath:        env("PORTAL_DATABASE_PATH", "/data/portal.db"),
 		ExternalURL:         strings.TrimRight(env("PORTAL_EXTERNAL_URL", "http://localhost:18080"), "/"),
 		CPAAPIBaseURL:       strings.TrimRight(env("CPA_API_BASE_URL", "http://localhost:8317"), "/"),
+		CPAUpstreamURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("CPA_UPSTREAM_URL")), "/"),
+		GatewayListenAddr:   strings.TrimSpace(os.Getenv("PORTAL_GATEWAY_LISTEN_ADDR")),
+		GatewayCaptureDir:   env("PORTAL_GATEWAY_CAPTURE_DIR", "/data/gateway-captures"),
 		CPAMPBaseURL:        strings.TrimRight(env("CPAMP_BASE_URL", "http://cpa-manager-plus:18317"), "/"),
 		CPAMPAdminKeyFile:   env("CPAMP_ADMIN_KEY_FILE", "/run/secrets/cpamp_admin_key"),
 		AppSecretFile:       env("PORTAL_APP_SECRET_FILE", "/run/secrets/portal_app_secret"),
@@ -51,6 +57,9 @@ func Load() (Config, error) {
 	}
 	if cfg.CPAMPBaseURL == "" || cfg.CPAAPIBaseURL == "" {
 		return Config{}, errors.New("CPAMP_BASE_URL and CPA_API_BASE_URL are required")
+	}
+	if cfg.GatewayListenAddr != "" && cfg.CPAUpstreamURL == "" {
+		return Config{}, errors.New("CPA_UPSTREAM_URL is required when PORTAL_GATEWAY_LISTEN_ADDR is set")
 	}
 	return cfg, nil
 }

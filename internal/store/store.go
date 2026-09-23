@@ -96,6 +96,32 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 			last_seen_at_ms INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id, issued_at_ms DESC)`,
+		`CREATE TABLE IF NOT EXISTS gateway_captures (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			api_key_hash TEXT NOT NULL,
+			cpa_request_id TEXT NOT NULL DEFAULT '',
+			created_at_ms INTEGER NOT NULL,
+			method TEXT NOT NULL,
+			path TEXT NOT NULL,
+			requested_model TEXT NOT NULL DEFAULT '',
+			status_code INTEGER NOT NULL,
+			request_content_type TEXT NOT NULL DEFAULT '',
+			response_content_type TEXT NOT NULL DEFAULT '',
+			request_truncated INTEGER NOT NULL DEFAULT 0,
+			response_truncated INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_captures_user_time ON gateway_captures(user_id, created_at_ms DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_captures_cpa_request ON gateway_captures(cpa_request_id, api_key_hash)`,
+		`CREATE TABLE IF NOT EXISTS gateway_capture_messages (
+			capture_id TEXT NOT NULL REFERENCES gateway_captures(id) ON DELETE CASCADE,
+			side TEXT NOT NULL CHECK(side IN ('request','response')),
+			position INTEGER NOT NULL,
+			message_id TEXT NOT NULL,
+			role TEXT NOT NULL,
+			PRIMARY KEY(capture_id, side, position)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_capture_messages_id ON gateway_capture_messages(message_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_key ON api_keys(user_id) WHERE status = 'active'`,
 		`CREATE TABLE IF NOT EXISTS model_test_results (
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

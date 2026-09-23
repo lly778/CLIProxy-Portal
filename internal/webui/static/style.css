@@ -495,18 +495,23 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .audit-actor-cell small { white-space: nowrap; }
 .request-log-table table { min-width: 0; table-layout: fixed; }
 .request-log-table th, .request-log-table td { padding-right: 10px; padding-left: 10px; overflow: hidden; text-overflow: ellipsis; }
-.request-log-table th:nth-child(1) { width: 12%; }
-.request-log-table th:nth-child(2) { width: 11%; }
-.request-log-table th:nth-child(3) { width: 16%; }
-.request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 6.6%; }
+.request-log-table th:nth-child(1) { width: 11%; }
+.request-log-table th:nth-child(2) { width: 10%; }
+.request-log-table th:nth-child(3) { width: 18%; }
+.request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 6%; }
 .request-log-table th:nth-child(9) { width: 8%; }
-.request-log-table th:nth-child(10) { width: 9%; }
-.request-log-table th:nth-child(11) { width: 11%; }
-.request-log-table .request-status-cell { width: 11%; min-width: 0; }
+.request-log-table th:nth-child(10) { width: 8%; }
+.request-log-table th:nth-child(11) { width: 7%; }
+.request-log-table th:nth-child(12) { width: 8%; }
+.request-log-table .request-status-cell { width: 7%; min-width: 0; }
+.request-log-table .request-download-cell { width: 8%; min-width: 0; }
 .request-model-cell { min-width: 0; white-space: normal; }
-.request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
-.request-detail-table .request-model-cell { width: 17%; max-width: 220px; }
-.request-status-cell { width: 1%; min-width: 180px; }
+.request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.request-detail-table .request-model-cell { width: 20%; }
+.request-status-cell { width: 1%; min-width: 90px; }
+.request-download-cell { width: 1%; min-width: 100px; }
+.request-status-download { color: var(--primary); font-weight: 600; }
+.request-status-download:hover { color: var(--primary-dark); text-decoration: underline; }
 .request-status-detail { display: -webkit-box; max-width: 210px; max-height: 7em; margin-top: 4px; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
 .request-status-detail[title] { cursor: help; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
@@ -593,9 +598,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .filter-inline > span, .filter-bar > span { flex: 0 0 auto; width: auto !important; align-self: center; }
   .request-log-table table { min-width: 1120px; table-layout: auto; }
   .request-log-table th { width: auto !important; }
-  .request-log-table .request-model-cell, .request-detail-table .request-model-cell { min-width: 190px; }
+  .request-log-table .request-model-cell, .request-detail-table .request-model-cell { min-width: 220px; }
   .request-model-text { -webkit-line-clamp: unset; }
-  .request-log-table .request-status-cell, .request-detail-table .request-status-cell { width: 190px; min-width: 190px; }
+  .request-log-table .request-status-cell, .request-detail-table .request-status-cell { width: 90px; min-width: 90px; }
+  .request-log-table .request-download-cell, .request-detail-table .request-download-cell { width: 100px; min-width: 100px; }
   .request-detail-table table { min-width: 980px; }
   .audit-table table { min-width: 900px; }
   .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td, .audit-table th, .audit-table td { padding: 10px 12px; }

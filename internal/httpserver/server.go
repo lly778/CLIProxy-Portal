@@ -11,6 +11,7 @@ import (
 
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/domain"
+	"cliproxy-portal/internal/gateway"
 	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
@@ -24,14 +25,15 @@ const sessionKey contextKey = "session"
 const tokenKey contextKey = "token"
 
 type Server struct {
-	Cfg      config.Config
-	Store    *store.Store
-	Accounts *service.Accounts
-	Keys     *service.Keys
-	UI       *webui.Renderer
-	Secret   []byte
-	Logger   *slog.Logger
-	limit    *limiter
+	Cfg          config.Config
+	Store        *store.Store
+	Accounts     *service.Accounts
+	Keys         *service.Keys
+	UI           *webui.Renderer
+	Secret       []byte
+	Logger       *slog.Logger
+	CaptureVault *gateway.Vault
+	limit        *limiter
 }
 
 func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *service.Keys, secret []byte, logger *slog.Logger) (*Server, error) {
@@ -72,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /models", s.withApproved(s.models))
 	mux.HandleFunc("POST /models/test", s.withApproved(s.modelsTest))
 	mux.HandleFunc("GET /activity", s.withApproved(s.activity))
+	mux.HandleFunc("GET /logs/dialogue/{id}", s.withApproved(s.downloadDialogue))
 	mux.HandleFunc("GET /health", s.withUser(s.health))
 	mux.HandleFunc("GET /profile", s.withUser(s.profile))
 	mux.HandleFunc("GET /password", s.withUser(s.passwordGet))
@@ -93,6 +96,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/policy", s.withAdmin(s.adminPolicySave))
 	mux.HandleFunc("POST /admin/registration", s.withAdmin(s.adminRegistration))
 	mux.HandleFunc("GET /admin/requests", s.withAdmin(s.adminRequests))
+	mux.HandleFunc("GET /admin/logs/dialogue/{id}", s.withAdmin(s.downloadDialogue))
 	mux.HandleFunc("GET /admin/system", s.withAdmin(s.adminSystem))
 	mux.HandleFunc("POST /admin/system/check", s.withAdmin(s.adminSystem))
 	return s.recover(s.headers(s.logRequests(mux)))

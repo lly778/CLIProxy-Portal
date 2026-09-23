@@ -171,7 +171,16 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 		latency = fmt.Sprintf("%d ms", *e.LatencyMS)
 	}
 	errorFull := requestFailureText(e)
-	return webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: requestModelLabel(e), Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
+	view := webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: requestModelLabel(e), Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
+	if s.CaptureVault != nil && e.RequestID != "" && e.APIKeyHash != "" {
+		if capture, err := s.Store.GatewayCaptureByCPARequest(contextBackground(), strings.ToLower(e.RequestID), strings.ToLower(e.APIKeyHash)); err == nil && capture.CreatedAt.After(time.Now().Add(-7*24*time.Hour)) {
+			eventAt := time.UnixMilli(e.TimestampMS)
+			if delta := capture.CreatedAt.Sub(eventAt); delta > -10*time.Minute && delta < 10*time.Minute {
+				view.CaptureID = capture.ID
+			}
+		}
+	}
+	return view
 }
 
 // requestModelLabel shows what the client requested and where CPA routed it.

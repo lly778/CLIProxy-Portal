@@ -828,11 +828,11 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events, err := s.Keys.GlobalRequests(r.Context(), 100)
-	if err != nil {
-		s.errorPage(w, r, http.StatusBadGateway, "全局日志暂时不可用", err)
-		return
-	}
 	v := webui.AdminRequestsView{LayoutView: s.layout(u, currentToken(r), "全局日志", "admin-requests"), Shown: strconv.Itoa(len(events.Items)), Total: compactNumber(events.TotalCount)}
+	if err != nil {
+		v.Error = "全局调用元数据暂时不可用"
+		s.Logger.Warn("list global request metadata", "error", err)
+	}
 	if events.TotalCount == 0 && len(events.Items) > 0 {
 		v.Total = strconv.Itoa(len(events.Items))
 	}
