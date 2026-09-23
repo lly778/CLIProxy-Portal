@@ -165,6 +165,12 @@ func (s *Store) DeleteExpiredGatewayCaptures(ctx context.Context, before time.Ti
 	return s.deleteGatewayCaptures(ctx, `SELECT id FROM gateway_captures WHERE created_at_ms<?`, before.UnixMilli())
 }
 
+// DeleteGatewayCapturesExceptFormat removes records from obsolete capture
+// formats, including both standalone and shared-message plain-text records.
+func (s *Store) DeleteGatewayCapturesExceptFormat(ctx context.Context, contentType string) (GatewayCaptureDeletion, error) {
+	return s.deleteGatewayCaptures(ctx, `SELECT id FROM gateway_captures WHERE request_content_type<>?`, contentType)
+}
+
 // DeleteExcessGatewayCaptures keeps the newest limit rows for one user.
 func (s *Store) DeleteExcessGatewayCaptures(ctx context.Context, userID string, limit int) (GatewayCaptureDeletion, error) {
 	if limit < 0 {

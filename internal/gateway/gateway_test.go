@@ -34,7 +34,7 @@ func (*gatewayCPAMP) ListOAuthExcludedModels(context.Context, string) ([]string,
 	return nil, nil
 }
 
-func TestGatewayFiltersListButPassesAliasAndSavesOnlyDialogue(t *testing.T) {
+func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
 	if err != nil {
@@ -50,9 +50,9 @@ func TestGatewayFiltersListButPassesAliasAndSavesOnlyDialogue(t *testing.T) {
 	if err := st.CreateKey(ctx, domain.APIKey{ID: "key_gateway", UserID: user.ID, Hash: cpamp.HashAPIKey(key), LastFour: "test", Alias: "test", Status: "active", IssuedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	stream := "data: {\"type\":\"response.output_text.delta\",\"delta\":\"你好\"}\n\n" +
-		"data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"secret-tool-argument\"}\n\n" +
-		"data: {\"type\":\"response.completed\"}\n\n"
+	stream := "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"你好\"}\n\n" +
+		"data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}\n\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"你好\"}]},{\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}],\"tools\":[{\"name\":\"secret-tool-definition\"}]}}\n\n"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "" || r.Header.Get("Proxy-Authorization") != "" {
 			t.Errorf("private gateway headers reached CPA")
@@ -107,7 +107,7 @@ func TestGatewayFiltersListButPassesAliasAndSavesOnlyDialogue(t *testing.T) {
 	if len(list.Data) != 2 || list.Data[0].ID != "gpt-6-luna" || list.Data[1].ID != "gpt-6-sol" {
 		t.Fatalf("filtered list = %+v", list.Data)
 	}
-	requestJSON := `{"model":"gpt-5.6-luna","input":[{"role":"user","content":[{"type":"input_text","text":"你好"}]},{"type":"function_call_output","output":"secret-tool-output"}],"tools":[{"name":"secret-tool-definition"}],"stream":true}`
+	requestJSON := `{"model":"gpt-5.6-luna","input":[{"role":"user","content":[{"type":"input_text","text":"你好"}]},{"type":"function_call_output","call_id":"call_1","output":"secret-tool-output"}],"tools":[{"name":"secret-tool-definition"}],"stream":true}`
 	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(requestJSON))
 	request.Header.Set("Authorization", "Bearer "+key)
 	request.Header.Set("Content-Type", "application/json")
@@ -124,20 +124,28 @@ func TestGatewayFiltersListButPassesAliasAndSavesOnlyDialogue(t *testing.T) {
 		t.Fatalf("CPA request id = %q", captures[0].CPARequestID)
 	}
 	requestParts, err := st.GatewayCaptureMessages(ctx, captures[0].ID, "request")
-	if err != nil || len(requestParts) != 1 || requestParts[0].Role != "用户" {
+	if err != nil || len(requestParts) != 2 || requestParts[0].Role != StructuredMessageRole {
 		t.Fatalf("saved request message references = %+v, %v", requestParts, err)
 	}
 	requestText, err := vault.ReadSharedMessage(user.ID, requestParts[0].Role, requestParts[0].ID)
-	if err != nil || requestText != "你好" {
+	if err != nil || !strings.Contains(requestText, `"role":"user"`) || !strings.Contains(requestText, `"content":"你好"`) {
 		t.Fatalf("saved request message = %q, %v", requestText, err)
 	}
+	toolResult, err := vault.ReadSharedMessage(user.ID, requestParts[1].Role, requestParts[1].ID)
+	if err != nil || !strings.Contains(toolResult, `"type":"tool_result"`) || !strings.Contains(toolResult, "secret-tool-output") {
+		t.Fatalf("saved tool result = %q, %v", toolResult, err)
+	}
 	responseParts, err := st.GatewayCaptureMessages(ctx, captures[0].ID, "response")
-	if err != nil || len(responseParts) != 1 || responseParts[0].Role != "助手" {
+	if err != nil || len(responseParts) != 2 || responseParts[0].Role != StructuredMessageRole {
 		t.Fatalf("saved response message references = %+v, %v", responseParts, err)
 	}
 	responseText, err := vault.ReadSharedMessage(user.ID, responseParts[0].Role, responseParts[0].ID)
-	if err != nil || responseText != "你好" {
+	if err != nil || !strings.Contains(responseText, `"role":"assistant"`) || !strings.Contains(responseText, `"content":"你好"`) {
 		t.Fatalf("saved response message = %q, %v", responseText, err)
+	}
+	toolCall, err := vault.ReadSharedMessage(user.ID, responseParts[1].Role, responseParts[1].ID)
+	if err != nil || !strings.Contains(toolCall, `"tool_name":"shell"`) || strings.Contains(toolCall, "secret-tool-definition") {
+		t.Fatalf("saved tool call = %q, %v", toolCall, err)
 	}
 	if _, err := os.Stat(filepath.Join(vault.dir, captures[0].ID+".rawrequest.enc")); !os.IsNotExist(err) {
 		t.Fatalf("raw request capture retained: %v", err)
@@ -168,7 +176,7 @@ func TestGatewayFiltersListButPassesAliasAndSavesOnlyDialogue(t *testing.T) {
 		t.Fatalf("history was not shared between requests: %+v", secondParts)
 	}
 	files, err := filepath.Glob(filepath.Join(vault.sharedDir, "*.enc"))
-	if err != nil || len(files) != 3 {
+	if err != nil || len(files) != 5 {
 		t.Fatalf("shared message files = %v, %v", files, err)
 	}
 }
@@ -235,28 +243,5 @@ func TestVaultIntegrityAndLimit(t *testing.T) {
 	_ = file.Close()
 	if _, err := vault.Read(id, "request"); err == nil {
 		t.Fatal("tampered capture decrypted")
-	}
-}
-
-func TestDialogueParsersOmitToolsAndReasoningAcrossProtocols(t *testing.T) {
-	request := requestDialogue([]byte(`{"messages":[{"role":"system","content":"hidden system"},{"role":"user","content":"hello"},{"role":"tool","content":"hidden tool"},{"role":"assistant","content":"past reply"}]}`))
-	if strings.Contains(request, "hidden") || !strings.Contains(request, "用户：\nhello") || !strings.Contains(request, "past reply") {
-		t.Fatalf("chat request dialogue = %q", request)
-	}
-	anthropic := responseDialogue([]byte(`{"type":"message","role":"assistant","content":[{"type":"text","text":"answer"},{"type":"tool_use","name":"shell","input":{"command":"hidden shell"}}]}`), "application/json")
-	if !strings.Contains(anthropic, "answer") || strings.Contains(anthropic, "hidden") {
-		t.Fatalf("Anthropic dialogue = %q", anthropic)
-	}
-	geminiRequest := requestDialogue([]byte(`{"contents":[{"role":"user","parts":[{"text":"hello"},{"functionResponse":{"name":"shell","response":"hidden"}}]}]}`))
-	if !strings.Contains(geminiRequest, "hello") || strings.Contains(geminiRequest, "hidden") {
-		t.Fatalf("Gemini request = %q", geminiRequest)
-	}
-	geminiResponse := responseDialogue([]byte(`{"candidates":[{"content":{"role":"model","parts":[{"text":"answer"},{"text":"hidden thought","thought":true},{"functionCall":{"name":"shell"}}]}}]}`), "application/json")
-	if !strings.Contains(geminiResponse, "answer") || strings.Contains(geminiResponse, "hidden") {
-		t.Fatalf("Gemini response = %q", geminiResponse)
-	}
-	streamed := responseDialogue([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"hidden\"}}\n\n"), "text/event-stream")
-	if !strings.Contains(streamed, "answer") || strings.Contains(streamed, "hidden") {
-		t.Fatalf("Anthropic stream = %q", streamed)
 	}
 }

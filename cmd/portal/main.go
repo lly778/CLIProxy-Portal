@@ -181,6 +181,17 @@ func cleanupGatewayCaptures(ctx context.Context, st *store.Store, vault *gateway
 	}
 	vault.LockSharedMessages()
 	defer vault.UnlockSharedMessages()
+	obsolete, err := st.DeleteGatewayCapturesExceptFormat(ctx, gateway.StructuredCaptureContentType)
+	if err != nil {
+		logger.Warn("obsolete gateway capture cleanup failed", "error", err)
+		return
+	}
+	for _, id := range obsolete.CaptureIDs {
+		vault.Delete(id)
+	}
+	for _, id := range obsolete.MessageIDs {
+		vault.DeleteSharedMessage(id)
+	}
 	deleted, err := st.DeleteExpiredGatewayCaptures(ctx, time.Now().Add(-7*24*time.Hour))
 	if err != nil {
 		logger.Warn("gateway capture retention cleanup failed", "error", err)

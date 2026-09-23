@@ -16,7 +16,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/service"
@@ -239,8 +238,8 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 	if json.Unmarshal(requestRaw, &payload) == nil {
 		capture.row.RequestedModel = payload.Model
 	}
-	requestMessages, requestTextTruncated := limitDialogueMessages(requestDialogueMessages(requestRaw), CaptureLimit)
-	responseMessages, responseTextTruncated := limitDialogueMessages(responseDialogueMessages(responseRaw, capture.responseContentType), CaptureLimit)
+	requestMessages, requestTextTruncated := limitRecordEvents(requestRecordEvents(requestRaw), CaptureLimit)
+	responseMessages, responseTextTruncated := limitRecordEvents(responseRecordEvents(responseRaw, capture.responseContentType), CaptureLimit)
 	// Raw wire data is a temporary encrypted parsing input, never a log entry.
 	for _, kind := range []string{"rawrequest", "rawresponse"} {
 		if path, err := g.vault.filePath(capture.row.ID, kind); err == nil {
@@ -254,8 +253,8 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 	if len(requestMessages) == 0 && len(responseMessages) == 0 {
 		return
 	}
-	// Empty encrypted markers distinguish new captures without text on one
-	// side from missing legacy files; actual messages are shared by ID.
+	// Empty encrypted markers identify the two sides of an indexed capture;
+	// actual events are stored as shared encrypted records.
 	for _, kind := range []string{"request", "response"} {
 		if _, err := g.saveDialogue(capture.row.ID, kind, ""); err != nil {
 			g.vault.Delete(capture.row.ID)
@@ -263,18 +262,27 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 			return
 		}
 	}
-	capture.row.RequestContentType = "text/plain; charset=utf-8"
-	capture.row.ResponseContentType = "text/plain; charset=utf-8"
+	capture.row.RequestContentType = StructuredCaptureContentType
+	capture.row.ResponseContentType = StructuredCaptureContentType
 	capture.row.RequestTruncated = capture.row.RequestTruncated || requestTextTruncated
 	capture.row.ResponseTruncated = capture.row.ResponseTruncated || responseTextTruncated
 	var references []store.GatewayCaptureMessage
 	var newlyCreated []string
 	for _, side := range []struct {
 		name     string
-		messages []dialogueMessage
+		messages []RecordEvent
 	}{{"request", requestMessages}, {"response", responseMessages}} {
 		for _, message := range side.messages {
-			id, created, err := g.vault.SaveSharedMessage(capture.row.UserID, message.Role, message.Text)
+			encoded, err := json.Marshal(message)
+			if err != nil {
+				g.vault.Delete(capture.row.ID)
+				for _, id := range newlyCreated {
+					g.vault.DeleteSharedMessage(id)
+				}
+				g.logger.Warn("gateway structured event encoding failed", "error", err)
+				return
+			}
+			id, created, err := g.vault.SaveSharedMessage(capture.row.UserID, StructuredMessageRole, string(encoded))
 			if err != nil {
 				g.vault.Delete(capture.row.ID)
 				for _, id := range newlyCreated {
@@ -286,7 +294,7 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 			if created {
 				newlyCreated = append(newlyCreated, id)
 			}
-			references = append(references, store.GatewayCaptureMessage{Side: side.name, ID: id, Role: message.Role})
+			references = append(references, store.GatewayCaptureMessage{Side: side.name, ID: id, Role: StructuredMessageRole})
 		}
 	}
 	// The client may have disconnected, but the capture must still be indexed.
@@ -320,34 +328,6 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 			g.vault.DeleteSharedMessage(id)
 		}
 	}
-}
-
-func limitDialogueMessages(messages []dialogueMessage, limit int) ([]dialogueMessage, bool) {
-	var result []dialogueMessage
-	used := 0
-	for _, message := range messages {
-		overhead := len(message.Role) + len("：\n")
-		if len(result) > 0 {
-			overhead += len("\n\n")
-		}
-		remaining := limit - used - overhead
-		if remaining <= 0 {
-			return result, true
-		}
-		if len(message.Text) > remaining {
-			piece := message.Text[:remaining]
-			for len(piece) > 0 && !utf8.ValidString(piece) {
-				piece = piece[:len(piece)-1]
-			}
-			if piece != "" {
-				result = append(result, dialogueMessage{Role: message.Role, Text: piece})
-			}
-			return result, true
-		}
-		result = append(result, message)
-		used += overhead + len(message.Text)
-	}
-	return result, false
 }
 
 func (g *Gateway) saveDialogue(id, kind, value string) (bool, error) {

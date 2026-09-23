@@ -248,11 +248,6 @@ func (v *Vault) readPath(path string) ([]byte, error) {
 
 func (v *Vault) sharedMessageID(userID, role, text string) string {
 	mac := hmac.New(sha256.New, v.hmacKey[:])
-	if strings.HasPrefix(role, "助手") {
-		role = "assistant"
-	} else if role == "用户" {
-		role = "user"
-	}
 	for _, part := range []string{userID, role, text} {
 		var size [8]byte
 		binary.BigEndian.PutUint64(size[:], uint64(len(part)))

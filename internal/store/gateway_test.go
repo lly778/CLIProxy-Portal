@@ -62,3 +62,33 @@ func TestSharedGatewayMessagesRemainUntilLastCaptureIsDeleted(t *testing.T) {
 		t.Fatalf("last cleanup = %+v, %v", removed, err)
 	}
 }
+
+func TestObsoleteGatewayFormatsAreDeletedWithoutTouchingStructuredRecords(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, item := range []struct {
+		id, contentType, messageID string
+	}{
+		{"standalone", "text/plain; charset=utf-8", ""},
+		{"shared-old", "text/plain; charset=utf-8", "old-message"},
+		{"structured", "application/vnd.cliproxy.interaction+json", "new-message"},
+	} {
+		row := GatewayCapture{ID: item.id, UserID: "owner", CreatedAt: now, Method: "POST", Path: "/v1/responses", RequestContentType: item.contentType}
+		var messages []GatewayCaptureMessage
+		if item.messageID != "" {
+			messages = append(messages, GatewayCaptureMessage{Side: "request", ID: item.messageID, Role: "test"})
+		}
+		if err := s.SaveGatewayCaptureWithMessages(ctx, row, messages); err != nil {
+			t.Fatal(err)
+		}
+	}
+	removed, err := s.DeleteGatewayCapturesExceptFormat(ctx, "application/vnd.cliproxy.interaction+json")
+	if err != nil || len(removed.CaptureIDs) != 2 || len(removed.MessageIDs) != 1 || removed.MessageIDs[0] != "old-message" {
+		t.Fatalf("obsolete cleanup = %+v, %v", removed, err)
+	}
+	remaining, err := s.ListGatewayCaptures(ctx, "owner", 100)
+	if err != nil || len(remaining) != 1 || remaining[0].ID != "structured" {
+		t.Fatalf("remaining captures = %+v, %v", remaining, err)
+	}
+}

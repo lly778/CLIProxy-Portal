@@ -123,7 +123,7 @@ func TestDialogueDownloadHasAdjacentTableColumn(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := out.String()
-			if !strings.Contains(got, `<th class="request-status-cell">状态</th><th class="request-download-cell">对话记录</th>`) ||
+			if !strings.Contains(got, `<th class="request-status-cell">状态</th><th class="request-download-cell">交互记录</th>`) ||
 				!strings.Contains(got, `class="request-download-cell"><a class="request-status-download" href="`+tc.href+`"`) {
 				t.Fatalf("download link does not have a column beside status: %s", got)
 			}
