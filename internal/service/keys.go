@@ -667,6 +667,25 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	return value, err
 }
 
+// CPAMP's unfiltered summary can classify failures differently from its
+// per-key aggregates. Use the latter only when they cover every request.
+func reconcileGlobalCallStatus(value *cpamp.AnalyticsResponse) {
+	if value == nil || value.Summary == nil || len(value.APIKeyStats) == 0 {
+		return
+	}
+	var calls, successes, failures int64
+	for _, stat := range value.APIKeyStats {
+		calls += stat.Calls
+		successes += stat.SuccessCalls
+		failures += stat.FailureCalls
+	}
+	if calls != value.Summary.TotalCalls || successes+failures != calls {
+		return
+	}
+	value.Summary.SuccessCalls = successes
+	value.Summary.FailureCalls = failures
+}
+
 func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
 	cacheKey := fmt.Sprintf("global:%d:%d:%d", from.Unix()/60, to.Unix()/60, events)
 	if value, ok := k.cached(cacheKey); ok {
@@ -678,6 +697,7 @@ func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) 
 	}
 	value, err := k.CPAMP.Analytics(ctx, req)
 	if err == nil {
+		reconcileGlobalCallStatus(&value)
 		k.putCache(cacheKey, value)
 	}
 	return value, err

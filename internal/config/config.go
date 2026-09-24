@@ -17,6 +17,7 @@ type Config struct {
 	CPAUpstreamURL      string
 	GatewayListenAddr   string
 	GatewayCaptureDir   string
+	HostLogMetricsPath  string
 	CPAMPBaseURL        string
 	CPAMPAdminKeyFile   string
 	AppSecretFile       string
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 		CPAUpstreamURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("CPA_UPSTREAM_URL")), "/"),
 		GatewayListenAddr:   strings.TrimSpace(os.Getenv("PORTAL_GATEWAY_LISTEN_ADDR")),
 		GatewayCaptureDir:   env("PORTAL_GATEWAY_CAPTURE_DIR", "/data/gateway-captures"),
+		HostLogMetricsPath:  env("PORTAL_HOST_LOG_METRICS_PATH", "/data/host-log-metrics.json"),
 		CPAMPBaseURL:        strings.TrimRight(env("CPAMP_BASE_URL", "http://cpa-manager-plus:18317"), "/"),
 		CPAMPAdminKeyFile:   env("CPAMP_ADMIN_KEY_FILE", "/run/secrets/cpamp_admin_key"),
 		AppSecretFile:       env("PORTAL_APP_SECRET_FILE", "/run/secrets/portal_app_secret"),

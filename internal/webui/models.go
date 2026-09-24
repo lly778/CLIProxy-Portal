@@ -357,6 +357,7 @@ type HealthCheckView struct {
 	Component   string
 	Status      string
 	StatusLabel string
+	Metric      string
 	Message     string
 	CheckedAt   string
 	Latency     string
@@ -537,10 +538,12 @@ type AdminPolicyView struct {
 
 type AdminSystemView struct {
 	LayoutView
+	Storage      []HealthCheckView
 	Checks       []HealthCheckView
 	LastSyncAt   string
 	NextSyncAt   string
 	SyncInterval string
+	HealthReady  bool
 	Retrying     bool
 	Messages     []NoticeView
 	AuditError   string

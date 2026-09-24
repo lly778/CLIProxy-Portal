@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh CLIProxy Portal host log sizes every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Unit=cliproxy-portal-log-metrics.service
+
+[Install]
+WantedBy=timers.target

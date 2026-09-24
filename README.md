@@ -135,6 +135,7 @@ docker compose down -v
 | `CPA_UPSTREAM_URL` | 空 | 网关访问 CPA 的内部地址；启用网关时必填 |
 | `PORTAL_GATEWAY_LISTEN_ADDR` | 空（关闭） | 网关监听地址，与门户页面监听地址分开 |
 | `PORTAL_GATEWAY_CAPTURE_DIR` | `/data/gateway-captures` | 加密交互记录目录 |
+| `PORTAL_HOST_LOG_METRICS_PATH` | `/data/host-log-metrics.json` | 宿主机日志大小摘要；缺失或超过 5 分钟未更新时显示待采集 |
 | `CPAMP_BASE_URL` | `http://host.docker.internal:18317` | CPAMP Manager Server 地址 |
 | `CPAMP_ADMIN_KEY_FILE` | `/run/secrets/cpamp_admin_key` | CPAMP 管理 Key 文件 |
 | `PORTAL_APP_SECRET_FILE` | `/run/secrets/portal_app_secret` | 至少 32 字符的会话/CSRF 密钥文件 |
@@ -143,6 +144,19 @@ docker compose down -v
 | `PORTAL_USAGE_CACHE_TTL` | `2m` | CPAMP 用量查询的进程内短缓存；重启即清空 |
 | `PORTAL_REGISTRATION_OPEN` | `true` | 仅首次建库时的注册开关默认值 |
 | `PORTAL_TRUST_PROXY_HEADERS` | `false` | 是否信任 `X-Forwarded-For`；直连公网时保持 false |
+
+### 宿主机日志占用采集
+
+系统管理页直接统计门户 SQLite、CPAMP SQLite 和加密交互记录；CPA 主日志、CPA 请求/响应日志及三个容器的运行日志由宿主机每分钟生成一次大小摘要。门户只读取数字，不读取日志内容，也不挂载 Docker socket。按实际目录/容器名调整 `ops/collect-host-log-metrics.py` 和 service 后，在宿主机安装定时器：
+
+```bash
+sudo cp ops/cliproxy-portal-log-metrics.service ops/cliproxy-portal-log-metrics.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cliproxy-portal-log-metrics.timer
+sudo systemctl start cliproxy-portal-log-metrics.service
+```
+
+默认 service 适配 `/root/cliproxy-portal` 下的门户数据目录和 `/root/cpa-manager-plus/cliproxyapi/logs` 下的 CPA 日志；容器名在脚本顶部。摘要不含日志正文或文件路径，未采集、过期或不可读取时页面显示待采集，不显示旧数值。
 
 ## 本地验证
 

@@ -27,13 +27,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		n, _ := s.Store.CountUsers(r.Context(), x.status)
 		v.Counts = append(v.Counts, webui.CountView{Label: x.label, Value: strconv.Itoa(n)})
 	}
-	start := time.Now()
-	_, healthErr := s.Keys.CPAMP.Health(r.Context())
-	state, label, msg := "healthy", "正常", "CPAMP 可访问"
-	if healthErr != nil {
-		state, label, msg = "error", "异常", "CPAMP 暂时不可访问"
-	}
-	v.Health = []webui.HealthCheckView{{Component: "门户数据库", Status: "healthy", StatusLabel: "正常", Message: "SQLite WAL", CheckedAt: s.formatTime(time.Now())}, {Component: "CPA-Manager-Plus", Status: state, StatusLabel: label, Message: msg, CheckedAt: s.formatTime(time.Now()), Latency: time.Since(start).Round(time.Millisecond).String()}}
+	v.Health = []webui.HealthCheckView{s.databaseHealthView(r.Context()), s.cpampDatabaseHealthView(r.Context()), s.captureHealthView(), s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context())}
 	if usageErr != nil {
 		v.Error = "全局用量暂时不可用"
 	} else {
@@ -739,12 +733,17 @@ func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) 
 	for i, model := range models {
 		inputs = append(inputs, service.OAuthModelAliasInput{Model: model, Aliases: strings.Join(r.PostForm["alias_"+strconv.Itoa(i)], ","), KeepOriginal: keepOriginal[strings.ToLower(strings.TrimSpace(model))]})
 	}
+	before, _, beforeErr := s.Keys.OAuthModelAliases(r.Context())
 	if err := s.Keys.SetOAuthModelAliases(r.Context(), inputs, r.PostForm.Get("revision")); err != nil {
 		s.Logger.Error("update OAuth model aliases", "error", err)
 		http.Redirect(w, r, "/admin/upstreams?alias_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_model.aliases.update", "codex", "Codex")
+	detail := "已保存；变更明细暂不可用"
+	if after, _, err := s.Keys.OAuthModelAliases(r.Context()); beforeErr == nil && err == nil {
+		detail = aliasChangeDetails(before, after)
+	}
+	s.audit(r, currentUser(r), "oauth_model.aliases.update", "codex", detail)
 	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("模型别名已保存"), http.StatusSeeOther)
 }
 
@@ -767,12 +766,17 @@ func (s *Server) adminReasoningCaps(w http.ResponseWriter, r *http.Request) {
 		}
 		inputs = append(inputs, service.ReasoningCapInput{Model: model, Cap: values[0]})
 	}
+	before, _, beforeErr := s.Keys.OAuthReasoningCaps(r.Context())
 	if err := s.Keys.SetOAuthReasoningCaps(r.Context(), inputs, r.PostForm.Get("reasoning_revision")); err != nil {
 		s.Logger.Error("update OAuth reasoning caps", "error", err)
 		http.Redirect(w, r, "/admin/upstreams?reasoning_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", "codex", "Codex")
+	detail := "已保存；变更明细暂不可用"
+	if after, _, err := s.Keys.OAuthReasoningCaps(r.Context()); beforeErr == nil && err == nil {
+		detail = reasoningCapChangeDetails(before, after)
+	}
+	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", "codex", detail)
 	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("思考强度上限已保存"), http.StatusSeeOther)
 }
 
@@ -871,16 +875,47 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, 403, "请求已失效", nil)
 		return
 	}
+	scope := ""
+	if r.Method == http.MethodPost {
+		scope = r.FormValue("check_scope")
+		if scope != "" && scope != "storage" && scope != "health" {
+			s.errorPage(w, r, http.StatusBadRequest, "检查范围无效", nil)
+			return
+		}
+	}
 	u := currentUser(r)
 	now := time.Now().UTC()
-	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system"), LastSyncAt: "由后台每次启动后执行", NextSyncAt: s.formatTime(now.Add(s.Cfg.ReconcileInterval)), SyncInterval: s.Cfg.ReconcileInterval.String()}
-	start := time.Now()
-	err := s.Store.Ping(r.Context())
-	v.Checks = append(v.Checks, healthView("门户数据库", err, time.Since(start), s))
-	start = time.Now()
-	_, err = s.Keys.CPAMP.Health(r.Context())
-	v.Checks = append(v.Checks, healthView("CPA-Manager-Plus", err, time.Since(start), s))
-	if err = s.Keys.Reconcile(r.Context()); err != nil {
+	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system")}
+	var next systemCheckSnapshot
+	if scope != "health" {
+		next.storage = append(next.storage, s.databaseHealthView(r.Context()), s.cpampDatabaseHealthView(r.Context()), s.captureHealthView())
+		next.storage = append(next.storage, s.hostLogHealthViews()...)
+		next.storageReady = true
+	}
+	if scope != "storage" {
+		next.checks = append(next.checks, s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context()))
+		next.retrying = s.Keys.Reconcile(r.Context()) != nil
+		next.lastSyncAt = "由后台每次启动后执行"
+		next.nextSyncAt = s.formatTime(now.Add(s.Cfg.ReconcileInterval))
+		next.syncInterval = s.Cfg.ReconcileInterval.String()
+		next.healthReady = true
+	}
+	snapshot := s.mergeSystemChecks(next)
+	if snapshot.storageReady {
+		v.Storage = snapshot.storage
+	} else {
+		v.Storage = uncheckedSystemViews("门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志")
+	}
+	if snapshot.healthReady {
+		v.Checks = snapshot.checks
+		v.HealthReady = true
+		v.Retrying = snapshot.retrying
+		v.LastSyncAt, v.NextSyncAt, v.SyncInterval = snapshot.lastSyncAt, snapshot.nextSyncAt, snapshot.syncInterval
+	} else {
+		v.Checks = uncheckedSystemViews("模型网关", "CPA 上游")
+		v.LastSyncAt, v.NextSyncAt, v.SyncInterval = "—", "—", s.Cfg.ReconcileInterval.String()
+	}
+	if v.Retrying {
 		v.Messages = append(v.Messages, webui.NoticeView{Kind: "warning", Title: "Key 对账失败", Message: "系统会按计划继续重试。"})
 	}
 	items, auditErr := s.Store.ListAudit(r.Context(), 100, 0)

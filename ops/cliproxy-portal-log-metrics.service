@@ -1,0 +1,7 @@
+[Unit]
+Description=Collect host log sizes for CLIProxy Portal
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/cliproxy-portal/ops/collect-host-log-metrics.py --cpa-log-dir /root/cpa-manager-plus/cliproxyapi/logs --output /root/cliproxy-portal/data/host-log-metrics.json

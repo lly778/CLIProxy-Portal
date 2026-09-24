@@ -517,8 +517,9 @@ func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []we
 	out := make([]webui.AuditView, 0, len(items))
 	actors := make(map[string]domain.User)
 	for _, e := range items {
-		name, phone := auditActorParts(e.ActorLabel)
-		if e.ActorUserID != "" && s.Store != nil && (name == "" || phone == "") {
+		name, _ := auditActorParts(e.ActorLabel)
+		phone := ""
+		if e.ActorUserID != "" && s.Store != nil {
 			actor, cached := actors[e.ActorUserID]
 			if !cached {
 				actor, _ = s.Store.UserByID(ctx, e.ActorUserID)
@@ -527,15 +528,24 @@ func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []we
 			if name == "" {
 				name = actor.Name
 			}
-			if phone == "" {
-				phone = maskedAuditPhone(actor.Phone)
+			if len(actor.Phone) == 11 && asciiDigits(actor.Phone) {
+				phone = actor.Phone
 			}
 		}
 		label := emptyDash(name)
 		if phone != "" {
 			label += "(" + phone + ")"
 		}
-		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: label, ActorName: emptyDash(name), ActorPhone: phone, Action: e.Action, Target: emptyDash(e.TargetLabel), Result: "success", IP: e.IP, Details: e.Detail})
+		action := auditActionDisplay(e.Action)
+		target, detail := auditTargetDisplay(e.Action, e.TargetID, e.TargetLabel), auditDetailDisplay(e.Action, e.Detail)
+		if action == "其他操作" {
+			if detail == "—" {
+				detail = "操作代码：" + e.Action
+			} else {
+				detail = "操作代码：" + e.Action + "；" + detail
+			}
+		}
+		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: label, ActorName: emptyDash(name), ActorPhone: phone, Action: action, Target: target, Result: "success", IP: e.IP, Details: detail})
 	}
 	return out
 }

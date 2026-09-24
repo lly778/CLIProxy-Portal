@@ -117,6 +117,23 @@ func TestListAuditForUserExcludesOtherUsers(t *testing.T) {
 	}
 }
 
+func TestListAuditSkipsQuotaRefreshBeforeLimit(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	for _, action := range []string{"key.issue", "quota.refresh", "user.approve", "quota.refresh"} {
+		if err := s.Audit(ctx, domain.AuditEvent{ActorLabel: "管理员", Action: action, CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ListAudit(ctx, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Action != "user.approve" || got[1].Action != "key.issue" {
+		t.Fatalf("visible audit events = %#v", got)
+	}
+}
+
 func TestPasswordResetSingleUse(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

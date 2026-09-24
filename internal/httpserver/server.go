@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"cliproxy-portal/internal/config"
@@ -34,6 +35,8 @@ type Server struct {
 	Logger       *slog.Logger
 	CaptureVault *gateway.Vault
 	limit        *limiter
+	systemMu     sync.RWMutex
+	systemChecks systemCheckSnapshot
 }
 
 func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *service.Keys, secret []byte, logger *slog.Logger) (*Server, error) {

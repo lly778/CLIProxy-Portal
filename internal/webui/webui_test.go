@@ -101,6 +101,47 @@ func TestRequestFailureRendersFullTextTooltip(t *testing.T) {
 	}
 }
 
+func TestAuditCellsDoNotHaveUnconditionalTooltips(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := AdminSystemView{Entries: []AuditView{{Action: "下载交互记录", Target: "交互记录", Details: "完整显示的详情", Result: "success"}}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminSystem, view); err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		`class="audit-action-text">下载交互记录`,
+		`class="audit-target-text">交互记录`,
+		`class="audit-detail-text">完整显示的详情`,
+	} {
+		if !strings.Contains(out.String(), fragment) {
+			t.Fatalf("audit cell should not have a default tooltip: %s", fragment)
+		}
+	}
+}
+
+func TestSystemCheckButtonsAreBesideTheirSections(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminSystem, AdminSystemView{}); err != nil {
+		t.Fatal(err)
+	}
+	page := out.String()
+	storage := strings.Index(page, `<section class="section" id="storage">`)
+	health := strings.Index(page, `<section class="section" id="health">`)
+	audit := strings.Index(page, `<section class="section section-gap" id="audit">`)
+	storageButton := strings.Index(page, `action="/admin/system/check#storage"`)
+	healthButton := strings.Index(page, `action="/admin/system/check#health"`)
+	if storage < 0 || health < 0 || audit < 0 || storageButton <= storage || storageButton >= health || healthButton <= health || healthButton >= audit || strings.Count(page, `action="/admin/system/check#`) != 2 || strings.Count(page, `name="check_scope" value="storage"`) != 1 || strings.Count(page, `name="check_scope" value="health"`) != 1 {
+		t.Fatalf("check buttons should appear once beside each section: %s", page)
+	}
+}
+
 func TestDialogueDownloadHasAdjacentTableColumn(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

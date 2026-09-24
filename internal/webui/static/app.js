@@ -105,6 +105,36 @@
     });
   }
 
+  var auditOverflowTexts = Array.prototype.slice.call(document.querySelectorAll(".audit-action-text, .audit-target-text, .audit-detail-text"));
+  var auditOverflowResizeFrame = 0;
+
+  function fitAuditOverflowTitles() {
+    auditOverflowTexts.forEach(function (element) {
+      element.removeAttribute("title");
+      var visibleWidth = element.clientWidth;
+      var visibleHeight = element.clientHeight;
+      var previousLineClamp = element.style.webkitLineClamp;
+      element.style.webkitLineClamp = "unset";
+      var isOverflowing = element.scrollWidth > visibleWidth + 1 || element.scrollHeight > visibleHeight + 1;
+      element.style.webkitLineClamp = previousLineClamp;
+      if (isOverflowing) {
+        element.setAttribute("title", element.textContent.trim());
+      }
+    });
+  }
+
+  if (auditOverflowTexts.length) {
+    fitAuditOverflowTitles();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitAuditOverflowTitles);
+    window.addEventListener("resize", function () {
+      if (auditOverflowResizeFrame) window.cancelAnimationFrame(auditOverflowResizeFrame);
+      auditOverflowResizeFrame = window.requestAnimationFrame(function () {
+        auditOverflowResizeFrame = 0;
+        fitAuditOverflowTitles();
+      });
+    });
+  }
+
   var requestStatusDetails = Array.prototype.slice.call(document.querySelectorAll(".request-status-detail"));
   var requestStatusResizeFrame = 0;
 

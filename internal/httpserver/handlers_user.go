@@ -255,8 +255,6 @@ func (s *Server) quotaRefresh(w http.ResponseWriter, r *http.Request) {
 	message := status.Message
 	if err != nil {
 		message = err.Error()
-	} else {
-		s.audit(r, currentUser(r), "quota.refresh", "codex", "用户手动刷新")
 	}
 	http.Redirect(w, r, next+"?quota_msg="+urlQuery(message), http.StatusSeeOther)
 }

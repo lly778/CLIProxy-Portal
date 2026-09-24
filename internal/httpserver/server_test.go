@@ -34,6 +34,8 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var lastSeenMS int64
 	var lastSeenAnalyticsCalls int
 	var eventAnalyticsCalls int
+	var cpampStatusCalls int
+	var apiKeyListCalls int
 	var upstreamDisabled bool
 	var upstreamStatusChanges int
 	var oauthExcluded = []string{"gpt-disabled"}
@@ -46,7 +48,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		switch {
 		case r.URL.Path == "/health" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "service": "cpa-manager-plus"})
+		case r.URL.Path == "/status" && r.Method == http.MethodGet:
+			cpampStatusCalls++
+			_, _ = io.WriteString(w, `{"service":"cpa-manager-plus","database":{"databaseBytes":1048576,"walBytes":524288,"shmBytes":32768,"totalBytes":1605632}}`)
 		case r.URL.Path == "/v0/management/api-keys" && r.Method == http.MethodGet:
+			apiKeyListCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"api-keys": keys})
 		case r.URL.Path == "/v0/management/api-keys" && r.Method == http.MethodPut:
 			if err := json.NewDecoder(r.Body).Decode(&keys); err != nil {
@@ -200,7 +206,8 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}))
 	defer cpampServer.Close()
 
-	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
+	dbPath := filepath.Join(t.TempDir(), "portal.db")
+	st, err := store.Open(dbPath, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +219,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 	accounts := service.NewAccounts(st, secret)
 	keysService := service.NewKeys(st, api)
-	cfg := config.Config{ListenAddr: ":18080", CPAAPIBaseURL: cpampServer.URL, CPAMPBaseURL: cpampServer.URL, CookieName: "portal_session", TimeZone: time.FixedZone("CST", 8*3600), PendingRetry: 30 * time.Second, ReconcileInterval: 5 * time.Minute}
+	cfg := config.Config{ListenAddr: ":18080", DatabasePath: dbPath, CPAAPIBaseURL: cpampServer.URL, CPAMPBaseURL: cpampServer.URL, CookieName: "portal_session", TimeZone: time.FixedZone("CST", 8*3600), PendingRetry: 30 * time.Second, ReconcileInterval: 5 * time.Minute}
 	server, err := New(cfg, st, accounts, keysService, secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -262,6 +269,15 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 	if status := keysService.QuotaRefreshStatus(); status.Running || status.Succeeded != 1 {
 		t.Fatalf("quota refresh status = %#v", status)
+	}
+	refreshAudits, err := st.ListAudit(t.Context(), 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range refreshAudits {
+		if event.Action == "quota.refresh" {
+			t.Fatal("quota refresh should not appear in operation logs")
+		}
 	}
 	keyPage := getBody(t, client, portal.URL+"/key", http.StatusOK)
 	csrf = extract(t, keyPage, `name="csrf_token" value="([^"]+)"`)
@@ -372,6 +388,32 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "操作日志") {
 		t.Fatalf("admin system page did not merge health and operation logs: %s", adminSystemPage)
 	}
+	for _, label := range []string{"门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志", "模型网关", "CPA 上游", "health-card-metric", "Key 对账"} {
+		if !strings.Contains(adminSystemPage, label) {
+			t.Fatalf("admin system page missing %q: %s", label, adminSystemPage)
+		}
+	}
+	if got := strings.Count(adminSystemPage, `class="card health-card system-health-card`); got != 9 {
+		t.Fatalf("admin system page rendered %d cards, want six storage and three health cards", got)
+	}
+	adminCSRF = extract(t, adminSystemPage, `name="csrf_token" value="([^"]+)"`)
+	mu.Lock()
+	statusBefore, keysBefore := cpampStatusCalls, apiKeyListCalls
+	mu.Unlock()
+	storagePage := postForm(t, adminClient, portal.URL+"/admin/system/check", url.Values{"csrf_token": {adminCSRF}, "check_scope": {"storage"}}, http.StatusOK)
+	mu.Lock()
+	statusAfterStorage, keysAfterStorage := cpampStatusCalls, apiKeyListCalls
+	mu.Unlock()
+	if statusAfterStorage != statusBefore+1 || keysAfterStorage != keysBefore || !strings.Contains(storagePage, "系统健康") {
+		t.Fatalf("storage-only check touched health: status %d→%d, keys %d→%d", statusBefore, statusAfterStorage, keysBefore, keysAfterStorage)
+	}
+	healthPage = postForm(t, adminClient, portal.URL+"/admin/system/check", url.Values{"csrf_token": {adminCSRF}, "check_scope": {"health"}}, http.StatusOK)
+	mu.Lock()
+	statusAfterHealth, keysAfterHealth := cpampStatusCalls, apiKeyListCalls
+	mu.Unlock()
+	if statusAfterHealth != statusAfterStorage || keysAfterHealth != keysAfterStorage+1 || !strings.Contains(healthPage, "存储占用") {
+		t.Fatalf("health-only check touched storage: status %d→%d, keys %d→%d", statusAfterStorage, statusAfterHealth, keysAfterStorage, keysAfterHealth)
+	}
 	if !strings.Contains(adminSystemPage, `href="/admin/system?refresh=1#audit"`) {
 		t.Fatal("admin operation log missing refresh button")
 	}
@@ -384,11 +426,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("operation log refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
 	}
 	auditTable := strings.SplitN(adminSystemPage, `class="table-card audit-table"`, 2)[1]
-	if !strings.Contains(auditTable, "139****9000") || !strings.Contains(auditTable, "138****8000") || strings.Contains(auditTable, "13900139000") || strings.Contains(auditTable, "13800138000") {
-		t.Fatalf("audit actors should show masked phones: %s", auditTable)
+	if !strings.Contains(auditTable, `<small class="muted mono">13900139000</small>`) || !strings.Contains(auditTable, `<small class="muted mono">13800138000</small>`) {
+		t.Fatalf("audit actors should show full phones: %s", auditTable)
 	}
 	legacyActor := server.auditViews(t.Context(), []domain.AuditEvent{{ActorUserID: admin.ID, ActorLabel: admin.Name}})
-	if len(legacyActor) != 1 || legacyActor[0].ActorPhone != "139****9000" {
+	if len(legacyActor) != 1 || legacyActor[0].ActorPhone != "13900139000" {
 		t.Fatalf("legacy audit actor phone was not restored: %#v", legacyActor)
 	}
 	if strings.Contains(adminSystemPage, `href="/admin/audit"`) || strings.Contains(adminSystemPage, `href="/admin/health"`) {
@@ -895,6 +937,10 @@ func TestAuditActorParts(t *testing.T) {
 	}
 	if got := auditActorLabel("蒋云龙", "18512341578"); got != "蒋云龙(185****1578)" {
 		t.Errorf("auditActorLabel() = %q", got)
+	}
+	view := (&Server{}).auditViews(t.Context(), []domain.AuditEvent{{ActorLabel: "旧用户(185****1578)"}})
+	if len(view) != 1 || view[0].ActorName != "旧用户" || view[0].ActorPhone != "" {
+		t.Fatalf("unrecoverable legacy phone must not masquerade as a full number: %#v", view)
 	}
 }
 
