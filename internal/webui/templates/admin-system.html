@@ -9,7 +9,7 @@
       <div class="health-card-head"><span class="status-dot {{statusClass .Status}}"></span><h2>{{.Component}}</h2><span class="badge {{statusClass .Status}}">{{.StatusLabel}}</span></div>
       <strong class="health-card-metric">{{.Metric}}</strong>
       <p>{{.Message}}</p>
-      <div class="health-card-foot muted small">检查：{{.CheckedAt}}{{if .Latency}} · 延迟 {{.Latency}}{{end}}</div>
+      <div class="health-card-foot muted small">检查：{{.CheckedAt}}</div>
     </article>
     {{else}}<div class="empty-state"><p>暂无存储数据。</p></div>{{end}}
   </div>

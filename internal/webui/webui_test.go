@@ -142,6 +142,26 @@ func TestSystemCheckButtonsAreBesideTheirSections(t *testing.T) {
 	}
 }
 
+func TestStorageCardsHideLatencyButHealthCardsKeepIt(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := AdminSystemView{
+		Storage: []HealthCheckView{{Component: "CPAMP SQLite", CheckedAt: "检查时间", Latency: "2ms"}},
+		Checks:  []HealthCheckView{{Component: "模型网关", CheckedAt: "检查时间", Latency: "3ms"}},
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminSystem, view); err != nil {
+		t.Fatal(err)
+	}
+	page := out.String()
+	storage, health, found := strings.Cut(page, `<section class="section" id="health">`)
+	if !found || !strings.Contains(storage, "CPAMP SQLite") || strings.Contains(storage, "延迟") || !strings.Contains(health, "延迟 3ms") {
+		t.Fatalf("storage latency should be hidden and health latency retained: %s", page)
+	}
+}
+
 func TestDialogueDownloadHasAdjacentTableColumn(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
