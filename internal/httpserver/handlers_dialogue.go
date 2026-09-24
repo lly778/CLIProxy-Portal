@@ -28,7 +28,7 @@ func (s *Server) downloadDialogue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := currentUser(r)
-	if row.CreatedAt.Before(time.Now().Add(-7*24*time.Hour)) || (!strings.HasPrefix(r.URL.Path, "/admin/") && row.UserID != user.ID) {
+	if !strings.HasPrefix(r.URL.Path, "/admin/") && row.UserID != user.ID {
 		http.NotFound(w, r)
 		return
 	}

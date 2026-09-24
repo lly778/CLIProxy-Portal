@@ -22,10 +22,7 @@ import (
 	"cliproxy-portal/internal/store"
 )
 
-const (
-	modelListLimit = 2 << 20
-	retention      = 7 * 24 * time.Hour
-)
+const modelListLimit = 2 << 20
 
 type Gateway struct {
 	upstream     *url.URL
@@ -308,25 +305,16 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 		g.logger.Warn("gateway capture index failed", "error", err)
 		return
 	}
-	for _, cleanup := range []func(context.Context) (store.GatewayCaptureDeletion, error){
-		func(ctx context.Context) (store.GatewayCaptureDeletion, error) {
-			return g.store.DeleteExpiredGatewayCaptures(ctx, time.Now().Add(-retention))
-		},
-		func(ctx context.Context) (store.GatewayCaptureDeletion, error) {
-			return g.store.DeleteExcessGatewayCaptures(ctx, capture.row.UserID, 100)
-		},
-	} {
-		deleted, err := cleanup(saveCtx)
-		if err != nil {
-			g.logger.Warn("gateway capture cleanup failed", "error", err)
-			continue
-		}
-		for _, id := range deleted.CaptureIDs {
-			g.vault.Delete(id)
-		}
-		for _, id := range deleted.MessageIDs {
-			g.vault.DeleteSharedMessage(id)
-		}
+	deleted, err := g.store.DeleteExcessGatewayCaptures(saveCtx, capture.row.UserID, 100)
+	if err != nil {
+		g.logger.Warn("gateway capture cleanup failed", "error", err)
+		return
+	}
+	for _, id := range deleted.CaptureIDs {
+		g.vault.Delete(id)
+	}
+	for _, id := range deleted.MessageIDs {
+		g.vault.DeleteSharedMessage(id)
 	}
 }
 

@@ -159,12 +159,6 @@ func (s *Store) ListGatewayCaptures(ctx context.Context, userID string, limit in
 	return result, rows.Err()
 }
 
-// DeleteExpiredGatewayCaptures returns capture files and now-unreferenced
-// shared message files that can be removed after the transaction commits.
-func (s *Store) DeleteExpiredGatewayCaptures(ctx context.Context, before time.Time) (GatewayCaptureDeletion, error) {
-	return s.deleteGatewayCaptures(ctx, `SELECT id FROM gateway_captures WHERE created_at_ms<?`, before.UnixMilli())
-}
-
 // DeleteGatewayCapturesExceptFormat removes records from obsolete capture
 // formats, including both standalone and shared-message plain-text records.
 func (s *Store) DeleteGatewayCapturesExceptFormat(ctx context.Context, contentType string) (GatewayCaptureDeletion, error) {

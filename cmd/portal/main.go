@@ -192,17 +192,6 @@ func cleanupGatewayCaptures(ctx context.Context, st *store.Store, vault *gateway
 	for _, id := range obsolete.MessageIDs {
 		vault.DeleteSharedMessage(id)
 	}
-	deleted, err := st.DeleteExpiredGatewayCaptures(ctx, time.Now().Add(-7*24*time.Hour))
-	if err != nil {
-		logger.Warn("gateway capture retention cleanup failed", "error", err)
-		return
-	}
-	for _, id := range deleted.CaptureIDs {
-		vault.Delete(id)
-	}
-	for _, id := range deleted.MessageIDs {
-		vault.DeleteSharedMessage(id)
-	}
 	indexed, err := st.GatewayCaptureIDs(ctx)
 	if err != nil {
 		logger.Warn("gateway capture orphan scan failed", "error", err)

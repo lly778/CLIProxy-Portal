@@ -106,7 +106,7 @@ docker compose -f compose.prebuilt.yaml up -d
 
 本机使用本项目配套的 CPA Manager Plus Compose 时，可以叠加 `compose.gateway.yaml`：它把网关发布到宿主机 `8317`，并将门户加入 `cpamp_default` 网络，通过容器名直连 CPA。须先把 CPA 原有的宿主机 `8317` 映射改为仅本机的其他端口（例如 `.env` 中的 `CPA_PORT=127.0.0.1:18319`），再运行 `docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml up -d`；`CPA_API_BASE_URL` 保持用户原来的公网地址，不用改客户端 URL。若 CPA 不在该 Docker 网络或已有其他反代，应按实际拓扑修改网关的内部上游和端口绑定。**不要把 `CPA_UPSTREAM_URL` 指回网关自身**；仅启用环境变量不会自动完成入口切换。
 
-经网关处理的 Responses、Chat Completions、Messages 和 Gemini 对话请求，会提取用户与助手文本，以及实际工具调用、参数和结果，作为结构化交互事件加密保存；系统/开发者指令、推理、工具定义、图片和其他非文本内容不保留。同一用户反复提交的相同事件只保存一次，不同用户之间不共用；下载按每次请求重建当次交互，默认提供 JSON，添加 `?format=txt` 可下载易读文本。旧版独立文件及旧版共用消息记录均不再兼容，并在新版启动时自动清理。用户可下载自己的记录，管理员可下载全局记录。每位用户最多保留最近 100 条、最长 7 天；请求或响应原始数据单侧超过 16 MB 时标注“已截断”，调用仍正常转发。请求头中的 API Key、Authorization 和门户 Cookie 不会写入记录；用户自行写进对话的秘密仍属于对话文本。未经网关的旧请求或直连 CPA 的请求没有可下载交互记录。更换 `PORTAL_APP_SECRET_FILE` 会使已有加密记录无法解密。
+经网关处理的 Responses、Chat Completions、Messages 和 Gemini 对话请求，会提取用户与助手文本，以及实际工具调用、参数和结果，作为结构化交互事件加密保存；系统/开发者指令、推理、工具定义、图片和其他非文本内容不保留。同一用户反复提交的相同事件只保存一次，不同用户之间不共用；下载按每次请求重建当次交互，默认提供 JSON，添加 `?format=txt` 可下载易读文本。旧版独立文件及旧版共用消息记录均不再兼容，并在新版启动时自动清理。用户可下载自己的记录，管理员可下载全局记录。每位用户最多保留最近 100 条，不按保存天数删除；请求或响应原始数据单侧超过 16 MB 时标注“已截断”，调用仍正常转发。请求头中的 API Key、Authorization 和门户 Cookie 不会写入记录；用户自行写进对话的秘密仍属于对话文本。未经网关的旧请求或直连 CPA 的请求没有可下载交互记录。更换 `PORTAL_APP_SECRET_FILE` 会使已有加密记录无法解密。
 
 ## 日常命令
 

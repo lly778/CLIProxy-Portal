@@ -104,6 +104,15 @@ func TestRequestViewLinksOnlyMatchingCapture(t *testing.T) {
 	if got := s.requestView(event).CaptureID; got != "" {
 		t.Fatalf("legacy capture gained a download link %q", got)
 	}
+	oldAt := now.Add(-8 * 24 * time.Hour)
+	const retainedID = "cccccccccccccccccccccccccccccccc"
+	if err := st.SaveGatewayCapture(context.Background(), store.GatewayCapture{ID: retainedID, UserID: "owner", APIKeyHash: "hash-a", CPARequestID: "old12345", CreatedAt: oldAt, Method: "POST", Path: "/v1/responses", StatusCode: 200, RequestContentType: gateway.StructuredCaptureContentType}); err != nil {
+		t.Fatal(err)
+	}
+	event.RequestID, event.TimestampMS = "old12345", oldAt.UnixMilli()
+	if got := s.requestView(event).CaptureID; got != retainedID {
+		t.Fatalf("old matching capture id = %q, want %q", got, retainedID)
+	}
 }
 
 func TestLegacySharedDialogueIsNotDownloadable(t *testing.T) {
@@ -192,7 +201,7 @@ func TestStructuredInteractionDownloadPreservesToolsAndOwnerBoundary(t *testing.
 			references = append(references, store.GatewayCaptureMessage{Side: side.name, ID: messageID, Role: gateway.StructuredMessageRole})
 		}
 	}
-	row := store.GatewayCapture{ID: id, UserID: "owner", APIKeyHash: "hash", CreatedAt: time.Now().UTC(), Method: "POST", Path: "/v1/responses", RequestedModel: "gpt-test", StatusCode: 200, RequestContentType: gateway.StructuredCaptureContentType, ResponseContentType: gateway.StructuredCaptureContentType}
+	row := store.GatewayCapture{ID: id, UserID: "owner", APIKeyHash: "hash", CreatedAt: time.Now().UTC().Add(-8 * 24 * time.Hour), Method: "POST", Path: "/v1/responses", RequestedModel: "gpt-test", StatusCode: 200, RequestContentType: gateway.StructuredCaptureContentType, ResponseContentType: gateway.StructuredCaptureContentType}
 	if err := st.SaveGatewayCaptureWithMessages(ctx, row, references); err != nil {
 		t.Fatal(err)
 	}

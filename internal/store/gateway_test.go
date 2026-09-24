@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestGatewayCaptureRetentionPerUserAndAge(t *testing.T) {
+func TestGatewayCaptureRetentionPerUserWithoutAgeCutoff(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -28,12 +28,15 @@ func TestGatewayCaptureRetentionPerUserAndAge(t *testing.T) {
 	if len(a) != 100 || len(b) != 101 {
 		t.Fatalf("remaining: a=%d b=%d", len(a), len(b))
 	}
-	if err := s.SaveGatewayCapture(ctx, GatewayCapture{ID: "expired", UserID: "a", CreatedAt: now.Add(-8 * 24 * time.Hour), Method: "POST", Path: "/v1/responses", StatusCode: 200}); err != nil {
+	if err := s.SaveGatewayCapture(ctx, GatewayCapture{ID: "old", UserID: "c", CreatedAt: now.Add(-8 * 24 * time.Hour), Method: "POST", Path: "/v1/responses", StatusCode: 200}); err != nil {
 		t.Fatal(err)
 	}
-	removed, err = s.DeleteExpiredGatewayCaptures(ctx, now.Add(-7*24*time.Hour))
-	if err != nil || len(removed.CaptureIDs) != 1 || removed.CaptureIDs[0] != "expired" {
-		t.Fatalf("age pruning = %v, %v", removed, err)
+	removed, err = s.DeleteExcessGatewayCaptures(ctx, "c", 100)
+	if err != nil || len(removed.CaptureIDs) != 0 {
+		t.Fatalf("old capture was removed before reaching the count limit: %v, %v", removed, err)
+	}
+	if _, err := s.GatewayCaptureByID(ctx, "old"); err != nil {
+		t.Fatalf("old capture was not retained: %v", err)
 	}
 }
 
