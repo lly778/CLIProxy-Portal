@@ -1440,9 +1440,8 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 		return pool, errors.New("无法从 CPAMP 获取当前额度")
 	}
 	type quotaAccumulator struct {
-		group            UpstreamQuotaGroup
-		remainingTotal   float64
-		includedAccounts int
+		group          UpstreamQuotaGroup
+		remainingTotal float64
 	}
 	groups := make(map[string]*quotaAccumulator)
 	knownAccounts := make(map[string]struct{}, len(items))
@@ -1474,14 +1473,11 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 				acc = &quotaAccumulator{group: UpstreamQuotaGroup{PlanType: plan, Period: period}}
 				groups[key] = acc
 			}
-			remaining := quotaRemaining(window)
+			remaining := quotaWindowEffectiveRemaining(period, window, windows)
 			acc.group.KnownAccounts++
-			if quotaWindowIncludedInAverage(period, windows) {
-				acc.remainingTotal += remaining
-				acc.includedAccounts++
-				if remaining > 0 {
-					acc.group.AvailableAccounts++
-				}
+			acc.remainingTotal += remaining
+			if remaining > 0 {
+				acc.group.AvailableAccounts++
 			}
 			if reset := quotaWindowEffectiveReset(period, window, windows, now); !reset.IsZero() {
 				if acc.group.NextResetAt.IsZero() || reset.Before(acc.group.NextResetAt) {
@@ -1504,10 +1500,10 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	sort.Strings(keys)
 	for _, key := range keys {
 		acc := groups[key]
-		if acc.includedAccounts > 0 {
-			acc.group.RemainingPercent = int(math.Round(acc.remainingTotal / float64(acc.includedAccounts)))
+		if acc.group.KnownAccounts > 0 {
+			acc.group.RemainingPercent = int(math.Round(acc.remainingTotal / float64(acc.group.KnownAccounts)))
 		}
-		acc.group.Estimated = acc.includedAccounts > 1
+		acc.group.Estimated = acc.group.KnownAccounts > 1
 		pool.Groups = append(pool.Groups, acc.group)
 	}
 	pool.UnknownCount = pool.TotalAccounts - len(knownAccounts)
@@ -1518,16 +1514,17 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	return pool, nil
 }
 
-func quotaWindowIncludedInAverage(period string, windows []quotaWindowSelection) bool {
+func quotaWindowEffectiveRemaining(period string, window cpamp.CodexQuotaWindow, windows []quotaWindowSelection) float64 {
+	remaining := quotaRemaining(window)
 	if period != "five_hour" {
-		return true
+		return remaining
 	}
 	for _, selected := range windows {
 		if (selected.Period == "weekly" || selected.Period == "monthly") && quotaRemaining(selected.Window) <= 0 {
-			return false
+			return 0
 		}
 	}
-	return true
+	return remaining
 }
 
 func quotaWindowEffectiveReset(period string, window cpamp.CodexQuotaWindow, windows []quotaWindowSelection, now time.Time) time.Time {

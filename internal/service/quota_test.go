@@ -232,7 +232,7 @@ func TestUpstreamQuotaKeepsPlansSeparate(t *testing.T) {
 	}
 }
 
-func TestUpstreamQuotaExcludesWeeklyExhaustedAccountFromFiveHourAverage(t *testing.T) {
+func TestUpstreamQuotaCountsWeeklyExhaustedAccountAsZeroInFiveHourAverage(t *testing.T) {
 	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -250,7 +250,7 @@ func TestUpstreamQuotaExcludesWeeklyExhaustedAccountFromFiveHourAverage(t *testi
 			}
 			shortUsed, longUsed := 10, 100
 			if request.AuthIndex == "two" {
-				shortUsed, longUsed = 20, 30
+				shortUsed, longUsed = 0, 30
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"status_code": 200, "body": map[string]any{
 				"plan_type": "plus",
@@ -280,7 +280,7 @@ func TestUpstreamQuotaExcludesWeeklyExhaustedAccountFromFiveHourAverage(t *testi
 	if pool.TotalAccounts != 2 || pool.UsableAccounts != 1 || len(pool.Groups) != 2 {
 		t.Fatalf("pool = %#v", pool)
 	}
-	want := map[string]int{"five_hour": 80, "weekly": 35}
+	want := map[string]int{"five_hour": 50, "weekly": 35}
 	for _, group := range pool.Groups {
 		if group.RemainingPercent != want[group.Period] || group.AvailableAccounts != 1 || group.KnownAccounts != 2 {
 			t.Fatalf("group = %#v", group)
@@ -288,31 +288,31 @@ func TestUpstreamQuotaExcludesWeeklyExhaustedAccountFromFiveHourAverage(t *testi
 	}
 }
 
-func TestFiveHourExhaustionDoesNotExcludeWeeklyQuota(t *testing.T) {
+func TestFiveHourExhaustionDoesNotReduceWeeklyQuota(t *testing.T) {
 	exhausted, available := 100.0, 20.0
 	windows := []quotaWindowSelection{
 		{Period: "five_hour", Window: cpamp.CodexQuotaWindow{UsedPercent: &exhausted}},
 		{Period: "weekly", Window: cpamp.CodexQuotaWindow{UsedPercent: &available}},
 	}
-	if !quotaWindowIncludedInAverage("weekly", windows) {
-		t.Fatal("weekly quota was excluded by exhausted five-hour quota")
+	if got := quotaWindowEffectiveRemaining("weekly", windows[1].Window, windows); got != 80 {
+		t.Fatalf("weekly effective remaining = %v, want 80", got)
 	}
-	if !quotaWindowIncludedInAverage("five_hour", windows) {
-		t.Fatal("five-hour quota should remain in its own average as a zero value")
+	if got := quotaWindowEffectiveRemaining("five_hour", windows[0].Window, windows); got != 0 {
+		t.Fatalf("five-hour effective remaining = %v, want 0", got)
 	}
 }
 
-func TestWeeklyExhaustionExcludesFiveHourQuota(t *testing.T) {
+func TestWeeklyExhaustionCountsFiveHourQuotaAsZero(t *testing.T) {
 	exhausted, available := 100.0, 20.0
 	windows := []quotaWindowSelection{
 		{Period: "five_hour", Window: cpamp.CodexQuotaWindow{UsedPercent: &available}},
 		{Period: "weekly", Window: cpamp.CodexQuotaWindow{UsedPercent: &exhausted}},
 	}
-	if quotaWindowIncludedInAverage("five_hour", windows) {
-		t.Fatal("five-hour quota remained eligible after weekly quota was exhausted")
+	if got := quotaWindowEffectiveRemaining("five_hour", windows[0].Window, windows); got != 0 {
+		t.Fatalf("five-hour effective remaining = %v, want 0", got)
 	}
-	if !quotaWindowIncludedInAverage("weekly", windows) {
-		t.Fatal("weekly quota excluded itself from its own average")
+	if got := quotaWindowEffectiveRemaining("weekly", windows[1].Window, windows); got != 0 {
+		t.Fatalf("weekly effective remaining = %v, want 0", got)
 	}
 }
 
