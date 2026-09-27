@@ -33,26 +33,27 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	phone := r.FormValue("phone")
+	remember := r.FormValue("remember") == "1"
 	ip := s.clientIP(r)
 	key := "login:" + ip + ":" + phone
 	if !s.limit.Allow(key, 10, time.Hour, 15*time.Minute) {
-		s.renderLoginError(w, csrf, phone, "尝试次数过多，请稍后再试")
+		s.renderLoginError(w, csrf, phone, remember, "尝试次数过多，请稍后再试")
 		return
 	}
 	u, err := s.Accounts.Authenticate(r.Context(), phone, r.FormValue("password"))
 	if err != nil {
-		s.renderLoginError(w, csrf, phone, service.ErrInvalidCredentials.Error())
+		s.renderLoginError(w, csrf, phone, remember, service.ErrInvalidCredentials.Error())
 		return
 	}
 	s.limit.Reset(key)
-	token, _, err := s.Accounts.CreateSession(r.Context(), u, ip, r.UserAgent())
+	token, _, err := s.Accounts.CreateSessionWithRemember(r.Context(), u, ip, r.UserAgent(), remember)
 	if err != nil {
 		s.errorPage(w, r, 500, "登录暂时不可用", err)
 		return
 	}
-	max := int((30 * 24 * time.Hour).Seconds())
-	if u.IsAdmin() {
-		max = int((8 * time.Hour).Seconds())
+	max := 0 // No Max-Age creates a browser-session cookie.
+	if remember {
+		max = int(s.Accounts.RememberMax.Seconds())
 	}
 	s.setSession(w, token, max)
 	next := r.FormValue("next")
@@ -61,9 +62,9 @@ func (s *Server) loginPost(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
-func (s *Server) renderLoginError(w http.ResponseWriter, csrf, phone, msg string) {
+func (s *Server) renderLoginError(w http.ResponseWriter, csrf, phone string, remember bool, msg string) {
 	w.WriteHeader(http.StatusUnauthorized)
-	_ = s.UI.Render(w, webui.PageLogin, webui.LoginView{LayoutView: webui.LayoutView{Title: "登录", Brand: "CLIProxy 账号门户", CSRFToken: csrf, Error: msg}, Phone: phone})
+	_ = s.UI.Render(w, webui.PageLogin, webui.LoginView{LayoutView: webui.LayoutView{Title: "登录", Brand: "CLIProxy 账号门户", CSRFToken: csrf, Error: msg}, Phone: phone, Remember: remember})
 }
 
 func (s *Server) registerGet(w http.ResponseWriter, r *http.Request) {

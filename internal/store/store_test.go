@@ -19,6 +19,38 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
+func TestSessionRememberMigrationPreservesLegacySessions(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	u := domain.User{ID: "legacy-user", Phone: "13800138000", Name: "用户", Role: domain.RoleUser, Status: domain.StatusApproved, CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateUser(ctx, u); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `ALTER TABLE sessions DROP COLUMN remember`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token_hash,user_id,created_at_ms,last_seen_at_ms,expires_at_ms) VALUES(?,?,?,?,?)`, "legacy", u.ID, now.UnixMilli(), now.UnixMilli(), now.Add(30*24*time.Hour).UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.migrate(ctx, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	legacy, err := s.Session(ctx, "legacy")
+	if err != nil || legacy.Remember || legacy.UserID != u.ID {
+		t.Fatalf("legacy session=%+v err=%v", legacy, err)
+	}
+	if err := s.CreateSession(ctx, Session{TokenHash: "remembered", UserID: u.ID, CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(30 * 24 * time.Hour), Remember: true}); err != nil {
+		t.Fatal(err)
+	}
+	remembered, err := s.Session(ctx, "remembered")
+	if err != nil || !remembered.Remember {
+		t.Fatalf("remembered session=%+v err=%v", remembered, err)
+	}
+}
+
 func TestUserKeyAndAnonymize(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

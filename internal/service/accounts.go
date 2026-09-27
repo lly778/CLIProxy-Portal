@@ -19,17 +19,17 @@ var (
 )
 
 type Accounts struct {
-	Store     *store.Store
-	Secret    []byte
-	Now       func() time.Time
-	UserIdle  time.Duration
-	UserMax   time.Duration
-	AdminIdle time.Duration
-	AdminMax  time.Duration
+	Store        *store.Store
+	Secret       []byte
+	Now          func() time.Time
+	SessionIdle  time.Duration
+	SessionMax   time.Duration
+	RememberIdle time.Duration
+	RememberMax  time.Duration
 }
 
 func NewAccounts(st *store.Store, secret []byte) *Accounts {
-	return &Accounts{Store: st, Secret: secret, Now: func() time.Time { return time.Now().UTC() }, UserIdle: 7 * 24 * time.Hour, UserMax: 30 * 24 * time.Hour, AdminIdle: 30 * time.Minute, AdminMax: 8 * time.Hour}
+	return &Accounts{Store: st, Secret: secret, Now: func() time.Time { return time.Now().UTC() }, SessionIdle: 30 * time.Minute, SessionMax: 8 * time.Hour, RememberIdle: 7 * 24 * time.Hour, RememberMax: 30 * 24 * time.Hour}
 }
 
 func (a *Accounts) Register(ctx context.Context, phoneInput, name, password string, policyVersion int, ip string) (domain.User, error) {
@@ -124,16 +124,20 @@ func (a *Accounts) Authenticate(ctx context.Context, phoneInput, password string
 }
 
 func (a *Accounts) CreateSession(ctx context.Context, u domain.User, ip, ua string) (token string, csrf string, err error) {
+	return a.CreateSessionWithRemember(ctx, u, ip, ua, false)
+}
+
+func (a *Accounts) CreateSessionWithRemember(ctx context.Context, u domain.User, ip, ua string, remember bool) (token string, csrf string, err error) {
 	token, err = security.RandomToken(32)
 	if err != nil {
 		return "", "", err
 	}
 	now := a.Now()
-	max := a.UserMax
-	if u.IsAdmin() {
-		max = a.AdminMax
+	max := a.SessionMax
+	if remember {
+		max = a.RememberMax
 	}
-	v := store.Session{TokenHash: security.SHA256(token), UserID: u.ID, CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(max), IP: ip, UserAgent: truncate(ua, 250)}
+	v := store.Session{TokenHash: security.SHA256(token), UserID: u.ID, CreatedAt: now, LastSeen: now, ExpiresAt: now.Add(max), IP: ip, UserAgent: truncate(ua, 250), Remember: remember}
 	if err = a.Store.CreateSession(ctx, v); err != nil {
 		return "", "", err
 	}
@@ -154,11 +158,11 @@ func (a *Accounts) ResolveSession(ctx context.Context, token string) (domain.Use
 	if err != nil {
 		return domain.User{}, store.Session{}, err
 	}
-	idle := a.UserIdle
-	if u.IsAdmin() {
-		idle = a.AdminIdle
+	idle, max := a.SessionIdle, a.SessionMax
+	if sess.Remember {
+		idle, max = a.RememberIdle, a.RememberMax
 	}
-	if now.After(sess.ExpiresAt) || now.Sub(sess.LastSeen) > idle || u.Status == domain.StatusDeleted || u.Status == domain.StatusDeletePending {
+	if !now.Before(sess.ExpiresAt) || now.Sub(sess.CreatedAt) >= max || now.Sub(sess.LastSeen) >= idle || u.Status == domain.StatusDeleted || u.Status == domain.StatusDeletePending {
 		_ = a.Store.DeleteSession(ctx, hash)
 		return domain.User{}, store.Session{}, store.ErrNotFound
 	}

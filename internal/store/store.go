@@ -24,6 +24,7 @@ type Session struct {
 	ExpiresAt time.Time
 	IP        string
 	UserAgent string
+	Remember  bool
 }
 
 type PasswordReset struct {
@@ -186,6 +187,15 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 	for _, stmt := range statements {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
+		}
+	}
+	var rememberColumn int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='remember'`).Scan(&rememberColumn); err != nil {
+		return err
+	}
+	if rememberColumn == 0 {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN remember INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("migrate session remember flag: %w", err)
 		}
 	}
 	open := "false"
@@ -557,13 +567,13 @@ func (s *Store) SwapActiveKey(ctx context.Context, oldHash string, next domain.A
 }
 
 func (s *Store) CreateSession(ctx context.Context, v Session) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token_hash,user_id,created_at_ms,last_seen_at_ms,expires_at_ms,ip,user_agent) VALUES(?,?,?,?,?,?,?)`, v.TokenHash, v.UserID, timeMS(v.CreatedAt), timeMS(v.LastSeen), timeMS(v.ExpiresAt), v.IP, v.UserAgent)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(token_hash,user_id,created_at_ms,last_seen_at_ms,expires_at_ms,ip,user_agent,remember) VALUES(?,?,?,?,?,?,?,?)`, v.TokenHash, v.UserID, timeMS(v.CreatedAt), timeMS(v.LastSeen), timeMS(v.ExpiresAt), v.IP, v.UserAgent, v.Remember)
 	return err
 }
 func (s *Store) Session(ctx context.Context, hash string) (Session, error) {
 	var v Session
 	var created, last, expires int64
-	err := s.db.QueryRowContext(ctx, `SELECT token_hash,user_id,created_at_ms,last_seen_at_ms,expires_at_ms,ip,user_agent FROM sessions WHERE token_hash=?`, hash).Scan(&v.TokenHash, &v.UserID, &created, &last, &expires, &v.IP, &v.UserAgent)
+	err := s.db.QueryRowContext(ctx, `SELECT token_hash,user_id,created_at_ms,last_seen_at_ms,expires_at_ms,ip,user_agent,remember FROM sessions WHERE token_hash=?`, hash).Scan(&v.TokenHash, &v.UserID, &created, &last, &expires, &v.IP, &v.UserAgent, &v.Remember)
 	v.CreatedAt = fromMS(created)
 	v.LastSeen = fromMS(last)
 	v.ExpiresAt = fromMS(expires)

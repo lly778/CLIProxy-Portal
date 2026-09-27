@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cliproxy-portal/internal/domain"
+	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/store"
 )
 
@@ -65,6 +66,65 @@ func TestAdminSessionIdleTimeout(t *testing.T) {
 		t.Fatal("idle admin session accepted")
 	}
 	_ = st
+}
+
+func TestSessionLifetimeDependsOnRememberNotRole(t *testing.T) {
+	a, st := accountsForTest(t)
+	ctx := context.Background()
+	p, err := st.LatestPolicy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := a.Register(ctx, "13800138000", "用户", "long-password-123", p.Version, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := a.CreateAdmin(ctx, "13900139000", "管理员", "very-long-admin-password", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []domain.User{user, admin} {
+		for _, remember := range []bool{false, true} {
+			max, idle := 8*time.Hour, 30*time.Minute
+			if remember {
+				max, idle = 30*24*time.Hour, 7*24*time.Hour
+			}
+			for _, expireByIdle := range []bool{false, true} {
+				start := time.Now().UTC().Truncate(time.Millisecond)
+				a.Now = func() time.Time { return start }
+				token, _, err := a.CreateSessionWithRemember(ctx, u, "", "", remember)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sess, err := st.Session(ctx, security.SHA256(token))
+				if err != nil || sess.Remember != remember || sess.ExpiresAt.Sub(start) != max {
+					t.Fatalf("role=%s remember=%v session=%+v err=%v", u.Role, remember, sess, err)
+				}
+				limit := max
+				if expireByIdle {
+					limit = idle
+				} else {
+					if err := st.TouchSession(ctx, sess.TokenHash, start.Add(max-time.Second)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				a.Now = func() time.Time { return start.Add(limit - time.Millisecond) }
+				if _, _, err := a.ResolveSession(ctx, token); err != nil {
+					t.Fatalf("session expired early: %v", err)
+				}
+				// Restore LastSeen because a successful resolution refreshes it.
+				if expireByIdle {
+					if err := st.TouchSession(ctx, sess.TokenHash, start); err != nil {
+						t.Fatal(err)
+					}
+				}
+				a.Now = func() time.Time { return start.Add(limit) }
+				if _, _, err := a.ResolveSession(ctx, token); err == nil {
+					t.Fatalf("role=%s remember=%v idle=%v accepted expired session", u.Role, remember, expireByIdle)
+				}
+			}
+		}
+	}
 }
 
 func TestChangePhoneRequiresAdminRoleWithoutPasswordReauthentication(t *testing.T) {
