@@ -467,8 +467,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-rule-note > div { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .oauth-preset-head { align-items: center; }
 .oauth-preset-head > div:first-child { min-width: 260px; }
-.oauth-preset-tools { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; }
-.oauth-preset-tools > .badge { white-space: nowrap; }
+.oauth-preset-tools { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; justify-content: flex-end; }
 .oauth-preset-save { display: grid; width: 370px; max-width: 42vw; grid-template-columns: minmax(170px, 1fr) auto; gap: 9px; align-items: center; }
 .oauth-preset-save label { min-width: 0; }
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
@@ -631,7 +630,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .oauth-model-list { grid-template-columns: 1fr; }
 	.oauth-preset-head { align-items: flex-start; flex-direction: column; }
 	.oauth-preset-tools { width: 100%; flex-wrap: wrap; }
-	.oauth-preset-tools > .badge { margin-left: auto; }
 	.oauth-preset-save { width: min(100%, 370px); max-width: none; grid-template-columns: minmax(150px, 1fr) auto; }
 	.oauth-preset-list { grid-template-columns: 1fr; }
 	.oauth-preset-row { align-items: flex-start; flex-direction: column; }
