@@ -66,10 +66,10 @@
   </div>
 </section>
 <section class="card upstream-card section-gap">
-  <div class="section-head compact"><div><h2>模型别名映射</h2><p class="muted small">仅显示已启用的 Codex 模型：卡片下方的用户侧别名会路由至上方实际模型，可增删；不添加别名时使用原名，也可同时保留原名。停用模型时会删除该模型的全部别名。</p></div></div>
+  <div class="section-head compact"><div><h2>模型别名映射</h2><p class="muted small">仅显示已启用的 Codex 模型：卡片下方的用户侧别名会路由至上方实际模型，可增删；不添加别名时使用原名，也可同时保留原名。停用模型时会删除该模型的全部别名。</p></div>{{if .AliasReady}}{{if .AliasModels}}<button class="button primary" type="submit" form="oauth-alias-form">保存模型别名</button>{{end}}{{end}}</div>
   {{if .AliasError}}<div class="alert danger" role="alert">{{.AliasError}}</div>{{end}}
   {{if .AliasReady}}{{if .AliasModels}}
-  <form method="post" action="/admin/upstreams/models/aliases" class="oauth-alias-form" data-confirm="确定保存所有 Codex 模型别名吗？保存后将影响所有用户的新请求。">
+  <form id="oauth-alias-form" method="post" action="/admin/upstreams/models/aliases" class="oauth-alias-form" data-confirm="确定保存所有 Codex 模型别名吗？保存后将影响所有用户的新请求。">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
     <input type="hidden" name="revision" value="{{.AliasRevision}}">
     <div class="oauth-alias-list">
@@ -87,15 +87,14 @@
       </div>
       {{end}}
     </div>
-    <div class="oauth-alias-actions"><button class="button primary" type="submit">保存模型别名</button></div>
   </form>
   {{else}}<div class="empty-state compact"><strong>暂无已启用的可映射模型</strong></div>{{end}}{{end}}
 </section>
 <section class="card upstream-card section-gap">
-  <div class="section-head compact"><div><h2>思考强度上限</h2><p class="muted small">按实际模型全局生效，别名共享上限。高于上限的显式请求降至上限；低于上限或未指定强度的请求保持原样。</p></div></div>
+  <div class="section-head compact"><div><h2>思考强度上限</h2><p class="muted small">按实际模型全局生效，别名共享上限。高于上限的显式请求降至上限；低于上限或未指定强度的请求保持原样。</p></div>{{if .ReasoningReady}}{{if .ReasoningModels}}<button class="button primary" type="submit" form="reasoning-cap-form">保存强度上限</button>{{end}}{{end}}</div>
   {{if .ReasoningError}}<div class="alert danger" role="alert">{{.ReasoningError}}</div>{{end}}
   {{if .ReasoningReady}}{{if .ReasoningModels}}
-  <form method="post" action="/admin/upstreams/models/reasoning" data-confirm="确定保存 Codex 模型思考强度上限吗？保存后将影响所有用户的新请求。">
+  <form id="reasoning-cap-form" method="post" action="/admin/upstreams/models/reasoning" data-confirm="确定保存 Codex 模型思考强度上限吗？保存后将影响所有用户的新请求。">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
     <input type="hidden" name="reasoning_revision" value="{{.ReasoningRevision}}">
     <div class="reasoning-cap-list">
@@ -103,7 +102,6 @@
       <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><span class="badge success">已启用</span><input type="hidden" name="model" value="{{$model.ID}}"></label>
       {{end}}
     </div>
-    <div class="oauth-alias-actions"><button class="button primary" type="submit">保存强度上限</button></div>
   </form>
   {{else}}<div class="empty-state compact"><strong>暂无可设置强度的已启用模型</strong></div>{{end}}{{end}}
 </section>
