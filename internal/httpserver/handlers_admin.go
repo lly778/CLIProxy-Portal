@@ -773,6 +773,17 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); msg != "" {
 		v.PresetError = msg
 	}
+	refresh := s.Keys.QuotaRefreshStatus()
+	v.RefreshLabel = "刷新额度"
+	v.RefreshMessage = refresh.Message
+	v.RefreshRunning = refresh.Running
+	if refresh.Running {
+		v.RefreshLabel = "正在刷新…"
+		v.RefreshDisabled = true
+	} else if !refresh.NextAllowedAt.IsZero() && time.Now().UTC().Before(refresh.NextAllowedAt) {
+		v.RefreshLabel = "稍后可刷新"
+		v.RefreshDisabled = true
+	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
 }
 

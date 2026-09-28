@@ -248,7 +248,7 @@ func (s *Server) quotaRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := r.FormValue("next")
-	if next != "/usage" && next != "/dashboard" {
+	if next != "/usage" && next != "/dashboard" && !(next == "/admin/upstreams" && currentUser(r).IsAdmin()) {
 		next = "/dashboard"
 	}
 	status, err := s.Keys.StartQuotaRefresh()

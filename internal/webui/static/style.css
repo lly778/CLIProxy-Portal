@@ -448,6 +448,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .approval-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .count-pill { padding: 5px 11px; color: var(--warning); background: var(--warning-bg); border-radius: 99px; font-size: 12px; font-weight: 650; }
 .upstream-card { padding-bottom: 10px; container-type: inline-size; }
+.upstream-credentials-head > div { min-width: 0; }
+.upstream-credentials-head > form { flex: 0 0 auto; }
+.upstream-credentials-head .quota-refresh-button { min-height: 36px; padding: 7px 13px; font-size: 14px; }
 .upstream-list { display: grid; }
 .upstream-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(320px, .8fr) max-content max-content; gap: 18px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }
 .upstream-row:last-child { border-bottom: 0; }

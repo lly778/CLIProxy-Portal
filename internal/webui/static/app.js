@@ -281,6 +281,7 @@
       event.preventDefault();
       var button = form.querySelector("button[type='submit']");
       if (!button || button.disabled) return;
+      var quotaPanelSelector = form.closest("[data-upstream-quotas]") ? "[data-upstream-quotas]" : "[data-quota-pool]";
       button.disabled = true;
       button.textContent = "正在刷新…";
 
@@ -298,8 +299,8 @@
           return response.text();
         }).then(function (html) {
           var page = new DOMParser().parseFromString(html, "text/html");
-          var current = document.querySelector("[data-quota-pool]");
-          var next = page.querySelector("[data-quota-pool]");
+          var current = document.querySelector(quotaPanelSelector);
+          var next = page.querySelector(quotaPanelSelector);
           if (!current || !next) throw new Error("quota pool missing");
           var running = next.getAttribute("data-refresh-running") === "true";
           current.replaceWith(document.importNode(next, true));
@@ -326,7 +327,7 @@
         if (!response.ok) throw new Error("HTTP " + response.status);
         return pollQuotaPool(0, 0);
       }).catch(function () {
-        var currentButton = document.querySelector("[data-quota-refresh-form] button[type='submit']");
+        var currentButton = document.querySelector(quotaPanelSelector + " [data-quota-refresh-form] button[type='submit']");
         if (!currentButton) return;
         currentButton.disabled = false;
         currentButton.textContent = "刷新失败，请重试";

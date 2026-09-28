@@ -444,6 +444,14 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("admin upstream account quotas were not rendered: %s", upstreamsPage)
 	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
+	refreshResponse, err = adminClient.PostForm(portal.URL+"/quota/refresh", url.Values{"csrf_token": {adminCSRF}, "next": {"/admin/upstreams"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refreshResponse.Body.Close()
+	if refreshResponse.StatusCode != http.StatusSeeOther || !strings.HasPrefix(refreshResponse.Header.Get("Location"), "/admin/upstreams?quota_msg=") {
+		t.Fatalf("upstream quota refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
+	}
 	if !strings.Contains(upstreamsPage, "调用预设") || !strings.Contains(upstreamsPage, "保存当前配置") {
 		t.Fatalf("admin upstream page missing preset controls: %s", upstreamsPage)
 	}
