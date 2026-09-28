@@ -292,6 +292,31 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 	}
 }
 
+func TestQuotaRefreshCompletedTextPrecedesButton(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, completed := range []bool{false, true} {
+		for _, page := range []string{PageDashboard, PageAdminUpstreams} {
+			var view any = DashboardView{Quota: QuotaPoolView{Show: true, RefreshCompleted: completed, RefreshDisabled: true, RefreshLabel: "稍后可刷新"}}
+			if page == PageAdminUpstreams {
+				view = AdminUpstreamsView{RefreshCompleted: completed, RefreshDisabled: true, RefreshLabel: "稍后可刷新"}
+			}
+			var out bytes.Buffer
+			if err := r.Execute(&out, page, view); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			result := strings.Index(got, `class="muted small quota-refresh-result" role="status">已刷新</span>`)
+			button := strings.Index(got, `class="button secondary quota-refresh-button"`)
+			if completed && (result < 0 || button < result) || !completed && result >= 0 {
+				t.Fatalf("page %s completed=%v should show success only before the refresh button", page, completed)
+			}
+		}
+	}
+}
+
 func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

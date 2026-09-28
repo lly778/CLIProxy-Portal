@@ -480,6 +480,7 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 	} else if !refresh.NextAllowedAt.IsZero() && time.Now().UTC().Before(refresh.NextAllowedAt) {
 		v.RefreshDisabled = true
 		v.RefreshLabel = "稍后可刷新"
+		v.RefreshCompleted = !refresh.LastFinishedAt.IsZero() && refresh.Succeeded > 0 && refresh.Failed == 0
 	}
 	for _, group := range pool.Groups {
 		plan := strings.ToUpper(group.PlanType)

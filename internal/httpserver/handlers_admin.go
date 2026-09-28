@@ -781,6 +781,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		v.RefreshDisabled = true
 	} else if !refresh.NextAllowedAt.IsZero() && time.Now().UTC().Before(refresh.NextAllowedAt) {
 		v.RefreshLabel = "稍后可刷新"
+		v.RefreshCompleted = !refresh.LastFinishedAt.IsZero() && refresh.Succeeded > 0 && refresh.Failed == 0
 		v.RefreshDisabled = true
 	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)

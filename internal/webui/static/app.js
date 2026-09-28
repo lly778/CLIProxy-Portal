@@ -282,6 +282,8 @@
       var button = form.querySelector("button[type='submit']");
       if (!button || button.disabled) return;
       var quotaPanelSelector = form.closest("[data-upstream-quotas]") ? "[data-upstream-quotas]" : "[data-quota-pool]";
+      var previousResult = form.querySelector(".quota-refresh-result");
+      if (previousResult) previousResult.remove();
       button.disabled = true;
       button.textContent = "正在刷新…";
 

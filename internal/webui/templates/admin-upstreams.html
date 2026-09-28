@@ -2,7 +2,7 @@
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">管理 Codex 上游凭证、模型启停、用户侧别名及思考强度上限。更改会影响后续请求调度。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="card upstream-card" data-upstream-quotas data-refresh-running="{{if .RefreshRunning}}true{{else}}false{{end}}">
-  <div class="section-head compact upstream-credentials-head"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="/admin/upstreams"><button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
+  <div class="section-head compact upstream-credentials-head"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="/admin/upstreams">{{if .RefreshCompleted}}<span class="muted small quota-refresh-result" role="status">已刷新</span>{{end}}<button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
   {{if .QuotaError}}<p class="muted small upstream-quota-error">{{.QuotaError}}</p>{{end}}
   <div class="upstream-list">
     {{range .Accounts}}

@@ -219,6 +219,7 @@ type QuotaPoolView struct {
 	CSRFToken         string
 	ReturnTo          string
 	RefreshLabel      string
+	RefreshCompleted  bool
 	RefreshDisabled   bool
 	RefreshRunning    bool
 }
@@ -491,6 +492,7 @@ type AdminUpstreamsView struct {
 	ReasoningReady    bool
 	QuotaError        string
 	RefreshLabel      string
+	RefreshCompleted  bool
 	RefreshDisabled   bool
 	RefreshRunning    bool
 	Enabled           int

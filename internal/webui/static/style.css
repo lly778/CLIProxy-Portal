@@ -114,6 +114,8 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .quota-pool-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; }
 .quota-refresh-button { min-height: 32px; padding: 5px 11px; font-size: 12px; }
 .quota-refresh-button:disabled { color: var(--muted); background: #f2f4f8; border-color: var(--line); cursor: not-allowed; }
+[data-quota-refresh-form] { gap: 10px; align-items: center; }
+.quota-refresh-result { white-space: nowrap; }
 .quota-pool-unavailable { display: flex; gap: 11px; align-items: flex-start; padding: 12px 14px; margin-top: 18px; color: var(--danger); background: var(--danger-bg); border: 1px solid #f0c9cd; border-radius: 10px; }
 .quota-pool-unavailable .status-dot { flex: 0 0 auto; margin-top: 5px; }
 .quota-pool-unavailable p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -447,8 +449,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .approval-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .count-pill { padding: 5px 11px; color: var(--warning); background: var(--warning-bg); border-radius: 99px; font-size: 12px; font-weight: 650; }
 .upstream-card { padding-bottom: 10px; container-type: inline-size; }
+.upstream-credentials-head { flex-wrap: wrap; }
 .upstream-credentials-head > div { min-width: 0; }
-.upstream-credentials-head > form { flex: 0 0 auto; }
+.upstream-credentials-head > form { flex: 0 0 auto; margin-left: auto; }
 .upstream-credentials-head .quota-refresh-button { min-height: 36px; padding: 7px 13px; font-size: 14px; }
 .upstream-list { display: grid; }
 .upstream-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(320px, .8fr) max-content max-content; gap: 18px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }
