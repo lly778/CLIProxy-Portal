@@ -76,7 +76,7 @@
     <div class="oauth-alias-list">
       {{range $index, $model := .AliasModels}}
       <div class="oauth-alias-row">
-        <div class="oauth-alias-model"><div><span class="muted small">实际模型</span><strong class="mono" title="实际模型：{{$model.ID}}">{{$model.ID}}</strong></div><span class="badge success">已启用</span></div>
+        <div class="oauth-alias-model"><div><span class="muted small">实际模型</span><strong class="mono" title="实际模型：{{$model.ID}}">{{$model.ID}}</strong></div></div>
         <div class="oauth-alias-controls">
           <span class="oauth-alias-caption">用户侧别名</span>
           <div class="oauth-alias-entries" data-alias-entries>{{range $model.AliasList}}<div class="oauth-alias-entry"><label class="oauth-alias-field"><span class="sr-only">{{$model.ID}} 的用户侧别名</span><input type="text" name="alias_{{$index}}" value="{{.}}" maxlength="128" placeholder="用户侧模型名" autocomplete="off"></label><button class="oauth-alias-icon-button" type="button" data-alias-remove aria-label="删除 {{$model.ID}} 的这个别名" title="删除别名">−</button></div>{{end}}</div>
@@ -100,7 +100,7 @@
     <input type="hidden" name="reasoning_revision" value="{{.ReasoningRevision}}">
     <div class="reasoning-cap-list">
       {{range $index, $model := .ReasoningModels}}
-      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><span class="badge success">已启用</span><input type="hidden" name="model" value="{{$model.ID}}"></label>
+      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></label>
       {{end}}
     </div>
   </form>

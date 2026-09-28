@@ -476,7 +476,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-preset-row { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .oauth-preset-main { display: grid; min-width: 0; gap: 3px; }
 .oauth-preset-main strong, .oauth-preset-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oauth-preset-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.oauth-preset-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
 .oauth-preset-details { display: grid; gap: 8px; padding: 10px 0; margin: 6px 0 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .oauth-preset-details > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; }
 .oauth-preset-detail-label { padding-top: 2px; color: var(--muted); font-size: 11px; font-weight: 650; }
@@ -511,7 +511,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-alias-original { display: inline-flex; align-items: center; gap: 7px; width: 100%; padding-top: 12px; margin-top: 14px; color: var(--muted); border-top: 1px solid var(--line); font-size: 13px; cursor: pointer; }
 .oauth-alias-original input { width: auto; margin: 0; }
 .reasoning-cap-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
-.reasoning-cap-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px) auto; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.reasoning-cap-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(145px, 180px); align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 .reasoning-cap-row .mono { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
 .reasoning-cap-row select { width: 100%; min-width: 0; }
 .policy-body { color: #3c4859; line-height: 1.75; white-space: pre-wrap; }
@@ -638,7 +638,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .oauth-rule-note > div { justify-content: flex-start; }
   .oauth-alias-list { grid-template-columns: 1fr; }
   .reasoning-cap-list { grid-template-columns: 1fr; }
-  .reasoning-cap-row { grid-template-columns: minmax(0, 1fr) minmax(120px, 150px) auto; }
+  .reasoning-cap-row { grid-template-columns: minmax(0, 1fr) minmax(120px, 150px); }
   .oauth-alias-row { padding: 15px; }
   .main { padding: 27px 16px 48px; margin-left: 0; }
   .page-head { display: block; margin-bottom: 22px; }
