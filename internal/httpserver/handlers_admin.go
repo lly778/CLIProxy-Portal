@@ -596,6 +596,7 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游管理", "admin-upstreams")}
+	currentPreset, currentPresetErr := s.Keys.OAuthPresetSnapshot(r.Context())
 	presets, presetErr := s.Store.ListOAuthPresets(r.Context())
 	if presetErr != nil {
 		v.PresetError = "调用预设暂时不可用"
@@ -606,6 +607,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			summary := "预设内容无法解析"
 			row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt)}
 			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil {
+				row.Applied = currentPresetErr == nil && service.OAuthPresetSnapshotsEqual(currentPreset, snapshot)
 				enabled := 0
 				canonical := make(map[string]string, len(snapshot.Models))
 				for _, model := range snapshot.Models {

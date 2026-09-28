@@ -12,6 +12,28 @@ type presetCPAMP struct {
 	aliases []cpamp.OAuthModelAlias
 }
 
+func TestOAuthPresetSnapshotsEqual(t *testing.T) {
+	left := OAuthPresetSnapshot{
+		Version:       OAuthPresetVersion,
+		Models:        []OAuthPresetModel{{ID: "gpt-b", Enabled: false}, {ID: "GPT-A", Enabled: true}},
+		Aliases:       []cpamp.OAuthModelAlias{{Name: "GPT-A", Alias: "client-a", Fork: true}},
+		ReasoningCaps: map[string]string{"GPT-A": "HIGH", "gpt-b": ""},
+	}
+	right := OAuthPresetSnapshot{
+		Version:       OAuthPresetVersion,
+		Models:        []OAuthPresetModel{{ID: "gpt-a", Enabled: true}, {ID: "GPT-B", Enabled: false}},
+		Aliases:       []cpamp.OAuthModelAlias{{Name: "gpt-a", Alias: "CLIENT-A", Fork: true}},
+		ReasoningCaps: map[string]string{"gpt-a": "high"},
+	}
+	if !OAuthPresetSnapshotsEqual(left, right) {
+		t.Fatal("equivalent snapshots should match")
+	}
+	right.ReasoningCaps["gpt-a"] = "medium"
+	if OAuthPresetSnapshotsEqual(left, right) {
+		t.Fatal("different reasoning caps should not match")
+	}
+}
+
 func (f *presetCPAMP) ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error) {
 	return append([]cpamp.OAuthModelAlias(nil), f.aliases...), nil
 }

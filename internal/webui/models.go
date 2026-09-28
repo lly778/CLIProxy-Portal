@@ -498,6 +498,7 @@ type AdminUpstreamsView struct {
 type OAuthPresetView struct {
 	ID             string
 	Name           string
+	Applied        bool
 	Summary        string
 	UpdatedAt      string
 	EnabledModels  []string

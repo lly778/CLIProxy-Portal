@@ -76,6 +76,54 @@ func canonicalizeOAuthPreset(snapshot *OAuthPresetSnapshot) {
 	})
 }
 
+// OAuthPresetSnapshotsEqual reports whether two snapshots describe the same
+// portal-managed routing configuration. It intentionally ignores ordering and
+// harmless casing differences in model and alias names.
+func OAuthPresetSnapshotsEqual(left, right OAuthPresetSnapshot) bool {
+	canonicalizeOAuthPreset(&left)
+	canonicalizeOAuthPreset(&right)
+	if left.Version != right.Version || len(left.Models) != len(right.Models) || len(left.Aliases) != len(right.Aliases) {
+		return false
+	}
+	for i := range left.Models {
+		if !strings.EqualFold(strings.TrimSpace(left.Models[i].ID), strings.TrimSpace(right.Models[i].ID)) ||
+			left.Models[i].Enabled != right.Models[i].Enabled ||
+			!strings.EqualFold(strings.TrimSpace(left.Models[i].WildcardRule), strings.TrimSpace(right.Models[i].WildcardRule)) {
+			return false
+		}
+	}
+	for i := range left.Aliases {
+		if !strings.EqualFold(strings.TrimSpace(left.Aliases[i].Name), strings.TrimSpace(right.Aliases[i].Name)) ||
+			!strings.EqualFold(strings.TrimSpace(left.Aliases[i].Alias), strings.TrimSpace(right.Aliases[i].Alias)) ||
+			left.Aliases[i].Fork != right.Aliases[i].Fork {
+			return false
+		}
+	}
+	leftCaps := normalizedReasoningCaps(left.ReasoningCaps)
+	rightCaps := normalizedReasoningCaps(right.ReasoningCaps)
+	if len(leftCaps) != len(rightCaps) {
+		return false
+	}
+	for model, cap := range leftCaps {
+		if rightCaps[model] != cap {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizedReasoningCaps(caps map[string]string) map[string]string {
+	normalized := make(map[string]string, len(caps))
+	for model, cap := range caps {
+		model = strings.ToLower(strings.TrimSpace(model))
+		cap = strings.ToLower(strings.TrimSpace(cap))
+		if model != "" && cap != "" {
+			normalized[model] = cap
+		}
+	}
+	return normalized
+}
+
 // ApplyOAuthPreset replaces the three portal-managed routing areas together.
 // If an operation fails, it makes a best-effort rollback to the snapshot read
 // immediately before applying the preset.

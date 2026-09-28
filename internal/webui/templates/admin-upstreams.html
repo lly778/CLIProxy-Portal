@@ -39,6 +39,7 @@
         <div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>
       </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
       <div class="oauth-preset-actions">
+        {{if .Applied}}<span class="badge success">已应用</span>{{end}}
         <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？当前 OAuth 模型、别名及思考强度上限将被替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button secondary" type="submit">应用</button></form>
         <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button danger-outline" type="submit">删除</button></form>
       </div>

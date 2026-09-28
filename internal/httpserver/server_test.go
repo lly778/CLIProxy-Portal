@@ -452,6 +452,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(upstreamsPage, "基准配置") || !strings.Contains(upstreamsPage, "启用 1/2 个模型") {
 		t.Fatalf("saved preset was not rendered: %s", upstreamsPage)
 	}
+	if !strings.Contains(upstreamsPage, `<span class="badge success">已应用</span>`) {
+		t.Fatalf("matching preset was not marked as applied: %s", upstreamsPage)
+	}
 	presetID := extract(t, upstreamsPage, `/admin/upstreams/presets/([^/]+)/apply`)
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/"+presetID+"/apply", url.Values{"csrf_token": {adminCSRF}}, http.StatusSeeOther)
