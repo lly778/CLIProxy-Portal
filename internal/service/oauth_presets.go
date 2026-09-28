@@ -22,10 +22,9 @@ type OAuthPresetSnapshot struct {
 }
 
 type OAuthPresetModel struct {
-	ID                string `json:"id"`
-	Enabled           bool   `json:"enabled"`
-	WildcardRule      string `json:"wildcard_rule,omitempty"`
-	SupportsReasoning bool   `json:"supports_reasoning,omitempty"`
+	ID           string `json:"id"`
+	Enabled      bool   `json:"enabled"`
+	WildcardRule string `json:"wildcard_rule,omitempty"`
 }
 
 // OAuthPresetSnapshot reads a consistent-enough configuration snapshot. Every
@@ -48,7 +47,7 @@ func (k *Keys) OAuthPresetSnapshot(ctx context.Context) (OAuthPresetSnapshot, er
 	for _, model := range models {
 		key := strings.ToLower(strings.TrimSpace(model.ID))
 		known[key] = model
-		snapshot.Models = append(snapshot.Models, OAuthPresetModel{ID: model.ID, Enabled: model.Enabled, WildcardRule: model.WildcardRule, SupportsReasoning: len(model.ThinkingLevels) > 0})
+		snapshot.Models = append(snapshot.Models, OAuthPresetModel{ID: model.ID, Enabled: model.Enabled, WildcardRule: model.WildcardRule})
 		if model.Enabled {
 			if cap := strings.ToLower(strings.TrimSpace(caps[key])); cap != "" {
 				snapshot.ReasoningCaps[key] = cap

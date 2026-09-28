@@ -48,7 +48,7 @@ func TestOAuthPresetSnapshotAndApplyRestoresAllManagedAreas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Models) != 2 || !snapshot.Models[0].SupportsReasoning || !snapshot.Models[1].SupportsReasoning || len(snapshot.Aliases) != 1 || snapshot.ReasoningCaps["gpt-alpha"] != "high" {
+	if len(snapshot.Models) != 2 || len(snapshot.Aliases) != 1 || snapshot.ReasoningCaps["gpt-alpha"] != "high" {
 		t.Fatalf("snapshot=%#v", snapshot)
 	}
 

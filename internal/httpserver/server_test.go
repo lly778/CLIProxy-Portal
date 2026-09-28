@@ -449,7 +449,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/save", url.Values{"csrf_token": {adminCSRF}, "name": {"基准配置"}}, http.StatusSeeOther)
 	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, "基准配置") || !strings.Contains(upstreamsPage, "启用 1/2 个模型") || !strings.Contains(upstreamsPage, `class="oauth-preset-value reasoning">gpt-enabled · 不限制</code>`) {
+	if !strings.Contains(upstreamsPage, "基准配置") || !strings.Contains(upstreamsPage, "启用 1/2 个模型") {
 		t.Fatalf("saved preset was not rendered: %s", upstreamsPage)
 	}
 	presetID := extract(t, upstreamsPage, `/admin/upstreams/presets/([^/]+)/apply`)
