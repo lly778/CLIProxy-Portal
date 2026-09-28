@@ -1,5 +1,5 @@
 {{define "content"}}
-<div class="page-head"><div><span class="eyebrow">用户中心</span><h1>{{if .Greeting}}{{.Greeting}}{{else}}账户概览{{end}}</h1><p class="muted">查看账号状态、API Key 和最近的模型调用。</p></div><a class="button secondary" href="/usage">查看完整用量</a></div>
+<div class="page-head"><div><span class="eyebrow">用户中心</span><h1>{{if .Greeting}}{{.Greeting}}{{else}}账户概览{{end}}</h1><p class="muted">查看账号状态、API Key 和最近的模型调用。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <div class="grid grid-3">
   <article class="card summary-card"><div class="card-label">账号状态</div><div class="status-line summary-value"><span class="status-dot {{statusClass .StatusCard.Status}}"></span><strong>{{.StatusCard.StatusLabel}}</strong></div><p class="summary-detail">{{.StatusCard.Description}}</p><a class="text-link" href="/status">查看状态详情 →</a></article>
