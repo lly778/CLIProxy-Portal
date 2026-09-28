@@ -437,6 +437,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("admin navigation still links legacy system pages: %s", adminSystemPage)
 	}
 	upstreamsPage := getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
+	if !strings.Contains(upstreamsPage, "data-quota-refresh-form") || strings.Contains(upstreamsPage, "quota-refresh-status") {
+		t.Fatalf("upstream quota refresh should retain its button without a status message: %s", upstreamsPage)
+	}
 	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
 		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)
 	}

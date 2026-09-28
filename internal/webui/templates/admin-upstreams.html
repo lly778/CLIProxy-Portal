@@ -4,7 +4,6 @@
 <section class="card upstream-card" data-upstream-quotas data-refresh-running="{{if .RefreshRunning}}true{{else}}false{{end}}">
   <div class="section-head compact upstream-credentials-head"><div><h2>Codex 凭证</h2><p class="muted small">已启用 {{.Enabled}} 个 · 已停用 {{.Disabled}} 个</p></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="/admin/upstreams"><button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
   {{if .QuotaError}}<p class="muted small upstream-quota-error">{{.QuotaError}}</p>{{end}}
-  {{if .RefreshMessage}}<p class="quota-refresh-status" aria-live="polite">{{.RefreshMessage}}</p>{{end}}
   <div class="upstream-list">
     {{range .Accounts}}
     <article class="upstream-row">

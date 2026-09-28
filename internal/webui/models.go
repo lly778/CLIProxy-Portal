@@ -492,7 +492,6 @@ type AdminUpstreamsView struct {
 	ReasoningReady    bool
 	QuotaError        string
 	RefreshLabel      string
-	RefreshMessage    string
 	RefreshDisabled   bool
 	RefreshRunning    bool
 	Enabled           int

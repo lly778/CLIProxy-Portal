@@ -775,7 +775,6 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	}
 	refresh := s.Keys.QuotaRefreshStatus()
 	v.RefreshLabel = "刷新额度"
-	v.RefreshMessage = refresh.Message
 	v.RefreshRunning = refresh.Running
 	if refresh.Running {
 		v.RefreshLabel = "正在刷新…"
