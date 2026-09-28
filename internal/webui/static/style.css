@@ -469,11 +469,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-preset-head > div:first-child { min-width: 260px; }
 .oauth-preset-tools { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; }
 .oauth-preset-tools > .badge { white-space: nowrap; }
-.oauth-preset-create { position: relative; }
-.oauth-preset-create > summary { list-style: none; cursor: pointer; }
-.oauth-preset-create > summary::-webkit-details-marker { display: none; }
-.oauth-preset-create[open] > summary { color: var(--primary); background: #f5f8ff; border-color: #a9bdf4; }
-.oauth-preset-save { position: absolute; z-index: 15; top: calc(100% + 8px); right: 0; display: grid; width: min(460px, 72vw); grid-template-columns: minmax(220px, 1fr) auto; gap: 9px; align-items: center; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 12px 28px rgba(16,24,40,.14); }
+.oauth-preset-save { display: grid; width: 370px; max-width: 42vw; grid-template-columns: minmax(170px, 1fr) auto; gap: 9px; align-items: center; }
 .oauth-preset-save label { min-width: 0; }
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
 .oauth-preset-save .button { justify-self: start; white-space: nowrap; }
@@ -626,9 +622,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .upstream-row > form { grid-column: 2 / -1; }
   .oauth-model-list { grid-template-columns: 1fr; }
 	.oauth-preset-head { align-items: flex-start; flex-direction: column; }
-	.oauth-preset-tools { width: 100%; }
-	.oauth-preset-create { margin-left: auto; }
-	.oauth-preset-save { position: static; width: min(100%, 460px); margin-top: 8px; grid-template-columns: 1fr; box-shadow: none; }
+	.oauth-preset-tools { width: 100%; flex-wrap: wrap; }
+	.oauth-preset-tools > .badge { margin-left: auto; }
+	.oauth-preset-save { width: min(100%, 370px); max-width: none; grid-template-columns: minmax(150px, 1fr) auto; }
 	.oauth-preset-list { grid-template-columns: 1fr; }
 	.oauth-preset-row { align-items: flex-start; flex-direction: column; }
   .oauth-model-row { grid-template-columns: minmax(0, 1fr) auto; }
