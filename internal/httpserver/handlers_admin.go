@@ -596,6 +596,11 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游管理", "admin-upstreams")}
+	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
+	thinkingCapable := make(map[string]bool, len(models))
+	for _, model := range models {
+		thinkingCapable[strings.ToLower(model.ID)] = len(model.ThinkingLevels) > 0
+	}
 	presets, presetErr := s.Store.ListOAuthPresets(r.Context())
 	if presetErr != nil {
 		v.PresetError = "调用预设暂时不可用"
@@ -631,17 +636,17 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 						row.OriginalModels = append(row.OriginalModels, model.ID)
 					}
 				}
-				capModels := make([]string, 0, len(snapshot.ReasoningCaps))
-				for model := range snapshot.ReasoningCaps {
-					capModels = append(capModels, model)
-				}
-				sort.Strings(capModels)
-				for _, model := range capModels {
-					name := canonical[strings.ToLower(model)]
-					if name == "" {
-						name = model
+				for _, model := range snapshot.Models {
+					modelID := strings.ToLower(model.ID)
+					if !model.Enabled || (!model.SupportsReasoning && !thinkingCapable[modelID]) {
+						continue
 					}
-					row.ReasoningCaps = append(row.ReasoningCaps, name+" · "+reasoningEffortLabel(snapshot.ReasoningCaps[model]))
+					cap := snapshot.ReasoningCaps[modelID]
+					label := "不限制"
+					if cap != "" {
+						label = reasoningEffortLabel(cap)
+					}
+					row.ReasoningCaps = append(row.ReasoningCaps, canonical[modelID]+" · "+label)
 				}
 				summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", enabled, len(snapshot.Models), len(snapshot.Aliases), len(snapshot.ReasoningCaps))
 			}
@@ -699,7 +704,6 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			v.Accounts = append(v.Accounts, row)
 		}
 	}
-	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
 	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context())
 	reasoningCaps, reasoningRevision, reasoningErr := s.Keys.OAuthReasoningCaps(r.Context())
 	aliasByModel := make(map[string][]string, len(aliases))
