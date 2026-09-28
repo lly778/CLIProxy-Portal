@@ -18,6 +18,7 @@ func TestAuditActionDisplay(t *testing.T) {
 		"key.model_test": "测试模型连接", "key.model_test.failed": "模型连接测试失败",
 		"oauth_model.aliases.update": "修改模型别名", "oauth_model.reasoning_caps.update": "修改思考上限",
 		"oauth_model.enable": "启用模型", "oauth_model.disable": "停用模型",
+		"oauth_preset.save": "保存调用预设", "oauth_preset.apply": "应用调用预设", "oauth_preset.delete": "删除调用预设",
 		"quota.refresh": "刷新额度", "upstream.enable": "启用上游账号", "upstream.disable": "停用上游账号",
 		"user.register": "提交注册申请", "user.resubmit": "重新提交注册申请", "user.approve": "批准注册申请",
 		"user.reject": "拒绝注册申请", "user.password.change": "修改密码", "user.password.reset_issued": "签发密码重置码",
@@ -49,6 +50,7 @@ func TestAuditTargetAndDetailDisplay(t *testing.T) {
 		{"admin.promote", "user-1", "user-1", "user -> admin", "用户（user-1）", "普通用户转为管理员"},
 		{"user.approve", "user-1", "小王(138****1234)", "", "小王(138****1234)", "—"},
 		{"oauth_model.reasoning_caps.update", "codex", "codex", "gpt-6-luna: high → max", "Codex 模型", "gpt-6-luna: 高 → 最高"},
+		{"oauth_preset.apply", "日常", "日常", "OAuth 模型、模型别名映射及思考强度上限", "调用预设（日常）", "OAuth 模型、模型别名映射及思考强度上限"},
 	}
 	for _, tc := range cases {
 		if got := auditTargetDisplay(tc.action, tc.id, tc.label); got != tc.targetWant {

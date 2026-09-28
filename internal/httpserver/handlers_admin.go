@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -13,6 +15,7 @@ import (
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/service"
+	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
 )
 
@@ -593,6 +596,26 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游管理", "admin-upstreams")}
+	presets, presetErr := s.Store.ListOAuthPresets(r.Context())
+	if presetErr != nil {
+		v.PresetError = "调用预设暂时不可用"
+		s.Logger.Error("list OAuth presets", "error", presetErr)
+	} else {
+		for _, preset := range presets {
+			var snapshot service.OAuthPresetSnapshot
+			summary := "预设内容无法解析"
+			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil {
+				enabled := 0
+				for _, model := range snapshot.Models {
+					if model.Enabled {
+						enabled++
+					}
+				}
+				summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", enabled, len(snapshot.Models), len(snapshot.Aliases), len(snapshot.ReasoningCaps))
+			}
+			v.Presets = append(v.Presets, webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, Summary: summary, UpdatedAt: s.formatTime(preset.UpdatedAt)})
+		}
+	}
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context())
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil {
@@ -712,7 +735,92 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	if msg := strings.TrimSpace(r.URL.Query().Get("reasoning_error")); msg != "" {
 		v.ReasoningError = msg
 	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); msg != "" {
+		v.PresetError = msg
+	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	if length := len([]rune(name)); length == 0 || length > 40 {
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("预设名称须为 1 至 40 个字符"), http.StatusSeeOther)
+		return
+	}
+	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context())
+	if err != nil {
+		s.Logger.Error("capture OAuth preset", "error", err)
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("读取当前调用配置失败："+err.Error()), http.StatusSeeOther)
+		return
+	}
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		s.errorPage(w, r, http.StatusInternalServerError, "保存调用预设失败", err)
+		return
+	}
+	id, err := security.NewID("preset_")
+	if err != nil {
+		s.errorPage(w, r, http.StatusInternalServerError, "保存调用预设失败", err)
+		return
+	}
+	u := currentUser(r)
+	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Name: name, Payload: string(payload), UpdatedBy: u.Name})
+	if err != nil {
+		message := "保存调用预设失败"
+		if strings.Contains(err.Error(), "limit") {
+			message = fmt.Sprintf("最多保存 %d 个调用预设", store.MaxOAuthPresets)
+		}
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape(message), http.StatusSeeOther)
+		return
+	}
+	s.audit(r, u, "oauth_preset.save", saved.Name, "OAuth 模型、模型别名映射及思考强度上限")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已保存"), http.StatusSeeOther)
+}
+
+func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设不存在"), http.StatusSeeOther)
+		return
+	}
+	var snapshot service.OAuthPresetSnapshot
+	if err := json.Unmarshal([]byte(preset.Payload), &snapshot); err != nil {
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设内容无效"), http.StatusSeeOther)
+		return
+	}
+	if err := s.Keys.ApplyOAuthPreset(r.Context(), snapshot); err != nil {
+		s.Logger.Error("apply OAuth preset", "preset", preset.Name, "error", err)
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		return
+	}
+	s.audit(r, currentUser(r), "oauth_preset.apply", preset.Name, "OAuth 模型、模型别名映射及思考强度上限")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已应用"), http.StatusSeeOther)
+}
+
+func (s *Server) adminOAuthPresetDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设不存在"), http.StatusSeeOther)
+		return
+	}
+	if err := s.Store.DeleteOAuthPreset(r.Context(), preset.ID); err != nil {
+		s.errorPage(w, r, http.StatusInternalServerError, "删除调用预设失败", err)
+		return
+	}
+	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, "已删除预设，不影响当前调用配置")
+	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已删除"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) {

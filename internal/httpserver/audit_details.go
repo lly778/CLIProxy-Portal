@@ -41,6 +41,12 @@ func auditActionDisplay(action string) string {
 		return "启用模型"
 	case "oauth_model.disable":
 		return "停用模型"
+	case "oauth_preset.save":
+		return "保存调用预设"
+	case "oauth_preset.apply":
+		return "应用调用预设"
+	case "oauth_preset.delete":
+		return "删除调用预设"
 	case "quota.refresh":
 		return "刷新额度"
 	case "upstream.enable":
@@ -101,6 +107,10 @@ func auditTargetDisplay(action, id, label string) string {
 	case "oauth_model.aliases.update", "oauth_model.reasoning_caps.update":
 		if strings.EqualFold(target, "codex") {
 			return "Codex 模型"
+		}
+	case "oauth_preset.save", "oauth_preset.apply", "oauth_preset.delete":
+		if target != "" {
+			return "调用预设（" + target + "）"
 		}
 	case "gateway.dialogue.download":
 		if target != "" {

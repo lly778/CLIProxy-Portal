@@ -464,6 +464,14 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .upstream-account-quota .quota-progress { height: 6px; }
 .oauth-rule-note { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 11px 13px; margin: 4px 0 10px; background: var(--warning-bg); border-radius: 9px; }
 .oauth-rule-note > div { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.oauth-preset-save { display: grid; grid-template-columns: minmax(220px, 420px) auto; gap: 10px; align-items: center; margin: 4px 0 15px; }
+.oauth-preset-save .button { justify-self: start; white-space: nowrap; }
+.oauth-preset-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.oauth-preset-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
+.oauth-preset-main { display: grid; min-width: 0; gap: 3px; }
+.oauth-preset-main strong, .oauth-preset-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oauth-preset-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.oauth-preset-empty { padding: 24px 12px; }
 .oauth-model-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .oauth-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px 13px; align-items: center; padding: 13px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .oauth-model-row form { justify-self: end; }
@@ -604,6 +612,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .upstream-account-quotas { grid-column: 2 / -1; min-width: 0; }
   .upstream-row > form { grid-column: 2 / -1; }
   .oauth-model-list { grid-template-columns: 1fr; }
+	.oauth-preset-save { grid-template-columns: 1fr; }
+	.oauth-preset-list { grid-template-columns: 1fr; }
+	.oauth-preset-row { align-items: flex-start; flex-direction: column; }
   .oauth-model-row { grid-template-columns: minmax(0, 1fr) auto; }
   .oauth-model-row form { grid-column: 1 / -1; justify-self: start; }
   .oauth-rule-note { align-items: flex-start; flex-direction: column; }

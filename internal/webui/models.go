@@ -477,6 +477,8 @@ type UpstreamAccountQuotaView struct {
 type AdminUpstreamsView struct {
 	LayoutView
 	Accounts          []UpstreamAccountView
+	Presets           []OAuthPresetView
+	PresetError       string
 	Models            []OAuthModelView
 	AliasModels       []OAuthModelView
 	ReasoningModels   []ReasoningCapModelView
@@ -491,6 +493,13 @@ type AdminUpstreamsView struct {
 	QuotaError        string
 	Enabled           int
 	Disabled          int
+}
+
+type OAuthPresetView struct {
+	ID        string
+	Name      string
+	Summary   string
+	UpdatedAt string
 }
 
 type OAuthModelView struct {

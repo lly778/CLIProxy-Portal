@@ -35,6 +35,15 @@ type PasswordReset struct {
 	CreatedAt time.Time
 }
 
+type OAuthPreset struct {
+	ID        string
+	Name      string
+	Payload   string
+	UpdatedBy string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 func Open(path string, registrationOpen bool) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -172,6 +181,15 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 			created_at_ms INTEGER NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS oauth_presets (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			payload TEXT NOT NULL,
+			updated_by TEXT NOT NULL DEFAULT '',
+			created_at_ms INTEGER NOT NULL,
+			updated_at_ms INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_oauth_presets_updated ON oauth_presets(updated_at_ms DESC)`,
 		`CREATE TABLE IF NOT EXISTS sync_jobs (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

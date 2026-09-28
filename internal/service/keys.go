@@ -36,6 +36,7 @@ type Keys struct {
 	refreshedQuota  map[string][]cpamp.CodexQuotaWindow
 	quotaFetchMu    sync.Mutex
 	modelConfigMu   sync.Mutex
+	presetMu        sync.Mutex
 	reconcileMu     sync.Mutex
 	lastSeenSyncAt  time.Time
 	RefreshCooldown time.Duration
@@ -1162,7 +1163,7 @@ func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAlia
 	}
 	next := make([]cpamp.OAuthModelAlias, 0, len(current)+len(inputs))
 	for _, existing := range current {
-		if model, exists := known[strings.ToLower(strings.TrimSpace(existing.Name))]; exists && model.Enabled {
+		if _, exists := known[strings.ToLower(strings.TrimSpace(existing.Name))]; exists {
 			continue
 		}
 		next = append(next, existing)

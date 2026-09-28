@@ -23,6 +23,24 @@
   </div>
 </section>
 <section class="card upstream-card section-gap">
+  <div class="section-head compact"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复 OAuth 模型、模型别名映射及思考强度上限；同名保存会更新现有预设。</p></div><span class="badge neutral">{{len .Presets}} / 20</span></div>
+  {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
+  <form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
+    {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
+    <label><span class="sr-only">预设名称</span><input type="text" name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required></label>
+    <button class="button primary" type="submit">保存当前配置</button>
+  </form>
+  {{if .Presets}}<div class="oauth-preset-list">
+    {{range .Presets}}<article class="oauth-preset-row">
+      <div class="oauth-preset-main"><strong>{{.Name}}</strong><span class="muted small">{{.Summary}}</span><small class="muted">更新于 {{.UpdatedAt}}</small></div>
+      <div class="oauth-preset-actions">
+        <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？当前 OAuth 模型、别名及思考强度上限将被替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button secondary" type="submit">应用</button></form>
+        <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button danger-outline" type="submit">删除</button></form>
+      </div>
+    </article>{{end}}
+  </div>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存当前三项调用配置。</p></div>{{end}}{{end}}
+</section>
+<section class="card upstream-card section-gap">
   <div class="section-head compact"><div><h2>OAuth 模型</h2><p class="muted small">全局控制 Codex OAuth 路由是否使用某个模型。</p></div><span class="badge neutral">{{len .Models}} 个模型</span></div>
   {{if .ModelError}}<div class="alert danger" role="alert">{{.ModelError}}</div>{{end}}
   {{if .WildcardRules}}<div class="oauth-rule-note"><span class="muted small">保留的通配禁用规则</span><div>{{range .WildcardRules}}<span class="badge warning mono">{{.}}</span>{{end}}</div></div>{{end}}
