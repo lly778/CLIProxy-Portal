@@ -617,8 +617,19 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 						row.DisabledModels = append(row.DisabledModels, model.ID)
 					}
 				}
+				aliasCount := make(map[string]int, len(snapshot.Aliases))
+				keepOriginal := make(map[string]bool, len(snapshot.Aliases))
 				for _, alias := range snapshot.Aliases {
 					row.AliasMappings = append(row.AliasMappings, alias.Alias+" → "+alias.Name)
+					modelID := strings.ToLower(alias.Name)
+					aliasCount[modelID]++
+					keepOriginal[modelID] = keepOriginal[modelID] || alias.Fork
+				}
+				for _, model := range snapshot.Models {
+					modelID := strings.ToLower(model.ID)
+					if model.Enabled && (aliasCount[modelID] == 0 || keepOriginal[modelID]) {
+						row.OriginalModels = append(row.OriginalModels, model.ID)
+					}
 				}
 				capModels := make([]string, 0, len(snapshot.ReasoningCaps))
 				for model := range snapshot.ReasoningCaps {

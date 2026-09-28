@@ -35,6 +35,7 @@
         <div><span class="oauth-preset-detail-label">启用模型</span><div class="oauth-preset-values">{{range .EnabledModels}}<code class="oauth-preset-value success">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
         <div><span class="oauth-preset-detail-label">停用模型</span><div class="oauth-preset-values">{{range .DisabledModels}}<code class="oauth-preset-value neutral">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
         <div><span class="oauth-preset-detail-label">别名映射</span><div class="oauth-preset-values">{{range .AliasMappings}}<code class="oauth-preset-value alias">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
+        <div><span class="oauth-preset-detail-label">保留原名</span><div class="oauth-preset-values">{{range .OriginalModels}}<code class="oauth-preset-value success">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
         <div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>
       </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
       <div class="oauth-preset-actions">
@@ -99,7 +100,7 @@
     <input type="hidden" name="reasoning_revision" value="{{.ReasoningRevision}}">
     <div class="reasoning-cap-list">
       {{range $index, $model := .ReasoningModels}}
-      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></label>
+      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="badge success">已启用</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></label>
       {{end}}
     </div>
     <div class="oauth-alias-actions"><button class="button primary" type="submit">保存强度上限</button></div>

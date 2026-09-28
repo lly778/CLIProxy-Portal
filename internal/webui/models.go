@@ -503,6 +503,7 @@ type OAuthPresetView struct {
 	EnabledModels  []string
 	DisabledModels []string
 	AliasMappings  []string
+	OriginalModels []string
 	ReasoningCaps  []string
 }
 
