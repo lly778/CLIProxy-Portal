@@ -146,6 +146,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .table-card { overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; min-width: 650px; }
 .user-management-card table { min-width: 900px; }
+.user-management-card th { text-align: center; }
 th, td { padding: 12px 15px; text-align: left; vertical-align: middle; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
 th { color: var(--muted); background: #fbfcfe; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
 tr:last-child td { border-bottom: 0; }
@@ -468,7 +469,11 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-preset-head > div:first-child { min-width: 260px; }
 .oauth-preset-tools { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; }
 .oauth-preset-tools > .badge { white-space: nowrap; }
-.oauth-preset-save { display: grid; width: min(38vw, 520px); max-width: 100%; grid-template-columns: minmax(220px, 1fr) auto; gap: 9px; align-items: center; }
+.oauth-preset-create { position: relative; }
+.oauth-preset-create > summary { list-style: none; cursor: pointer; }
+.oauth-preset-create > summary::-webkit-details-marker { display: none; }
+.oauth-preset-create[open] > summary { color: var(--primary); background: #f5f8ff; border-color: #a9bdf4; }
+.oauth-preset-save { position: absolute; z-index: 15; top: calc(100% + 8px); right: 0; display: grid; width: min(460px, 72vw); grid-template-columns: minmax(220px, 1fr) auto; gap: 9px; align-items: center; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 12px 28px rgba(16,24,40,.14); }
 .oauth-preset-save label { min-width: 0; }
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
 .oauth-preset-save .button { justify-self: start; white-space: nowrap; }
@@ -607,9 +612,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .admin-action-form.change-phone-form { grid-template-columns: 1fr; }
   .admin-action-form.change-phone-form .button { grid-column: 1; }
   .admin-action-form.delete-form .button { grid-column: 1; justify-self: start; }
-	.oauth-preset-head { align-items: flex-start; flex-direction: column; }
-	.oauth-preset-tools { width: 100%; }
-	.oauth-preset-save { width: min(100%, 520px); }
 }
 @media (max-width: 760px) {
   .usage-page-head .filter-inline { flex-wrap: wrap; }
@@ -623,8 +625,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .upstream-account-quotas { grid-column: 2 / -1; min-width: 0; }
   .upstream-row > form { grid-column: 2 / -1; }
   .oauth-model-list { grid-template-columns: 1fr; }
-	.oauth-preset-tools { align-items: flex-start; flex-direction: column; }
-	.oauth-preset-save { width: 100%; grid-template-columns: 1fr; }
+	.oauth-preset-head { align-items: flex-start; flex-direction: column; }
+	.oauth-preset-tools { width: 100%; }
+	.oauth-preset-create { margin-left: auto; }
+	.oauth-preset-save { position: static; width: min(100%, 460px); margin-top: 8px; grid-template-columns: 1fr; box-shadow: none; }
 	.oauth-preset-list { grid-template-columns: 1fr; }
 	.oauth-preset-row { align-items: flex-start; flex-direction: column; }
   .oauth-model-row { grid-template-columns: minmax(0, 1fr) auto; }

@@ -23,11 +23,11 @@
   </div>
 </section>
 <section class="card upstream-card section-gap">
-  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复 OAuth 模型、模型别名映射及思考强度上限；最多保存 20 个，同名保存会更新现有预设。</p></div><div class="oauth-preset-tools"><span class="badge neutral">{{len .Presets}} 个预设</span><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
+  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复 OAuth 模型、模型别名映射及思考强度上限；最多保存 20 个，同名保存会更新现有预设。</p></div><div class="oauth-preset-tools"><span class="badge neutral">{{len .Presets}} 个预设</span><details class="oauth-preset-create"><summary class="button secondary">保存预设</summary><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
     <label><span class="sr-only">预设名称</span><input type="text" name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required></label>
     <button class="button primary" type="submit">保存当前配置</button>
-  </form></div></div>
+  </form></details></div></div>
   {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
   {{if .Presets}}<div class="oauth-preset-list">
     {{range .Presets}}<article class="oauth-preset-row">
