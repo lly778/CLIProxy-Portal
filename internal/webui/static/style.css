@@ -473,9 +473,11 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
 .oauth-preset-save .button { justify-self: start; white-space: nowrap; }
 .oauth-preset-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.oauth-preset-row { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
+.oauth-preset-row { min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .oauth-preset-main { display: grid; min-width: 0; gap: 3px; }
-.oauth-preset-main strong, .oauth-preset-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oauth-preset-card-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; min-width: 0; }
+.oauth-preset-title { display: grid; min-width: 0; gap: 3px; }
+.oauth-preset-title strong, .oauth-preset-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oauth-preset-actions { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; }
 .oauth-preset-details { display: grid; gap: 8px; padding: 10px 0; margin: 6px 0 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .oauth-preset-details > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; }
@@ -631,7 +633,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 	.oauth-preset-tools { width: 100%; flex-wrap: wrap; }
 	.oauth-preset-save { width: min(100%, 370px); max-width: none; grid-template-columns: minmax(150px, 1fr) auto; }
 	.oauth-preset-list { grid-template-columns: 1fr; }
-	.oauth-preset-row { align-items: flex-start; flex-direction: column; }
+	.oauth-preset-card-head { align-items: flex-start; flex-direction: column; }
   .oauth-model-row { grid-template-columns: minmax(0, 1fr) auto; }
   .oauth-model-row form { grid-column: 1 / -1; justify-self: start; }
   .oauth-rule-note { align-items: flex-start; flex-direction: column; }
