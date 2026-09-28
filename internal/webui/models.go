@@ -496,10 +496,14 @@ type AdminUpstreamsView struct {
 }
 
 type OAuthPresetView struct {
-	ID        string
-	Name      string
-	Summary   string
-	UpdatedAt string
+	ID             string
+	Name           string
+	Summary        string
+	UpdatedAt      string
+	EnabledModels  []string
+	DisabledModels []string
+	AliasMappings  []string
+	ReasoningCaps  []string
 }
 
 type OAuthModelView struct {

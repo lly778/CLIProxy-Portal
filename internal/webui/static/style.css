@@ -474,10 +474,18 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
 .oauth-preset-save .button { justify-self: start; white-space: nowrap; }
 .oauth-preset-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.oauth-preset-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
+.oauth-preset-row { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .oauth-preset-main { display: grid; min-width: 0; gap: 3px; }
 .oauth-preset-main strong, .oauth-preset-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oauth-preset-actions { display: flex; flex: 0 0 auto; gap: 8px; }
+.oauth-preset-details { display: grid; gap: 8px; padding: 10px 0; margin: 6px 0 4px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.oauth-preset-details > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; align-items: start; }
+.oauth-preset-detail-label { padding-top: 2px; color: var(--muted); font-size: 11px; font-weight: 650; }
+.oauth-preset-values { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.oauth-preset-value { display: inline-block; max-width: 100%; overflow-wrap: anywhere; padding: 2px 6px; color: #536176; background: #e9edf3; border-radius: 5px; font-size: 10px; white-space: normal; }
+.oauth-preset-value.success { color: #167351; background: #e5f3ec; }
+.oauth-preset-value.alias { color: #3158ce; background: #e8eefc; }
+.oauth-preset-value.reasoning { color: #98631a; background: #f7eedc; }
 .oauth-preset-empty { padding: 24px 12px; }
 .oauth-model-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .oauth-model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px 13px; align-items: center; padding: 13px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }

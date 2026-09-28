@@ -604,16 +604,38 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		for _, preset := range presets {
 			var snapshot service.OAuthPresetSnapshot
 			summary := "预设内容无法解析"
+			row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt)}
 			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil {
 				enabled := 0
+				canonical := make(map[string]string, len(snapshot.Models))
 				for _, model := range snapshot.Models {
+					canonical[strings.ToLower(model.ID)] = model.ID
 					if model.Enabled {
 						enabled++
+						row.EnabledModels = append(row.EnabledModels, model.ID)
+					} else {
+						row.DisabledModels = append(row.DisabledModels, model.ID)
 					}
+				}
+				for _, alias := range snapshot.Aliases {
+					row.AliasMappings = append(row.AliasMappings, alias.Alias+" → "+alias.Name)
+				}
+				capModels := make([]string, 0, len(snapshot.ReasoningCaps))
+				for model := range snapshot.ReasoningCaps {
+					capModels = append(capModels, model)
+				}
+				sort.Strings(capModels)
+				for _, model := range capModels {
+					name := canonical[strings.ToLower(model)]
+					if name == "" {
+						name = model
+					}
+					row.ReasoningCaps = append(row.ReasoningCaps, name+" · "+reasoningEffortLabel(snapshot.ReasoningCaps[model]))
 				}
 				summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", enabled, len(snapshot.Models), len(snapshot.Aliases), len(snapshot.ReasoningCaps))
 			}
-			v.Presets = append(v.Presets, webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, Summary: summary, UpdatedAt: s.formatTime(preset.UpdatedAt)})
+			row.Summary = summary
+			v.Presets = append(v.Presets, row)
 		}
 	}
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context())

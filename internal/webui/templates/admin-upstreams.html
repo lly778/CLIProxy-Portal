@@ -31,7 +31,12 @@
   {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
   {{if .Presets}}<div class="oauth-preset-list">
     {{range .Presets}}<article class="oauth-preset-row">
-      <div class="oauth-preset-main"><strong>{{.Name}}</strong><span class="muted small">{{.Summary}}</span><small class="muted">更新于 {{.UpdatedAt}}</small></div>
+      <div class="oauth-preset-main"><strong>{{.Name}}</strong><span class="muted small">{{.Summary}}</span><div class="oauth-preset-details">
+        <div><span class="oauth-preset-detail-label">启用模型</span><div class="oauth-preset-values">{{range .EnabledModels}}<code class="oauth-preset-value success">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
+        <div><span class="oauth-preset-detail-label">停用模型</span><div class="oauth-preset-values">{{range .DisabledModels}}<code class="oauth-preset-value neutral">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
+        <div><span class="oauth-preset-detail-label">别名映射</span><div class="oauth-preset-values">{{range .AliasMappings}}<code class="oauth-preset-value alias">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
+        <div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>
+      </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
       <div class="oauth-preset-actions">
         <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？当前 OAuth 模型、别名及思考强度上限将被替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button secondary" type="submit">应用</button></form>
         <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<button class="button danger-outline" type="submit">删除</button></form>
