@@ -1279,6 +1279,7 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 		SetOAuthExcludedModels(context.Context, string, []string) error
+		SetOAuthModelAliases(context.Context, string, []cpamp.OAuthModelAlias) error
 	})
 	if !ok {
 		return errors.New("CPAMP 客户端不支持 OAuth 模型管理")
@@ -1302,15 +1303,15 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 	if err != nil {
 		return err
 	}
+	aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+	if err != nil {
+		return err
+	}
 	matched, wildcard := excludedModelRule(canonical, rules)
 	if enabled && wildcard != "" {
 		return fmt.Errorf("该模型由通配规则 %q 禁用，请在 CPAMP 中调整该规则", wildcard)
 	}
 	if enabled {
-		aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
-		if err != nil {
-			return err
-		}
 		settings := make([]OAuthModelSetting, 0, len(definitions))
 		for _, definition := range definitions {
 			id := strings.TrimSpace(definition.ID)
@@ -1346,6 +1347,36 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 	confirmedRule, _ := excludedModelRule(canonical, confirmed)
 	if (enabled && confirmedRule != "") || (!enabled && confirmedRule == "") {
 		return errors.New("CPAMP 未确认 OAuth 模型状态变更")
+	}
+	if !enabled {
+		nextAliases := make([]cpamp.OAuthModelAlias, 0, len(aliases))
+		for _, alias := range aliases {
+			if !strings.EqualFold(strings.TrimSpace(alias.Name), canonical) {
+				nextAliases = append(nextAliases, alias)
+			}
+		}
+		if oauthAliasRevision(nextAliases) != oauthAliasRevision(aliases) {
+			if err := typed.SetOAuthModelAliases(ctx, "codex", nextAliases); err != nil {
+				if rollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules); rollbackErr != nil {
+					return fmt.Errorf("删除模型别名失败：%v；恢复模型状态也失败：%w", err, rollbackErr)
+				}
+				return fmt.Errorf("删除模型别名失败，模型停用已撤销：%w", err)
+			}
+			confirmedAliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+			if err == nil && oauthAliasRevision(confirmedAliases) == oauthAliasRevision(nextAliases) {
+				return nil
+			}
+			aliasErr := err
+			if aliasErr == nil {
+				aliasErr = errors.New("CPAMP 未确认模型别名已删除")
+			}
+			aliasRollbackErr := typed.SetOAuthModelAliases(ctx, "codex", aliases)
+			statusRollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules)
+			if aliasRollbackErr != nil || statusRollbackErr != nil {
+				return fmt.Errorf("%v；恢复别名失败：%v；恢复模型状态失败：%v", aliasErr, aliasRollbackErr, statusRollbackErr)
+			}
+			return fmt.Errorf("%v，模型停用已撤销", aliasErr)
+		}
 	}
 	return nil
 }

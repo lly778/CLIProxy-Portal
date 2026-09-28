@@ -589,6 +589,13 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("renamed disabled model could not be re-enabled: aliases=%#v exclusions=%#v", oauthModelAliases, oauthExcluded)
 	}
 	mu.Unlock()
+	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-disabled"}, "enabled": {"false"}}, http.StatusSeeOther)
+	mu.Lock()
+	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Name != "gpt-enabled" || oauthModelAliases[0].Alias != "gpt-disabled" || !containsFold(oauthExcluded, "gpt-disabled") {
+		mu.Unlock()
+		t.Fatalf("disabled model aliases were not deleted: aliases=%#v exclusions=%#v", oauthModelAliases, oauthExcluded)
+	}
+	mu.Unlock()
 	adminUsersPage := getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)
 	if !strings.Contains(adminUsersPage, `name="sort"`) || !strings.Contains(adminUsersPage, `<option value="last_used_desc" selected>最近使用：最新</option>`) {
 		t.Fatalf("admin user sorting controls were not rendered: %s", adminUsersPage)

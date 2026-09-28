@@ -792,11 +792,11 @@ func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/upstreams?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
 		return
 	}
-	action, message := "oauth_model.disable", "OAuth 模型已停用"
+	action, message, detail := "oauth_model.disable", "OAuth 模型已停用，相关别名已删除", "Codex；已删除该模型的全部别名"
 	if enabled {
-		action, message = "oauth_model.enable", "OAuth 模型已启用"
+		action, message, detail = "oauth_model.enable", "OAuth 模型已启用", "Codex"
 	}
-	s.audit(r, currentUser(r), action, modelID, "Codex")
+	s.audit(r, currentUser(r), action, modelID, detail)
 	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
 }
 

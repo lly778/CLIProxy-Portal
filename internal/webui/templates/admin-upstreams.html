@@ -43,7 +43,7 @@
   </div>
 </section>
 <section class="card upstream-card section-gap">
-  <div class="section-head compact"><div><h2>模型别名映射</h2><p class="muted small">仅显示已启用的 Codex 模型：卡片下方的用户侧别名会路由至上方实际模型，可增删；不添加别名时使用原名，也可同时保留原名。停用模型的映射保留。</p></div><span class="badge neutral">全局生效</span></div>
+  <div class="section-head compact"><div><h2>模型别名映射</h2><p class="muted small">仅显示已启用的 Codex 模型：卡片下方的用户侧别名会路由至上方实际模型，可增删；不添加别名时使用原名，也可同时保留原名。停用模型时会删除该模型的全部别名。</p></div><span class="badge neutral">全局生效</span></div>
   {{if .AliasError}}<div class="alert danger" role="alert">{{.AliasError}}</div>{{end}}
   {{if .AliasReady}}{{if .AliasModels}}
   <form method="post" action="/admin/upstreams/models/aliases" class="oauth-alias-form" data-confirm="确定保存所有 Codex 模型别名吗？保存后将影响所有用户的新请求。">
