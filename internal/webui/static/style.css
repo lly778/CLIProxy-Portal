@@ -509,6 +509,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .rule-display p { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
+.audit-table th { text-align: center; }
 .audit-result-cell { width: 1%; min-width: 100px; }
 .audit-actor-cell span, .audit-actor-cell small { display: block; }
 .audit-actor-cell small { white-space: nowrap; }
