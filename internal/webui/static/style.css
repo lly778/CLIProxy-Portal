@@ -529,7 +529,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-log-table .request-time-cell, .request-log-table td:nth-child(2) { line-height: 1.45; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
 .request-log-table td:nth-child(2) .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }
-.request-log-table td:nth-child(1), .request-log-table td:nth-child(2), .request-detail-table td:nth-child(1) { text-align: left; }
+.request-log-table td:nth-child(1), .request-log-table td:nth-child(2), .request-log-table td:nth-child(3), .request-detail-table td:nth-child(1), .request-detail-table td:nth-child(2) { text-align: left; }
 .request-model-cell { min-width: 0; white-space: normal; }
 .request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .request-detail-table .request-model-cell { width: 20%; }
