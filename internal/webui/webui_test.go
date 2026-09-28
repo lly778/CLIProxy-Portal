@@ -287,6 +287,9 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 	if strings.Contains(got, "quota-refresh-status") {
 		t.Fatal("quota pool should not render refresh status text")
 	}
+	if !strings.Contains(got, "不同套餐和不同周期不会混合计算。</p>") || strings.Contains(got, "长周期额度耗尽的账号仍计入") {
+		t.Fatal("quota pool note should end after the grouping explanation")
+	}
 }
 
 func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
