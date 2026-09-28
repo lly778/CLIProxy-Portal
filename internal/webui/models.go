@@ -219,7 +219,6 @@ type QuotaPoolView struct {
 	CSRFToken         string
 	ReturnTo          string
 	RefreshLabel      string
-	RefreshMessage    string
 	RefreshDisabled   bool
 	RefreshRunning    bool
 }

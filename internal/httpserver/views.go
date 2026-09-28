@@ -467,7 +467,6 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 		CSRFToken:         csrfToken,
 		ReturnTo:          returnTo,
 		RefreshLabel:      "刷新额度",
-		RefreshMessage:    refresh.Message,
 		RefreshRunning:    refresh.Running,
 	}
 	if pool.UsableAccounts == 0 {

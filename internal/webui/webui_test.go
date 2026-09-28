@@ -284,6 +284,9 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 			t.Errorf("quota pool output does not contain %q", want)
 		}
 	}
+	if strings.Contains(got, "quota-refresh-status") {
+		t.Fatal("quota pool should not render refresh status text")
+	}
 }
 
 func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
