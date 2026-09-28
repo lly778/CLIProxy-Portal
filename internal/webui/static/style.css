@@ -527,14 +527,13 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-log-table .request-download-cell { width: 8%; min-width: 0; }
 .request-log-table .request-time-cell, .request-log-table td:nth-child(2) { line-height: 1.45; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
 .request-log-table td:nth-child(2) .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
-.request-log-table th:nth-child(n+4):nth-child(-n+10), .request-log-table td:nth-child(n+4):nth-child(-n+10) { text-align: center; }
-.request-detail-table th:nth-child(n+3):nth-child(-n+9), .request-detail-table td:nth-child(n+3):nth-child(-n+9) { text-align: center; }
+.request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }
+.request-log-table th:nth-child(3), .request-log-table td:nth-child(3), .request-detail-table th:nth-child(2), .request-detail-table td:nth-child(2) { text-align: left; }
 .request-model-cell { min-width: 0; white-space: normal; }
 .request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .request-detail-table .request-model-cell { width: 20%; }
 .request-status-cell { width: 1%; min-width: 90px; }
 .request-download-cell { width: 1%; min-width: 100px; }
-.request-status-cell, .request-download-cell { text-align: center; }
 .request-status-download { color: var(--primary); font-weight: 600; }
 .request-status-download:hover { color: var(--primary-dark); text-decoration: underline; }
 .request-status-detail { display: -webkit-box; max-width: 210px; max-height: 7em; margin-top: 4px; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
