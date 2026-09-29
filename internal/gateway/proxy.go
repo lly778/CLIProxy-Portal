@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"cliproxy-portal/internal/cpamp"
@@ -31,6 +32,8 @@ type Gateway struct {
 	vault        *Vault
 	logger       *slog.Logger
 	captureSlots chan struct{}
+	captureTasks sync.WaitGroup
+	transport    *http.Transport
 }
 
 func New(upstreamURL string, keys *service.Keys, st *store.Store, vault *Vault, logger *slog.Logger) (*Gateway, error) {
@@ -44,33 +47,26 @@ func New(upstreamURL string, keys *service.Keys, st *store.Store, vault *Vault, 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gateway{upstream: upstream, keys: keys, store: st, vault: vault, logger: logger, captureSlots: make(chan struct{}, 1)}, nil
+	return &Gateway{
+		upstream: upstream, keys: keys, store: st, vault: vault, logger: logger,
+		captureSlots: make(chan struct{}, 1),
+		// Do not add environment proxies, compression negotiation, or connection
+		// deadlines to the explicitly configured CPA upstream.
+		transport: &http.Transport{DisableCompression: true, ForceAttemptHTTP2: true},
+	}, nil
 }
 
 func (g *Gateway) Handler() http.Handler {
 	return http.HandlerFunc(g.serveHTTP)
 }
 
-func allowedPath(path string) bool {
-	for _, prefix := range []string{"/v1/", "/v1beta/", "/openai/v1/", "/backend-api/codex/"} {
-		if strings.HasPrefix(path, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
-	if !allowedPath(r.URL.Path) {
-		http.NotFound(w, r)
-		return
-	}
 	isModelList := r.Method == http.MethodGet && r.URL.Path == "/v1/models"
 	var capture *requestCapture
 	if isDialoguePath(r.Method, r.URL.Path) {
 		capture = g.startCapture(r)
 		if capture != nil {
-			defer g.finishCapture(capture)
+			defer g.saveCaptureInBackground(capture)
 			if r.Body != nil {
 				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture.request), Closer: r.Body}
 			}
@@ -79,27 +75,31 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(out *httputil.ProxyRequest) {
 			out.SetURL(g.upstream)
-			out.SetXForwarded()
-			// Browser sessions and proxy credentials are not CPA API credentials.
-			out.Out.Header.Del("Cookie")
-			out.Out.Header.Del("Proxy-Authorization")
-			if isModelList || capture != nil {
-				out.Out.Header.Set("Accept-Encoding", "identity")
+			out.Out.Host = out.In.Host
+			out.Out.URL.RawQuery = out.In.URL.RawQuery
+			// ReverseProxy removes these before Rewrite. Preserve client values
+			// without inventing forwarding metadata.
+			for _, name := range []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto"} {
+				if values, ok := out.In.Header[name]; ok {
+					out.Out.Header[name] = append([]string(nil), values...)
+				}
 			}
 			if isModelList {
+				out.Out.Header.Set("Accept-Encoding", "identity")
 				out.Out.Header.Del("If-None-Match")
 				out.Out.Header.Del("If-Modified-Since")
 			}
 		},
+		Transport:     g.transport,
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
-			resp.Header.Del("Set-Cookie")
 			if isModelList && resp.StatusCode == http.StatusOK {
 				return g.filterModelList(resp)
 			}
 			if capture != nil {
 				capture.status = resp.StatusCode
 				capture.responseContentType = resp.Header.Get("Content-Type")
+				capture.responseContentEncoding = resp.Header.Get("Content-Encoding")
 				capture.cpaRequestID = cpaRequestID(resp.Header.Get("X-CPA-TRACE-ID"))
 				resp.Body = &teeReadCloser{Reader: io.TeeReader(resp.Body, capture.response), Closer: resp.Body}
 			}
@@ -117,6 +117,32 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+// Final parsing, encryption, and SQLite writes must not delay response EOF or
+// prevent the client from starting its next request on the same connection.
+func (g *Gateway) saveCaptureInBackground(capture *requestCapture) {
+	g.captureTasks.Add(1)
+	go func() {
+		defer g.captureTasks.Done()
+		g.finishCapture(capture)
+	}()
+}
+
+// WaitCaptures is called after HTTP shutdown, or after completed requests in
+// tests, so every capture has been scheduled before waiting begins.
+func (g *Gateway) WaitCaptures(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		g.captureTasks.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func isDialoguePath(method, path string) bool {
@@ -140,12 +166,14 @@ type teeReadCloser struct {
 }
 
 type requestCapture struct {
-	row                 store.GatewayCapture
-	request             *CaptureWriter
-	response            *CaptureWriter
-	status              int
-	responseContentType string
-	cpaRequestID        string
+	row                     store.GatewayCapture
+	request                 *CaptureWriter
+	response                *CaptureWriter
+	status                  int
+	responseContentType     string
+	responseContentEncoding string
+	requestContentEncoding  string
+	cpaRequestID            string
 }
 
 func apiKey(r *http.Request) string {
@@ -196,7 +224,7 @@ func (g *Gateway) startCapture(r *http.Request) *requestCapture {
 	}
 	return &requestCapture{
 		row:     store.GatewayCapture{ID: id, UserID: owner.UserID, APIKeyHash: hash, CreatedAt: time.Now().UTC(), Method: r.Method, Path: r.URL.Path, RequestContentType: r.Header.Get("Content-Type")},
-		request: request, response: response,
+		request: request, response: response, requestContentEncoding: r.Header.Get("Content-Encoding"),
 	}
 }
 
@@ -229,6 +257,15 @@ func (g *Gateway) finishCapture(capture *requestCapture) {
 		g.logger.Warn("gateway response dialogue extraction failed", "error", err)
 		return
 	}
+	requestRaw, requestDecodedTruncated, requestDecodeErr := decodeCaptureBody(requestRaw, capture.requestContentEncoding)
+	responseRaw, responseDecodedTruncated, responseDecodeErr := decodeCaptureBody(responseRaw, capture.responseContentEncoding)
+	if requestDecodeErr != nil || responseDecodeErr != nil {
+		g.vault.Delete(capture.row.ID)
+		g.logger.Warn("gateway capture decoding unavailable", "request_error", requestDecodeErr, "response_error", responseDecodeErr)
+		return
+	}
+	capture.row.RequestTruncated = capture.row.RequestTruncated || requestDecodedTruncated
+	capture.row.ResponseTruncated = capture.row.ResponseTruncated || responseDecodedTruncated
 	var payload struct {
 		Model string `json:"model"`
 	}

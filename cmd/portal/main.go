@@ -95,6 +95,7 @@ func serve(cfg config.Config, st *store.Store) error {
 	}
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	var gatewayServer *http.Server
+	var captureGateway *gateway.Gateway
 	var captureVault *gateway.Vault
 	if cfg.GatewayListenAddr != "" {
 		vault, err := gateway.NewVault(cfg.GatewayCaptureDir, secret)
@@ -106,8 +107,9 @@ func serve(cfg config.Config, st *store.Store) error {
 			return fmt.Errorf("initialize CPA gateway: %w", err)
 		}
 		captureVault = vault
+		captureGateway = proxy
 		app.CaptureVault = vault
-		gatewayServer = &http.Server{Addr: cfg.GatewayListenAddr, Handler: proxy.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
+		gatewayServer = newGatewayServer(cfg.GatewayListenAddr, proxy.Handler())
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -138,9 +140,18 @@ func serve(cfg config.Config, st *store.Store) error {
 		defer done()
 		if gatewayServer != nil {
 			_ = gatewayServer.Shutdown(shutdownCtx)
+			if err := captureGateway.WaitCaptures(shutdownCtx); err != nil {
+				logger.Warn("gateway capture shutdown incomplete", "error", err)
+			}
 		}
 		return server.Shutdown(shutdownCtx)
 	}
+}
+
+// Model API connections follow the client and CPA lifetimes. Portal page
+// deadlines must not impose an additional upload or generation deadline.
+func newGatewayServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{Addr: addr, Handler: handler}
 }
 
 func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg config.Config, logger *slog.Logger, vault *gateway.Vault) {

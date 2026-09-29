@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,13 @@ import (
 	"cliproxy-portal/internal/gateway"
 	"cliproxy-portal/internal/store"
 )
+
+func TestGatewayDoesNotImposeConnectionDeadlines(t *testing.T) {
+	server := newGatewayServer(":18318", http.NotFoundHandler())
+	if server.ReadTimeout != 0 || server.ReadHeaderTimeout != 0 || server.WriteTimeout != 0 || server.IdleTimeout != 0 {
+		t.Fatalf("model connections must follow client and CPA deadlines: %+v", server)
+	}
+}
 
 func TestGatewayMaintenanceKeepsOldStructuredCapture(t *testing.T) {
 	ctx := context.Background()

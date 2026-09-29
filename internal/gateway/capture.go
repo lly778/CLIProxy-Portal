@@ -2,6 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
+	"compress/zlib"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -24,6 +27,44 @@ const (
 	captureChunk = 64 << 10
 	captureMagic = "CPGW1"
 )
+
+// Decode only the private capture copy. Proxy response bytes and encoding
+// headers remain exactly as supplied by CPA.
+func decodeCaptureBody(raw []byte, encoding string) ([]byte, bool, error) {
+	encodings := strings.Split(encoding, ",")
+	truncated := false
+	for i := len(encodings) - 1; i >= 0; i-- {
+		var reader io.ReadCloser
+		var err error
+		switch strings.ToLower(strings.TrimSpace(encodings[i])) {
+		case "", "identity":
+			continue
+		case "gzip", "x-gzip":
+			reader, err = gzip.NewReader(bytes.NewReader(raw))
+		case "deflate":
+			reader, err = zlib.NewReader(bytes.NewReader(raw))
+			if err != nil {
+				reader = flate.NewReader(bytes.NewReader(raw))
+				err = nil
+			}
+		default:
+			return nil, false, errors.New("unsupported capture content encoding")
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		raw, err = io.ReadAll(io.LimitReader(reader, CaptureLimit+1))
+		_ = reader.Close()
+		if err != nil {
+			return nil, false, err
+		}
+		if len(raw) > CaptureLimit {
+			raw = raw[:CaptureLimit]
+			truncated = true
+		}
+	}
+	return raw, truncated, nil
+}
 
 type Vault struct {
 	dir       string
@@ -92,6 +133,7 @@ func (v *Vault) filePath(id, kind string) (string, error) {
 }
 
 type CaptureWriter struct {
+	mu        sync.Mutex
 	file      *os.File
 	aead      cipher.AEAD
 	prefix    [8]byte
@@ -134,7 +176,12 @@ func (v *Vault) newWriter(file *os.File) (*CaptureWriter, error) {
 // Write never interrupts the proxied request when local capture storage fails.
 func (w *CaptureWriter) Write(p []byte) (int, error) {
 	inputSize := len(p)
-	if w == nil || w.failed != nil || w.file == nil {
+	if w == nil {
+		return inputSize, nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.failed != nil || w.file == nil {
 		return inputSize, nil
 	}
 	if len(p) > CaptureLimit-w.written {
@@ -173,8 +220,13 @@ func (w *CaptureWriter) flush(plain []byte) error {
 }
 
 func (w *CaptureWriter) Close() (truncated bool, err error) {
-	if w == nil || w.file == nil {
+	if w == nil {
 		return false, nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.file == nil {
+		return w.truncated, w.failed
 	}
 	if w.failed == nil && len(w.buffer) > 0 {
 		w.failed = w.flush(w.buffer)

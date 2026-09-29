@@ -54,10 +54,10 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 		"data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}}\n\n" +
 		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"你好\"}]},{\"type\":\"function_call\",\"name\":\"shell\",\"call_id\":\"call_1\",\"arguments\":\"{\\\"command\\\":\\\"pwd\\\"}\"}],\"tools\":[{\"name\":\"secret-tool-definition\"}]}}\n\n"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Cookie") != "" || r.Header.Get("Proxy-Authorization") != "" {
-			t.Errorf("private gateway headers reached CPA")
+		if r.URL.Path == "/v1/models" && r.Header.Get("Cookie") != "portal_session=private" {
+			t.Errorf("client cookie was changed")
 		}
-		w.Header().Set("Set-Cookie", "should-not-reach-client=1")
+		w.Header().Set("Set-Cookie", "upstream-cookie=1")
 		if r.URL.Path == "/v1/models" {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"gpt-6-luna"},{"id":"gpt-5.6-luna"},{"id":"gpt-6-sol"}]}`))
@@ -93,8 +93,8 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 	if listResponse.Code != http.StatusOK {
 		t.Fatalf("model list status=%d body=%s", listResponse.Code, listResponse.Body.String())
 	}
-	if listResponse.Header().Get("Set-Cookie") != "" {
-		t.Fatal("upstream cookie reached the client")
+	if listResponse.Header().Get("Set-Cookie") != "upstream-cookie=1" {
+		t.Fatal("upstream cookie was changed")
 	}
 	var list struct {
 		Data []struct {
@@ -115,6 +115,9 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 	gateway.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || response.Body.String() != stream {
 		t.Fatalf("proxied response = %d %q", response.Code, response.Body.String())
+	}
+	if err := gateway.WaitCaptures(ctx); err != nil {
+		t.Fatal(err)
 	}
 	captures, err := st.ListGatewayCaptures(ctx, user.ID, 100)
 	if err != nil || len(captures) != 1 {
@@ -157,6 +160,9 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 	gateway.Handler().ServeHTTP(secondResponse, second)
 	if secondResponse.Code != http.StatusOK {
 		t.Fatalf("second response status = %d", secondResponse.Code)
+	}
+	if err := gateway.WaitCaptures(ctx); err != nil {
+		t.Fatal(err)
 	}
 	captures, err = st.ListGatewayCaptures(ctx, user.ID, 100)
 	if err != nil || len(captures) != 2 {
