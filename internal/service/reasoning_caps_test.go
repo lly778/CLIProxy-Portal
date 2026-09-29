@@ -224,6 +224,18 @@ func TestReasoningCapsInlineMarkersSurviveCPACommentRewrite(t *testing.T) {
 	}
 }
 
+func TestReasoningRuleMatchingRejectsNonemptyCustomSelectorFields(t *testing.T) {
+	expected := buildReasoningRule("gpt-6-sol", "medium", "high", false)
+	modified := buildReasoningRule("gpt-6-sol", "medium", "high", false)
+	models, _ := yamlField(modified, "models")
+	models.Content[0].Content = append(models.Content[0].Content,
+		yamlScalar("headers"), yamlMap("X-Custom", yamlScalar("present")),
+	)
+	if sameReasoningRule(modified, expected) {
+		t.Fatal("a custom override must not be mistaken for a portal-managed rule")
+	}
+}
+
 func normalizeStandaloneComments(data []byte) []byte {
 	lines := strings.Split(string(data), "\n")
 	for index, line := range lines {

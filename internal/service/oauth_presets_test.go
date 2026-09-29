@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"cliproxy-portal/internal/cpamp"
+	"gopkg.in/yaml.v3"
 )
 
 type presetCPAMP struct {
@@ -115,6 +116,80 @@ func TestDisablingOAuthModelRollsBackIfReasoningCapCannotBeRemoved(t *testing.T)
 	caps, _, err := k.OAuthReasoningCaps(ctx)
 	if err != nil || caps["gpt-alpha"] != "medium" || len(fake.excluded) != 0 || len(fake.aliases) != 1 {
 		t.Fatalf("failed disable was not rolled back: caps=%v excluded=%v aliases=%v err=%v", caps, fake.excluded, fake.aliases, err)
+	}
+}
+
+func TestDisablingAlreadyExcludedModelsRemovesNormalizedDuplicateCaps(t *testing.T) {
+	ctx := context.Background()
+	fake := &presetCPAMP{reasoningCPAMP: reasoningCPAMP{
+		config: []byte("api-keys: []\npayload:\n  override-raw:\n    - models:\n        - name: unrelated\n          protocol: codex\n      params:\n        service_tier: '\"priority\"'\n"),
+		models: []cpamp.OAuthModelDefinition{
+			{ID: "gpt-6-sol", ThinkingLevels: []string{"low", "medium", "high", "xhigh", "max"}},
+			{ID: "gpt-6.1-sol", ThinkingLevels: []string{"low", "medium", "high", "xhigh", "max"}},
+		},
+	}}
+	k := &Keys{CPAMP: fake}
+	_, revision, err := k.OAuthReasoningCaps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := []ReasoningCapInput{{Model: "gpt-6-sol", Cap: "medium"}, {Model: "gpt-6.1-sol", Cap: "medium"}}
+	if err := k.SetOAuthReasoningCaps(ctx, inputs, revision); err != nil {
+		t.Fatal(err)
+	}
+	doc, rules, err := parseReasoningConfig(fake.config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated := append([]*yaml.Node(nil), rules.Content[1:]...)
+	for _, rule := range generated {
+		models, _ := yamlField(rule, "models")
+		model := models.Content[0]
+		name, _ := yamlField(model, "name")
+		name.LineComment = ""
+		rule.HeadComment = ""
+		model.Content = append(model.Content,
+			yamlScalar("headers"), yamlMap(),
+			yamlScalar("from-protocol"), yamlScalar(""),
+			yamlScalar("not-match"), yamlSeq(),
+			yamlScalar("exist"), yamlSeq(),
+			yamlScalar("not-exist"), yamlSeq(),
+		)
+		if match, _ := yamlField(model, "match"); match == nil {
+			model.Content = append(model.Content, yamlScalar("match"), yamlSeq())
+		}
+	}
+	rules.Content = append(rules.Content, generated...)
+	fake.config, err = yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake.excluded = []string{"gpt-6-sol", "gpt-6.1-sol"}
+	caps, _, err := k.OAuthReasoningCaps(ctx)
+	if err != nil || caps["gpt-6-sol"] != "medium" || caps["gpt-6.1-sol"] != "medium" {
+		t.Fatalf("normalized duplicate caps not recognized: caps=%v err=%v", caps, err)
+	}
+	copyFake := &reasoningCPAMP{config: append([]byte(nil), fake.config...), models: fake.models}
+	copyKeys := &Keys{CPAMP: copyFake}
+	_, copyRevision, err := copyKeys.OAuthReasoningCaps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := copyKeys.SetOAuthReasoningCaps(ctx, inputs, copyRevision); err != nil {
+		t.Fatal(err)
+	}
+	_, deduplicated, err := parseReasoningConfig(copyFake.config)
+	if err != nil || len(deduplicated.Content) != 17 {
+		t.Fatalf("saving the same caps did not deduplicate legacy groups: rules=%v err=%v", deduplicated, err)
+	}
+	for _, model := range []string{"gpt-6-sol", "gpt-6.1-sol"} {
+		if err := k.SetOAuthModelEnabled(ctx, model, false); err != nil {
+			t.Fatalf("remove stale cap for %s: %v", model, err)
+		}
+	}
+	caps, _, err = k.OAuthReasoningCaps(ctx)
+	if err != nil || len(caps) != 0 || !strings.Contains(string(fake.config), "service_tier") {
+		t.Fatalf("stale caps remained or unrelated rule changed: caps=%v err=%v", caps, err)
 	}
 }
 

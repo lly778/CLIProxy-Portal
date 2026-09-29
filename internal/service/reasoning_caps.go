@@ -117,11 +117,27 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	if err != nil {
 		return err
 	}
+	_, managedIndexes, err := parseManagedReasoningGroups(rules)
+	if err != nil {
+		return err
+	}
 	changed := false
 	for modelID, cap := range selected {
 		if current[modelID] != cap {
 			changed = true
 			break
+		}
+		if cap != "" {
+			count := 0
+			for _, managedModel := range managedIndexes {
+				if managedModel == modelID {
+					count++
+				}
+			}
+			if count > len(buildReasoningCapRules(canonical[modelID], cap)) {
+				changed = true
+				break
+			}
 		}
 	}
 	if !changed {
@@ -131,10 +147,6 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 		return err
 	}
 	_, rules, err = reasoningOverrideRaw(doc)
-	if err != nil {
-		return err
-	}
-	_, managedIndexes, err := parseManagedReasoningGroups(rules)
 	if err != nil {
 		return err
 	}
@@ -357,9 +369,9 @@ func managedReasoningCaps(rules *yaml.Node) (map[string]string, error) {
 	return caps, err
 }
 
-// CPA left-aligns standalone YAML comments after other management operations.
-// A marker on the first rule identifies the entire contiguous, structurally
-// validated group, even if later legacy markers stop attaching to rule nodes.
+// CPA may drop portal comments and expand empty selector fields. Recognize
+// unmarked groups only when the complete generated sequence matches exactly;
+// malformed marked groups remain errors instead of being silently ignored.
 func parseManagedReasoningGroups(rules *yaml.Node) (map[string]string, map[int]string, error) {
 	caps := make(map[string]string)
 	managedIndexes := make(map[int]string)
@@ -368,25 +380,36 @@ func parseManagedReasoningGroups(rules *yaml.Node) (map[string]string, map[int]s
 	}
 	for index := 0; index < len(rules.Content); {
 		rule := rules.Content[index]
-		if !isManagedReasoningRule(rule) {
+		marked := isManagedReasoningRule(rule)
+		model, cap, err := managedReasoningRule(rule)
+		if err != nil {
+			if marked {
+				return nil, nil, err
+			}
 			index++
 			continue
 		}
-		model, cap, err := managedReasoningRule(rule)
-		if err != nil {
-			return nil, nil, err
-		}
-		if _, duplicate := caps[model]; duplicate {
-			return nil, nil, errors.New("CPA 思考强度规则相互冲突，未作修改")
-		}
 		expected := buildReasoningCapRules(model, cap)
-		if len(expected) == 0 || index+len(expected) > len(rules.Content) {
-			return nil, nil, errors.New("CPA 中的门户思考强度规则不完整，未作修改")
+		matched := len(expected) > 0 && index+len(expected) <= len(rules.Content)
+		if matched {
+			for offset, want := range expected {
+				if !sameReasoningRule(rules.Content[index+offset], want) {
+					matched = false
+					break
+				}
+			}
 		}
-		for offset, want := range expected {
-			if !sameReasoningRule(rules.Content[index+offset], want) {
+		if !matched {
+			if marked {
 				return nil, nil, errors.New("CPA 中的门户思考强度规则已被修改，未作修改")
 			}
+			index++
+			continue
+		}
+		if previous, duplicate := caps[model]; duplicate && previous != cap {
+			return nil, nil, errors.New("CPA 思考强度规则相互冲突，未作修改")
+		}
+		for offset := range expected {
 			managedIndexes[index+offset] = model
 		}
 		caps[model] = cap
@@ -396,8 +419,27 @@ func parseManagedReasoningGroups(rules *yaml.Node) (map[string]string, map[int]s
 }
 
 func sameReasoningRule(left, right *yaml.Node) bool {
-	var leftValue, rightValue any
-	return left.Decode(&leftValue) == nil && right.Decode(&rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
+	var leftValue, rightValue map[string]any
+	if left.Decode(&leftValue) != nil || right.Decode(&rightValue) != nil {
+		return false
+	}
+	models, ok := leftValue["models"].([]any)
+	if !ok || len(models) != 1 {
+		return false
+	}
+	model, ok := models[0].(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, empty := range map[string]any{
+		"headers": map[string]any{}, "from-protocol": "", "match": []any{},
+		"not-match": []any{}, "exist": []any{}, "not-exist": []any{},
+	} {
+		if value, exists := model[key]; exists && reflect.DeepEqual(value, empty) {
+			delete(model, key)
+		}
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 func isManagedReasoningRule(rule *yaml.Node) bool {
