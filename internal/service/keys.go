@@ -1356,7 +1356,8 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 				nextAliases = append(nextAliases, alias)
 			}
 		}
-		if oauthAliasRevision(nextAliases) != oauthAliasRevision(aliases) {
+		aliasesChanged := oauthAliasRevision(nextAliases) != oauthAliasRevision(aliases)
+		if aliasesChanged {
 			if err := typed.SetOAuthModelAliases(ctx, "codex", nextAliases); err != nil {
 				if rollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules); rollbackErr != nil {
 					return fmt.Errorf("删除模型别名失败：%v；恢复模型状态也失败：%w", err, rollbackErr)
@@ -1364,19 +1365,29 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 				return fmt.Errorf("删除模型别名失败，模型停用已撤销：%w", err)
 			}
 			confirmedAliases, err := typed.ListOAuthModelAliases(ctx, "codex")
-			if err == nil && oauthAliasRevision(confirmedAliases) == oauthAliasRevision(nextAliases) {
-				return nil
+			if err != nil || oauthAliasRevision(confirmedAliases) != oauthAliasRevision(nextAliases) {
+				aliasErr := err
+				if aliasErr == nil {
+					aliasErr = errors.New("CPAMP 未确认模型别名已删除")
+				}
+				aliasRollbackErr := typed.SetOAuthModelAliases(ctx, "codex", aliases)
+				statusRollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules)
+				if aliasRollbackErr != nil || statusRollbackErr != nil {
+					return fmt.Errorf("%v；恢复别名失败：%v；恢复模型状态失败：%v", aliasErr, aliasRollbackErr, statusRollbackErr)
+				}
+				return fmt.Errorf("%v，模型停用已撤销", aliasErr)
 			}
-			aliasErr := err
-			if aliasErr == nil {
-				aliasErr = errors.New("CPAMP 未确认模型别名已删除")
+		}
+		if err := k.removeOAuthReasoningCap(ctx, canonical); err != nil {
+			var aliasRollbackErr error
+			if aliasesChanged {
+				aliasRollbackErr = typed.SetOAuthModelAliases(ctx, "codex", aliases)
 			}
-			aliasRollbackErr := typed.SetOAuthModelAliases(ctx, "codex", aliases)
 			statusRollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules)
 			if aliasRollbackErr != nil || statusRollbackErr != nil {
-				return fmt.Errorf("%v；恢复别名失败：%v；恢复模型状态失败：%v", aliasErr, aliasRollbackErr, statusRollbackErr)
+				return fmt.Errorf("删除思考强度上限失败：%v；恢复别名失败：%v；恢复模型状态失败：%v", err, aliasRollbackErr, statusRollbackErr)
 			}
-			return fmt.Errorf("%v，模型停用已撤销", aliasErr)
+			return fmt.Errorf("删除思考强度上限失败，模型停用已撤销：%w", err)
 		}
 	}
 	return nil

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"cliproxy-portal/internal/cpamp"
@@ -9,7 +11,15 @@ import (
 
 type presetCPAMP struct {
 	reasoningCPAMP
-	aliases []cpamp.OAuthModelAlias
+	aliases       []cpamp.OAuthModelAlias
+	failConfigPut bool
+}
+
+func (f *presetCPAMP) PutConfigYAML(ctx context.Context, data []byte) error {
+	if f.failConfigPut {
+		return errors.New("config write failed")
+	}
+	return f.reasoningCPAMP.PutConfigYAML(ctx, data)
 }
 
 func TestOAuthPresetSnapshotsEqual(t *testing.T) {
@@ -46,6 +56,66 @@ func (f *presetCPAMP) SetOAuthModelAliases(_ context.Context, _ string, aliases 
 func (f *presetCPAMP) SetOAuthExcludedModels(_ context.Context, _ string, excluded []string) error {
 	f.excluded = append([]string(nil), excluded...)
 	return nil
+}
+
+func TestDisablingOAuthModelRemovesAliasesAndManagedReasoningCap(t *testing.T) {
+	ctx := context.Background()
+	fake := &presetCPAMP{reasoningCPAMP: reasoningCPAMP{
+		config: []byte("api-keys: []\npayload:\n  override-raw:\n    - models:\n        - name: other-model\n          protocol: codex\n      params:\n        service_tier: '\"priority\"'\n"),
+		models: []cpamp.OAuthModelDefinition{
+			{ID: "gpt-alpha", ThinkingLevels: []string{"low", "medium", "high", "xhigh"}},
+			{ID: "gpt-beta", ThinkingLevels: []string{"low", "medium", "high", "xhigh"}},
+		},
+	}, aliases: []cpamp.OAuthModelAlias{{Name: "gpt-alpha", Alias: "old-alpha"}, {Name: "gpt-beta", Alias: "beta-alias"}}}
+	k := &Keys{CPAMP: fake}
+	_, revision, err := k.OAuthReasoningCaps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.SetOAuthReasoningCaps(ctx, []ReasoningCapInput{{Model: "gpt-alpha", Cap: "medium"}, {Model: "gpt-beta", Cap: "high"}}, revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := k.SetOAuthModelEnabled(ctx, "gpt-alpha", false); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.excluded) != 1 || fake.excluded[0] != "gpt-alpha" || len(fake.aliases) != 1 || fake.aliases[0].Alias != "beta-alias" {
+		t.Fatalf("disabled model retained aliases or changed another model: excluded=%v aliases=%v", fake.excluded, fake.aliases)
+	}
+	caps, _, err := k.OAuthReasoningCaps(ctx)
+	if err != nil || caps["gpt-alpha"] != "" || caps["gpt-beta"] != "high" || !strings.Contains(string(fake.config), "service_tier") {
+		t.Fatalf("disabled model cap remained or unrelated rules changed: caps=%v err=%v", caps, err)
+	}
+	if err := k.SetOAuthModelEnabled(ctx, "gpt-alpha", true); err != nil {
+		t.Fatal(err)
+	}
+	caps, _, err = k.OAuthReasoningCaps(ctx)
+	if err != nil || caps["gpt-alpha"] != "" || caps["gpt-beta"] != "high" {
+		t.Fatalf("re-enabled model unexpectedly restored its old cap: caps=%v err=%v", caps, err)
+	}
+}
+
+func TestDisablingOAuthModelRollsBackIfReasoningCapCannotBeRemoved(t *testing.T) {
+	ctx := context.Background()
+	fake := &presetCPAMP{reasoningCPAMP: reasoningCPAMP{
+		config: []byte("api-keys: []\n"),
+		models: []cpamp.OAuthModelDefinition{{ID: "gpt-alpha", ThinkingLevels: []string{"low", "medium", "high", "xhigh"}}},
+	}, aliases: []cpamp.OAuthModelAlias{{Name: "gpt-alpha", Alias: "old-alpha"}}}
+	k := &Keys{CPAMP: fake}
+	_, revision, err := k.OAuthReasoningCaps(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.SetOAuthReasoningCaps(ctx, []ReasoningCapInput{{Model: "gpt-alpha", Cap: "medium"}}, revision); err != nil {
+		t.Fatal(err)
+	}
+	fake.failConfigPut = true
+	if err := k.SetOAuthModelEnabled(ctx, "gpt-alpha", false); err == nil {
+		t.Fatal("model disable succeeded after reasoning rule cleanup failed")
+	}
+	caps, _, err := k.OAuthReasoningCaps(ctx)
+	if err != nil || caps["gpt-alpha"] != "medium" || len(fake.excluded) != 0 || len(fake.aliases) != 1 {
+		t.Fatalf("failed disable was not rolled back: caps=%v excluded=%v aliases=%v err=%v", caps, fake.excluded, fake.aliases, err)
+	}
 }
 
 func TestOAuthPresetSnapshotAndApplyRestoresAllManagedAreas(t *testing.T) {

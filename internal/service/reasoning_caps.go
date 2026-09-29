@@ -197,6 +197,84 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	return nil
 }
 
+// removeOAuthReasoningCap removes only this model's portal-managed override
+// group. The caller holds modelConfigMu while changing model status/aliases.
+func (k *Keys) removeOAuthReasoningCap(ctx context.Context, modelID string) error {
+	client, ok := k.CPAMP.(interface {
+		GetConfigYAML(context.Context) ([]byte, error)
+		PutConfigYAML(context.Context, []byte) error
+	})
+	if !ok {
+		return errors.New("CPAMP 客户端不支持 CPA 配置管理")
+	}
+	data, err := client.GetConfigYAML(ctx)
+	if err != nil {
+		return err
+	}
+	doc, rules, err := parseReasoningConfig(data)
+	if err != nil {
+		return err
+	}
+	_, managed, err := parseManagedReasoningGroups(rules)
+	if err != nil {
+		return err
+	}
+	if rules == nil {
+		return nil
+	}
+	kept := make([]*yaml.Node, 0, len(rules.Content))
+	removed := false
+	for index, rule := range rules.Content {
+		if strings.EqualFold(managed[index], modelID) {
+			removed = true
+			continue
+		}
+		kept = append(kept, rule)
+	}
+	if !removed {
+		return nil
+	}
+	rules.Content = kept
+	var output bytes.Buffer
+	encoder := yaml.NewEncoder(&output)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(doc); err != nil {
+		return errors.New("CPA 配置编码失败")
+	}
+	if err := encoder.Close(); err != nil {
+		return errors.New("CPA 配置编码失败")
+	}
+	latest, err := client.GetConfigYAML(ctx)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(latest, data) {
+		return errors.New("CPA 配置在停用模型期间发生变化，请刷新页面后重试")
+	}
+	if err := client.PutConfigYAML(ctx, output.Bytes()); err != nil {
+		return err
+	}
+	confirmed, err := client.GetConfigYAML(ctx)
+	if err == nil {
+		_, confirmedRules, parseErr := parseReasoningConfig(confirmed)
+		if parseErr == nil {
+			var caps map[string]string
+			caps, parseErr = managedReasoningCaps(confirmedRules)
+			if parseErr == nil && caps[strings.ToLower(modelID)] == "" {
+				return nil
+			}
+			if parseErr == nil {
+				parseErr = errors.New("规则仍存在")
+			}
+		}
+		err = parseErr
+	}
+	if rollbackErr := client.PutConfigYAML(ctx, data); rollbackErr != nil {
+		return fmt.Errorf("CPA 未确认思考强度上限已删除：%v；恢复原配置也失败：%w", err, rollbackErr)
+	}
+	return fmt.Errorf("CPA 未确认思考强度上限已删除，已恢复原配置：%w", err)
+}
+
 func containsReasoningLevel(levels []string, candidate string) bool {
 	for _, level := range levels {
 		if strings.EqualFold(strings.TrimSpace(level), candidate) {
