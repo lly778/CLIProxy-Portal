@@ -675,8 +675,22 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .request-log-table .request-status-cell, .request-detail-table .request-status-cell { width: 90px; min-width: 90px; }
   .request-log-table .request-download-cell, .request-detail-table .request-download-cell { width: 100px; min-width: 100px; }
   .request-detail-table table { min-width: 980px; }
-  .audit-table table { min-width: 900px; }
   .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td, .audit-table th, .audit-table td { padding: 10px 12px; }
+  #audit .system-section-head { align-items: stretch; flex-direction: column; }
+  #audit .system-section-head > .button-row { justify-content: flex-end; }
+  .audit-table table { min-width: 760px; table-layout: fixed; }
+  .audit-table th:nth-child(1) { width: 14%; }
+  .audit-table th:nth-child(2) { width: 15%; }
+  .audit-table th:nth-child(3) { width: 15%; }
+  .audit-table th:nth-child(4) { width: 19%; }
+  .audit-table th:nth-child(5) { width: 10%; }
+  .audit-table th:nth-child(6) { width: 12%; }
+  .audit-table th:nth-child(7) { width: 15%; }
+  .audit-table td { min-width: 0; overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }
+  .audit-table .audit-result-cell { min-width: 0; }
+  .audit-table .audit-action-text { overflow: visible; white-space: normal; }
+  .audit-table .audit-target-text, .audit-table .audit-detail-text, .audit-table .audit-detail-cell .tiny { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
+  .audit-table .audit-detail-cell .tiny { -webkit-line-clamp: 2; }
   .usage-trend-head { gap: 12px; margin-bottom: 14px; }
   .usage-line-chart { min-height: 220px; }
   .usage-line-chart svg { min-width: 0; min-height: 220px; }
