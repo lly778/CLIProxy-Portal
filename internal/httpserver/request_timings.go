@@ -39,7 +39,7 @@ func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) 
 	case "connection_accepted":
 		lines = append(lines, "计时起点：服务器接入新连接")
 	case "request_received":
-		lines = append(lines, "计时起点：复用连接收到本次请求；不计连接空闲时间")
+		lines = append(lines, "计时起点：复用连接收到本次请求")
 	case "headers_received":
 		lines = append(lines, "计时起点：已缓冲的请求头解析完成；此前接收时间不可分离")
 	default:
