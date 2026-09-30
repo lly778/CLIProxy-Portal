@@ -365,19 +365,45 @@ func (g *Gateway) saveDialogue(id, kind, value string) (bool, error) {
 }
 
 func cpaRequestID(traceID string) string {
+	traceID = strings.ToLower(strings.TrimSpace(traceID))
+	// CPA trace IDs end with the request ID. Recent CPA versions use a UUID
+	// instead of the earlier eight-character hex ID; splitting at the last
+	// hyphen would discard most of a UUID and break capture/log correlation.
+	if len(traceID) >= 36 {
+		part := traceID[len(traceID)-36:]
+		if (len(traceID) == 36 || traceID[len(traceID)-37] == '-') && validCPAUUID(part) {
+			return part
+		}
+	}
 	part := traceID
 	if index := strings.LastIndexByte(traceID, '-'); index >= 0 {
 		part = traceID[index+1:]
 	}
-	if len(part) != 8 {
+	if len(part) != 8 || !validCPAHex(part) {
 		return ""
 	}
-	for _, ch := range part {
-		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
-			return ""
+	return part
+}
+
+func validCPAUUID(id string) bool {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
+		return false
+	}
+	for _, part := range []string{id[:8], id[9:13], id[14:18], id[19:23], id[24:]} {
+		if !validCPAHex(part) {
+			return false
 		}
 	}
-	return part
+	return true
+}
+
+func validCPAHex(part string) bool {
+	for _, ch := range part {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *Gateway) filterModelList(resp *http.Response) error {

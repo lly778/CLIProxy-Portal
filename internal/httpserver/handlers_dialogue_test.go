@@ -92,6 +92,16 @@ func TestRequestViewLinksOnlyMatchingCapture(t *testing.T) {
 	if got := s.requestView(event).CaptureID; got != id {
 		t.Fatalf("matching capture id = %q", got)
 	}
+	const uuidID = "01a0f044-7caf-7b8d-a123-145aab9c3d1e"
+	const uuidCaptureID = "dddddddddddddddddddddddddddddddd"
+	if err := st.SaveGatewayCapture(context.Background(), store.GatewayCapture{ID: uuidCaptureID, UserID: "owner", APIKeyHash: "hash-a", CPARequestID: uuidID, CreatedAt: now, Method: "POST", Path: "/v1/responses", StatusCode: 200, RequestContentType: gateway.StructuredCaptureContentType}); err != nil {
+		t.Fatal(err)
+	}
+	event.RequestID = uuidID
+	if got := s.requestView(event).CaptureID; got != uuidCaptureID {
+		t.Fatalf("UUID request capture id = %q, want %q", got, uuidCaptureID)
+	}
+	event.RequestID = "1234abcd"
 	event.APIKeyHash = "hash-b"
 	if got := s.requestView(event).CaptureID; got != "" {
 		t.Fatalf("other key gained link %q", got)

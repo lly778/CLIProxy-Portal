@@ -21,6 +21,27 @@ import (
 
 type gatewayCPAMP struct{ cpamp.API }
 
+func TestCPARequestIDFormats(t *testing.T) {
+	const uuid = "01a0f044-7caf-7b8d-a123-145aab9c3d1e"
+	for _, tt := range []struct {
+		trace string
+		want  string
+	}{
+		{"20260923120000-auth-1234abcd", "1234abcd"},
+		{"1234abcd", "1234abcd"},
+		{"20260930100000-auth-" + uuid, uuid},
+		{uuid, uuid},
+		{"20260930100000-auth-" + strings.ToUpper(uuid), uuid},
+		{"20260930100000-auth-not-a-request-id", ""},
+		{"20260930100000-auth-01a0f044-7caf-7b8d-a123-145aab9c3d1g", ""},
+		{"20260930100000-auth-x" + uuid, ""},
+	} {
+		if got := cpaRequestID(tt.trace); got != tt.want {
+			t.Errorf("cpaRequestID(%q) = %q, want %q", tt.trace, got, tt.want)
+		}
+	}
+}
+
 func (*gatewayCPAMP) ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error) {
 	return []cpamp.OAuthModelAlias{
 		{Name: "gpt-6-luna", Alias: "gpt-5.6-luna", Fork: true},
@@ -72,7 +93,7 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 			t.Errorf("alias request was rewritten: %s", body)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("X-CPA-TRACE-ID", "20260923120000-auth-1234abcd")
+		w.Header().Set("X-CPA-TRACE-ID", "20260930100000-auth-01a0f044-7caf-7b8d-a123-145aab9c3d1e")
 		_, _ = w.Write([]byte(stream))
 	}))
 	defer upstream.Close()
@@ -123,7 +144,7 @@ func TestGatewayFiltersListButPassesAliasAndSavesStructuredEvents(t *testing.T) 
 	if err != nil || len(captures) != 1 {
 		t.Fatalf("captures = %+v, %v", captures, err)
 	}
-	if captures[0].CPARequestID != "1234abcd" {
+	if captures[0].CPARequestID != "01a0f044-7caf-7b8d-a123-145aab9c3d1e" {
 		t.Fatalf("CPA request id = %q", captures[0].CPARequestID)
 	}
 	requestParts, err := st.GatewayCaptureMessages(ctx, captures[0].ID, "request")
