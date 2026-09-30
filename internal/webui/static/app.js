@@ -81,15 +81,22 @@
   var requestModelTexts = Array.prototype.slice.call(document.querySelectorAll(".request-model-text"));
   var requestModelResizeFrame = 0;
 
+  function setLogTooltip(element, text) {
+    if (text) {
+      element.setAttribute("title", text);
+      element.classList.add("log-tooltip");
+      return;
+    }
+    element.removeAttribute("title");
+    element.classList.remove("log-tooltip");
+  }
+
   function fitRequestModelTitles() {
     requestModelTexts.forEach(function (model) {
       if (!model.dataset.fullText) {
         model.dataset.fullText = model.getAttribute("title") || model.textContent.trim();
       }
-      model.removeAttribute("title");
-      if (model.scrollHeight > model.clientHeight + 1) {
-        model.setAttribute("title", model.dataset.fullText);
-      }
+      setLogTooltip(model, model.scrollHeight > model.clientHeight + 1 ? model.dataset.fullText : "");
     });
   }
 
@@ -110,16 +117,14 @@
 
   function fitAuditOverflowTitles() {
     auditOverflowTexts.forEach(function (element) {
-      element.removeAttribute("title");
+      setLogTooltip(element, "");
       var visibleWidth = element.clientWidth;
       var visibleHeight = element.clientHeight;
       var previousLineClamp = element.style.webkitLineClamp;
       element.style.webkitLineClamp = "unset";
       var isOverflowing = element.scrollWidth > visibleWidth + 1 || element.scrollHeight > visibleHeight + 1;
       element.style.webkitLineClamp = previousLineClamp;
-      if (isOverflowing) {
-        element.setAttribute("title", element.textContent.trim());
-      }
+      setLogTooltip(element, isOverflowing ? element.textContent.trim() : "");
     });
   }
 
@@ -145,7 +150,7 @@
     var fullText = detail.dataset.fullText;
     var characters = Array.from(fullText);
 
-    detail.removeAttribute("title");
+    setLogTooltip(detail, "");
     detail.textContent = fullText;
     detail.style.display = "block";
     detail.style.webkitLineClamp = "unset";
@@ -168,7 +173,7 @@
       }
     }
     detail.textContent = characters.slice(0, low).join("").replace(/\s+$/, "") + "…";
-    detail.setAttribute("title", fullText);
+    setLogTooltip(detail, fullText);
     detail.style.display = "";
     detail.style.webkitLineClamp = "";
   }
