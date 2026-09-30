@@ -123,6 +123,22 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_captures_user_time ON gateway_captures(user_id, created_at_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_captures_cpa_request ON gateway_captures(cpa_request_id, api_key_hash)`,
+		`CREATE TABLE IF NOT EXISTS gateway_request_timings (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			api_key_hash TEXT NOT NULL,
+			cpa_request_id TEXT NOT NULL DEFAULT '',
+			started_at_ms INTEGER NOT NULL,
+			ended_at_ms INTEGER NOT NULL,
+			start_source TEXT NOT NULL,
+			request_read_ms INTEGER,
+			upstream_headers_ms INTEGER,
+			response_started_ms INTEGER,
+			total_ms INTEGER NOT NULL,
+			completed INTEGER NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_timings_request ON gateway_request_timings(cpa_request_id,api_key_hash,started_at_ms DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_timings_user ON gateway_request_timings(user_id,started_at_ms DESC)`,
 		`CREATE TABLE IF NOT EXISTS gateway_capture_messages (
 			capture_id TEXT NOT NULL REFERENCES gateway_captures(id) ON DELETE CASCADE,
 			side TEXT NOT NULL CHECK(side IN ('request','response')),

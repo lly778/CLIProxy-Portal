@@ -18,7 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
 )
@@ -61,14 +60,46 @@ func (g *Gateway) Handler() http.Handler {
 }
 
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	start, source, connection := requestStart(r)
 	isModelList := r.Method == http.MethodGet && r.URL.Path == "/v1/models"
 	var capture *requestCapture
+	var measurement *requestMeasurement
 	if isDialoguePath(r.Method, r.URL.Path) {
-		capture = g.startCapture(r)
+		measurement = g.startMeasurement(r, start, source)
+		if measurement != nil {
+			// Register before handler completion: shutdown may observe an idle
+			// connection before its final-flush callback has scheduled the save.
+			g.captureTasks.Add(1)
+			capture = g.startCapture(r, measurement.row)
+			// Preserve net/http's panic handling, including aborted streams.
+			defer func() {
+				panicValue := recover()
+				completed := panicValue == nil && r.Context().Err() == nil
+				if connection == nil {
+					g.completeMeasurement(measurement, time.Now(), time.Time{}, completed)
+				} else {
+					connection.mu.Lock()
+					connection.finish = func(end, firstWrite time.Time, failed bool) {
+						g.completeMeasurement(measurement, end, firstWrite, completed && !failed)
+					}
+					connection.mu.Unlock()
+				}
+				if panicValue != nil {
+					panic(panicValue)
+				}
+			}()
+		}
 		if capture != nil {
 			defer g.saveCaptureInBackground(capture)
 			if r.Body != nil {
 				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture.request), Closer: r.Body}
+			}
+		}
+		if measurement != nil {
+			if r.Body == nil || r.Body == http.NoBody {
+				measurement.requestRead()
+			} else {
+				r.Body = &measuredRequestBody{ReadCloser: r.Body, measurement: measurement, remaining: r.ContentLength}
 			}
 		}
 	}
@@ -93,6 +124,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		Transport:     g.transport,
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
+			if measurement != nil {
+				measurement.upstreamResponse(resp)
+			}
 			if isModelList && resp.StatusCode == http.StatusOK {
 				return g.filterModelList(resp)
 			}
@@ -196,20 +230,8 @@ func newCaptureID() (string, error) {
 	return hex.EncodeToString(raw[:]), nil
 }
 
-func (g *Gateway) startCapture(r *http.Request) *requestCapture {
-	key := apiKey(r)
-	if key == "" {
-		return nil
-	}
-	hash := cpamp.HashAPIKey(key)
-	owner, err := g.store.KeyByHash(r.Context(), hash)
-	if err != nil || owner.UserID == "" {
-		return nil
-	}
-	id, err := newCaptureID()
-	if err != nil {
-		return nil
-	}
+func (g *Gateway) startCapture(r *http.Request, timing store.GatewayRequestTiming) *requestCapture {
+	id := timing.ID
 	request, err := g.vault.Create(id, "rawrequest")
 	if err != nil {
 		g.logger.Warn("gateway request capture unavailable", "error", err)
@@ -223,7 +245,7 @@ func (g *Gateway) startCapture(r *http.Request) *requestCapture {
 		return nil
 	}
 	return &requestCapture{
-		row:     store.GatewayCapture{ID: id, UserID: owner.UserID, APIKeyHash: hash, CreatedAt: time.Now().UTC(), Method: r.Method, Path: r.URL.Path, RequestContentType: r.Header.Get("Content-Type")},
+		row:     store.GatewayCapture{ID: id, UserID: timing.UserID, APIKeyHash: timing.APIKeyHash, CreatedAt: timing.StartedAt.UTC(), Method: r.Method, Path: r.URL.Path, RequestContentType: r.Header.Get("Content-Type")},
 		request: request, response: response, requestContentEncoding: r.Header.Get("Content-Encoding"),
 	}
 }

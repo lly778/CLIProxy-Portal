@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -122,7 +123,12 @@ func serve(cfg config.Config, st *store.Store) error {
 	if gatewayServer != nil {
 		go func() {
 			logger.Info("CPA gateway listening", "address", cfg.GatewayListenAddr)
-			errCh <- gatewayServer.ListenAndServe()
+			listener, err := net.Listen("tcp", gatewayServer.Addr)
+			if err != nil {
+				errCh <- err
+				return
+			}
+			errCh <- gatewayServer.Serve(gateway.TimingListener(listener))
 		}()
 	}
 	select {
@@ -151,7 +157,9 @@ func serve(cfg config.Config, st *store.Store) error {
 // Model API connections follow the client and CPA lifetimes. Portal page
 // deadlines must not impose an additional upload or generation deadline.
 func newGatewayServer(addr string, handler http.Handler) *http.Server {
-	return &http.Server{Addr: addr, Handler: handler}
+	server := &http.Server{Addr: addr, Handler: handler}
+	gateway.ConfigureServerTiming(server)
+	return server
 }
 
 func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg config.Config, logger *slog.Logger, vault *gateway.Vault) {

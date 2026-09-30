@@ -188,6 +188,8 @@ type RequestView struct {
 	ReasoningEffort string
 	TotalTokens     string
 	Latency         string
+	TotalLatency    string
+	LatencyDetail   string
 	Error           string
 	ErrorFull       string
 }

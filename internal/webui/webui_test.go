@@ -101,6 +101,32 @@ func TestRequestFailureRendersFullTextTooltip(t *testing.T) {
 	}
 }
 
+func TestRequestDurationDisplaysOnlyTotalAndEscapesStageTooltip(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RequestView{TotalLatency: "473000 ms", Latency: "8000 ms", LatencyDetail: "模型调用耗时：8000 ms\n接入及请求上传：465000 ms\n<safe> \"detail\""}
+	for _, test := range []struct {
+		page string
+		view any
+	}{
+		{PageActivity, ActivityView{Requests: []RequestView{request}}},
+		{PageDashboard, DashboardView{RecentUsage: []RequestView{request}}},
+		{PageAdminRequests, AdminRequestsView{Requests: []GlobalRequestView{{RequestView: request}}}},
+		{PageAdminUser, AdminUserDetailView{Requests: []RequestView{request}}},
+	} {
+		var out bytes.Buffer
+		if err := r.Execute(&out, test.page, test.view); err != nil {
+			t.Fatal(err)
+		}
+		got := out.String()
+		if !strings.Contains(got, "<th>总耗时</th>") || !strings.Contains(got, ">473000 ms</span>") || strings.Contains(got, ">8000 ms<") || !strings.Contains(got, "模型调用耗时：8000 ms") || !strings.Contains(got, "&lt;safe&gt; &#34;detail&#34;") {
+			t.Fatalf("total-only display or escaped tooltip missing on %s: %s", test.page, got)
+		}
+	}
+}
+
 func TestAuditCellsDoNotHaveUnconditionalTooltips(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
