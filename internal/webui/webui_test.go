@@ -17,6 +17,29 @@ func TestRendererParsesAllPages(t *testing.T) {
 	}
 }
 
+func TestTokenSummaryLabelsMatchTrendLegend(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, page := range []struct {
+		name string
+		view any
+	}{
+		{PageUsage, UsageView{Summary: UsageSummaryView{TotalTokens: "225M"}}},
+		{PageAdminUser, AdminUserDetailView{Usage: UsageSummaryView{TotalTokens: "225M"}}},
+		{PageAdminDashboard, AdminDashboardView{Usage: UsageSummaryView{TotalTokens: "225M"}}},
+	} {
+		var out bytes.Buffer
+		if err := r.Execute(&out, page.name, page.view); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), `<span>Token 数</span><strong>225M</strong>`) || strings.Contains(out.String(), "总 Tokens") {
+			t.Fatalf("inconsistent Token summary label on %s", page.name)
+		}
+	}
+}
+
 func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
