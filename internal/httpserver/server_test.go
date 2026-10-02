@@ -734,7 +734,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("administrator key visibility notice was not rendered: %s", adminUserPage)
 	}
 	adminUsagePage := getBody(t, adminClient, portal.URL+"/admin/usage?range=7d", http.StatusOK)
-	for _, label := range []string{"请求健康趋势", "平均总耗时", "成功率", "失败率", "平均耗时", "按计时请求统计"} {
+	for _, label := range []string{"请求健康趋势", "成功率", "失败率", "平均耗时", "按计时请求统计"} {
 		if !strings.Contains(adminUsagePage, label) {
 			t.Fatalf("admin usage missing %s", label)
 		}

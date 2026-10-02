@@ -42,7 +42,10 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	if strings.Count(html, `class="usage-trend-meta"`) != 2 {
 		t.Fatal("trend headers must share the same layout")
 	}
-	caption := "成功率、失败率与平均总耗时在同一时间范围内联动展示。"
+	caption := "成功率、失败率与平均耗时在同一时间范围内联动展示。"
+	if strings.Contains(html, "平均总耗时") {
+		t.Fatal("duration labels must consistently use 平均耗时")
+	}
 	if strings.Contains(html, "总耗时仅统计已记录的门户请求") {
 		t.Fatal("removed timing note must not appear in the page")
 	}
