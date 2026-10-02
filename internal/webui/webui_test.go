@@ -172,6 +172,26 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 	}
 }
 
+func TestTrendTooltipDoesNotTintSurroundingBarsOrBleedThroughSwatches(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(css), ".trend-tooltip {")
+	if start < 0 {
+		t.Fatal("missing shared chart tooltip style")
+	}
+	rule := strings.SplitN(string(css[start:]), "}", 2)[0]
+	for _, want := range []string{"background: #fff;", "box-shadow: none;", "border: 1px solid var(--line);"} {
+		if !strings.Contains(rule, want) {
+			t.Fatalf("tooltip must not change surrounding chart colors: missing %s", want)
+		}
+	}
+	if strings.Contains(rule, "rgba(") || strings.Contains(rule, "opacity:") || strings.Contains(rule, "filter:") {
+		t.Fatal("tooltip must be opaque and free of shading effects")
+	}
+}
+
 func TestUserManagementTableKeepsAlignedAvatarsAndUserDetails(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
