@@ -146,7 +146,7 @@ func TestRequestDurationDisplaysOnlyTotalAndEscapesStageTooltip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := RequestView{TotalLatency: "473000 ms", Latency: "8000 ms", LatencyDetail: "模型调用耗时：8000 ms\n接入及请求上传：465000 ms\n<safe> \"detail\""}
+	request := RequestView{TotalLatency: "473000 ms", Latency: "8000 ms", LatencyDetail: "服务器耗时：473000 ms\n模型调用耗时：8000 ms\n接入及请求上传：465000 ms\n<safe> \"detail\""}
 	for _, test := range []struct {
 		page string
 		view any
@@ -161,7 +161,7 @@ func TestRequestDurationDisplaysOnlyTotalAndEscapesStageTooltip(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := out.String()
-		if !strings.Contains(got, "<th>总耗时</th>") || !strings.Contains(got, ">473000 ms</span>") || strings.Contains(got, ">8000 ms<") || !strings.Contains(got, "模型调用耗时：8000 ms") || !strings.Contains(got, "&lt;safe&gt; &#34;detail&#34;") {
+		if !strings.Contains(got, "<th>耗时</th>") || strings.Contains(got, "总耗时") || !strings.Contains(got, "服务器耗时：473000 ms") || !strings.Contains(got, ">473000 ms</span>") || strings.Contains(got, ">8000 ms<") || !strings.Contains(got, "模型调用耗时：8000 ms") || !strings.Contains(got, "&lt;safe&gt; &#34;detail&#34;") {
 			t.Fatalf("total-only display or escaped tooltip missing on %s: %s", test.page, got)
 		}
 	}

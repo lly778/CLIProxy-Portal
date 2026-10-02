@@ -10,15 +10,15 @@ import (
 
 func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) (string, string) {
 	total := fmt.Sprintf("%d ms", row.TotalMS)
-	lines := []string{"服务器总耗时：" + total}
+	lines := []string{"服务器耗时：" + total}
 	if !row.Completed {
-		lines = append(lines, "连接中断或回复未完整写出；总耗时为中断前已耗时间")
+		lines = append(lines, "连接中断或回复未完整写出；耗时为中断前已耗时间")
 	}
 	model := "—"
 	if event.LatencyMS != nil {
 		model = fmt.Sprintf("%d ms", *event.LatencyMS)
 	}
-	lines = append(lines, "", "各阶段耗时（完整记录时，三段相加为总耗时）")
+	lines = append(lines, "", "各阶段耗时（完整记录时，三段相加为服务器耗时）")
 	stage := func(label string, from, to *int64) {
 		value := "—"
 		if from != nil && to != nil && *to >= *from {

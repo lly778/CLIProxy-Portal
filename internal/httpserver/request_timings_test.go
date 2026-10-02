@@ -34,10 +34,13 @@ func TestTotalTimingRequiresExactRequestAndKeyAndDoesNotInventOldTotals(t *testi
 	if v.TotalLatency != "473000 ms" || v.Latency != "8000 ms" {
 		t.Fatalf("total/model duration mixed: %+v", v)
 	}
-	for _, want := range []string{"接入及请求上传：465000 ms", "请求收齐到开始写出回复：5000 ms", "持续生成及发送回复：3000 ms", "其中：首 token 等待 5000 ms"} {
+	for _, want := range []string{"服务器耗时：473000 ms", "三段相加为服务器耗时", "接入及请求上传：465000 ms", "请求收齐到开始写出回复：5000 ms", "持续生成及发送回复：3000 ms", "其中：首 token 等待 5000 ms"} {
 		if !strings.Contains(v.LatencyDetail, want) {
 			t.Errorf("detail missing %q: %s", want, v.LatencyDetail)
 		}
+	}
+	if strings.Contains(v.LatencyDetail, "总耗时") {
+		t.Fatal("tooltip should consistently use 耗时")
 	}
 	e.APIKeyHash = "hash-b"
 	if v := s.requestView(e); v.TotalLatency != "—" {
