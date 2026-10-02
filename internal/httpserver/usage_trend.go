@@ -26,46 +26,51 @@ func usageTrendAxisScale(maximum int64) float64 {
 	return math.Ceil(step) * 5
 }
 
-// usageTimeline groups CPAMP's hourly data into local six-hour intervals for
-// week-long ranges. Empty intervals are included; partially covered boundary
-// intervals retain their data rather than dropping requests at either end.
+// usageTimeline follows CPAMP's hourly (up to seven days) and daily buckets.
+// Fill gaps only when data exists, retaining partially covered boundary buckets.
 func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []webui.UsagePointView {
-	step := time.Duration(0)
-	if to.After(from) && to.Sub(from) <= 7*24*time.Hour && !strings.EqualFold(a.Granularity, "day") {
-		step = time.Hour
-		if to.Sub(from) > 48*time.Hour {
-			step = 6 * time.Hour
-		}
+	if len(a.Timeline) == 0 {
+		return nil
 	}
+	hourly := strings.EqualFold(a.Granularity, "hour") || (a.Granularity == "" && to.Sub(from) <= 7*24*time.Hour)
+	fill := to.After(from)
 	for _, point := range a.Timeline {
 		if point.BucketMS <= 0 {
-			step = 0 // Preserve older responses with labels but no timestamps.
+			fill = false // Preserve older responses with labels but no timestamps.
 			break
 		}
 	}
-	if len(a.Timeline) == 0 && a.Summary == nil {
-		return nil
+	floor := func(at time.Time) time.Time {
+		local := at.In(s.Cfg.TimeZone)
+		hour := 0
+		if hourly {
+			hour = local.Hour()
+		}
+		return time.Date(local.Year(), local.Month(), local.Day(), hour, 0, 0, 0, s.Cfg.TimeZone)
+	}
+	next := func(at time.Time) time.Time {
+		if hourly {
+			return at.Add(time.Hour)
+		}
+		return at.AddDate(0, 0, 1)
 	}
 	timeline := a.Timeline
-	if step > 0 {
-		local := from.In(s.Cfg.TimeZone)
-		hours := int(step / time.Hour)
-		start := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()/hours*hours, 0, 0, 0, s.Cfg.TimeZone)
+	if fill {
+		start := floor(from)
 		grouped := make(map[int64]cpamp.UsageTimelinePoint)
 		for _, point := range timeline {
-			at := time.UnixMilli(point.BucketMS)
-			if !at.Before(to) || !at.Add(time.Hour).After(from) {
+			at := floor(time.UnixMilli(point.BucketMS))
+			if !at.Before(to) || !next(at).After(from) {
 				continue
 			}
-			index := int64(at.Sub(start) / step)
-			bucket := start.Add(time.Duration(index) * step).UnixMilli()
+			bucket := at.UnixMilli()
 			value := grouped[bucket]
 			value.Calls += point.Calls
 			value.TotalTokens += point.TotalTokens
 			grouped[bucket] = value
 		}
 		timeline = nil
-		for at := start; at.Before(to); at = at.Add(step) {
+		for at := start; at.Before(to); at = next(at) {
 			point := grouped[at.UnixMilli()]
 			point.BucketMS = at.UnixMilli()
 			timeline = append(timeline, point)
@@ -77,8 +82,10 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 		maxTokens = max(maxTokens, point.TotalTokens)
 	}
 	layout := "01-02"
-	if step > 0 || strings.EqualFold(a.Granularity, "hour") {
+	bucketHours := 24
+	if hourly {
 		layout = "01-02 15:00"
+		bucketHours = 1
 	}
 	points := make([]webui.UsagePointView, 0, len(timeline))
 	for _, point := range timeline {
@@ -86,7 +93,7 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 		if point.BucketMS > 0 {
 			label = time.UnixMilli(point.BucketMS).In(s.Cfg.TimeZone).Format(layout)
 		}
-		points = append(points, webui.UsagePointView{BucketHours: int(step / time.Hour), Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
+		points = append(points, webui.UsagePointView{BucketHours: bucketHours, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
 	}
 	return points
 }

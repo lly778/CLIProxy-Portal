@@ -12,7 +12,7 @@ import (
 	"cliproxy-portal/internal/webui"
 )
 
-func TestWeeklyTimelineHasFourPointsPerDayAndPreservesTotals(t *testing.T) {
+func TestWeeklyTimelineKeepsHourlyPointsAndPreservesTotals(t *testing.T) {
 	zone := time.FixedZone("CST", 8*60*60)
 	s := &Server{Cfg: config.Config{TimeZone: zone}}
 	from := time.Date(2026, 9, 25, 0, 0, 0, 0, zone)
@@ -21,13 +21,42 @@ func TestWeeklyTimelineHasFourPointsPerDayAndPreservesTotals(t *testing.T) {
 		a.Timeline = append(a.Timeline, cpamp.UsageTimelinePoint{BucketMS: from.Add(time.Duration(i) * time.Hour).UnixMilli(), Calls: 1, TotalTokens: 1000})
 	}
 	points := s.usageTimeline(a, from, from.Add(7*24*time.Hour))
-	if len(points) != 28 || usageTrend(points).GranularityLabel != "每 6 小时" {
+	if len(points) != 168 || usageTrend(points).GranularityLabel != "按小时" || usageTrend(points).ShowSymbols {
 		t.Fatalf("weekly timeline has %d points with wrong granularity", len(points))
 	}
 	for i, point := range points {
-		if point.Date != from.Add(time.Duration(i)*6*time.Hour).Format("01-02 15:00") || point.RequestValue != 6 || point.TokenValue != 6000 {
+		if point.Date != from.Add(time.Duration(i)*time.Hour).Format("01-02 15:00") || point.RequestValue != 1 || point.TokenValue != 1000 {
 			t.Fatalf("weekly interval %d = %#v", i, point)
 		}
+	}
+}
+
+func TestCustomTwoDayTimelineKeeps48HourlyIntervalsWithoutChangingTotals(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, zone)
+	a := cpamp.AnalyticsResponse{Granularity: "hour"}
+	var calls, tokens int64
+	for i := 0; i < 48; i++ {
+		point := cpamp.UsageTimelinePoint{BucketMS: from.Add(time.Duration(i) * time.Hour).UnixMilli(), Calls: int64(i), TotalTokens: int64(i) * 1000}
+		a.Timeline = append(a.Timeline, point)
+		calls += point.Calls
+		tokens += point.TotalTokens
+	}
+	points := s.usageTimeline(a, from, from.Add(48*time.Hour))
+	if len(points) != 48 {
+		t.Fatalf("two-day timeline has %d points, want 48", len(points))
+	}
+	var chartCalls, chartTokens int64
+	for _, point := range points {
+		if point.BucketHours != 1 {
+			t.Fatalf("custom interval is %d hours, want 1", point.BucketHours)
+		}
+		chartCalls += point.RequestValue
+		chartTokens += point.TokenValue
+	}
+	if chartCalls != calls || chartTokens != tokens {
+		t.Fatalf("aggregation changed totals: %d/%d calls, %d/%d Tokens", chartCalls, calls, chartTokens, tokens)
 	}
 }
 
@@ -43,12 +72,66 @@ func TestWeeklyTimelineIncludesEmptyAndPartialBoundaryIntervals(t *testing.T) {
 		{BucketMS: to.Truncate(time.Hour).Add(time.Hour).UnixMilli(), Calls: 99, TotalTokens: 9900},
 	}}
 	points := s.usageTimeline(a, from, to)
-	if len(points) != 29 || points[0].RequestValue != 2 || points[len(points)-1].RequestValue != 5 {
+	if len(points) != 169 || points[0].RequestValue != 2 || points[len(points)-1].RequestValue != 5 {
 		t.Fatalf("partial boundary interval data lost: %#v", points)
 	}
 	for _, point := range points[1 : len(points)-1] {
 		if point.RequestValue != 0 || point.TokenValue != 0 {
 			t.Fatalf("empty interval contains fabricated data: %#v", point)
+		}
+	}
+}
+
+func TestLongTimelineFillsDailyBucketsAndPreservesBoundaryTotals(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 9, 2, 3, 15, 0, 0, zone)
+	to := from.AddDate(0, 0, 30)
+	floor := func(at time.Time) int64 {
+		return time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, zone).UnixMilli()
+	}
+	a := cpamp.AnalyticsResponse{Granularity: "day", Timeline: []cpamp.UsageTimelinePoint{
+		{BucketMS: floor(to), Calls: 7, TotalTokens: 700},
+		{BucketMS: floor(from), Calls: 2, TotalTokens: 200},
+		{BucketMS: floor(from), Calls: 3, TotalTokens: 300},
+		{BucketMS: floor(from.AddDate(0, 0, -1)), Calls: 99, TotalTokens: 9900},
+	}}
+	points := s.usageTimeline(a, from, to)
+	if len(points) != 31 || points[0].Date != "09-02" || points[30].Date != "10-02" || points[0].RequestValue != 5 || points[30].RequestValue != 7 {
+		t.Fatalf("daily boundary data lost: %#v", points)
+	}
+	var calls, tokens int64
+	for _, point := range points {
+		if point.BucketHours != 24 {
+			t.Fatal("daily interval must be one local day")
+		}
+		calls += point.RequestValue
+		tokens += point.TokenValue
+	}
+	if calls != 12 || tokens != 1200 || usageTrend(points).GranularityLabel != "按天" {
+		t.Fatalf("daily totals changed: %d calls, %d Tokens", calls, tokens)
+	}
+}
+
+func TestEmptyTimelineRemainsEmptyAndLegacyLabelsArePreserved(t *testing.T) {
+	s := &Server{Cfg: config.Config{TimeZone: time.UTC}}
+	from := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	if got := s.usageTimeline(cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}}, from, from.Add(24*time.Hour)); len(got) != 0 {
+		t.Fatal("empty analytics must not fabricate chart data")
+	}
+	a := cpamp.AnalyticsResponse{Timeline: []cpamp.UsageTimelinePoint{{Label: "10-01", Calls: 5, TotalTokens: 123}}}
+	points := s.usageTimeline(a, from, from.Add(24*time.Hour))
+	if len(points) != 1 || points[0].Date != "10-01" || points[0].RequestValue != 5 || points[0].TokenValue != 123 {
+		t.Fatalf("legacy labels changed: %#v", points)
+	}
+}
+
+func TestUsageTrendSymbolThresholdPreservesAllPoints(t *testing.T) {
+	for _, count := range []int{1, 12, 24, 36, 37, 168} {
+		points := make([]webui.UsagePointView, count)
+		trend := usageTrend(points)
+		if len(trend.Points) != count || trend.ShowSymbols != (count <= 36) {
+			t.Fatalf("%d points: incorrect symbol threshold or discarded data", count)
 		}
 	}
 }

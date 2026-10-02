@@ -161,6 +161,7 @@ type UsageTrendPointView struct {
 }
 
 type UsageTrendView struct {
+	ShowSymbols      bool
 	Points           []UsageTrendPointView
 	RequestPath      string
 	RequestAreaPath  string

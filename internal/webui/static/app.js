@@ -209,20 +209,60 @@
     return Promise.resolve();
   }
 
-  document.querySelectorAll("[data-usage-trend]").forEach(function (chart) {
+  document.querySelectorAll("[data-usage-trend]").forEach(function (chart, chartIndex) {
     var svg = chart.querySelector("svg");
     var tooltip = chart.querySelector("[data-trend-tooltip]");
     var cursor = chart.querySelector(".trend-cursor");
     var points = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-point]"));
     if (!svg || !tooltip || !cursor || !points.length) return;
+    var plot = chart.querySelector("[data-trend-plot]");
+    var clip = chart.querySelector("[data-trend-clip]");
+    var clipTarget = chart.querySelector("[data-trend-clip-target]");
+    if (!plot || !clip || !clipTarget) return;
+    var clipID = "usage-trend-clip-" + chartIndex;
+    clip.id = clipID;
+    clipTarget.setAttribute("clip-path", "url(#" + clipID + ")");
+    var leftBound = 100, rightBound = 900;
+    var scale = 1, offset = 0, drag = null;
+    var zoomable = points.length > 12;
+    var maxScale = Math.min(10, points.length / 6);
+    if (zoomable) chart.classList.add("trend-interactive");
+    function screenX(x) { return x * scale + offset; }
+    function pointerPosition(event) {
+      var matrix = svg.getScreenCTM();
+      if (!matrix) return null;
+      var pointer = svg.createSVGPoint();
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+      return pointer.matrixTransform(matrix.inverse());
+    }
 
     // Text stays in HTML so mobile resizing does not shrink axis labels with
     // the SVG. Reduce only the displayed labels, never the underlying points.
     var labels = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-label]"));
     function resizeTrendLabels() {
-      labels.forEach(function (label, index) {
-        label.hidden = chart.clientWidth < 540 && index !== 0 && index !== Math.floor((labels.length - 1) / 2) && index !== labels.length - 1;
+      var visible = labels.filter(function (label) {
+        var x = screenX(Number(label.dataset.x));
+        label.hidden = true;
+        label.style.left = (x / 10) + "%";
+        return x >= leftBound && x <= rightBound;
       });
+      var count = Math.min(visible.length, chart.clientWidth < 540 ? 3 : 6);
+      var previousRight = -Infinity;
+      for (var i = 0; i < count; i++) {
+        var index = count > 1 ? Math.round(i * (visible.length - 1) / (count - 1)) : 0;
+        var label = visible[index];
+        label.hidden = false;
+        var width = label.getBoundingClientRect().width;
+        var x = screenX(Number(label.dataset.x)) / 1000 * chart.clientWidth;
+        x = Math.max(width / 2 + 4, Math.min(x, chart.clientWidth - width / 2 - 4));
+        if (x - width / 2 < previousRight + 8) {
+          label.hidden = true;
+        } else {
+          label.style.left = x + "px";
+          previousRight = x + width / 2;
+        }
+      }
     }
     resizeTrendLabels();
     if (window.ResizeObserver) {
@@ -235,20 +275,34 @@
       tooltip.hidden = true;
       cursor.setAttribute("hidden", "");
     }
+    function updateViewport() {
+      scale = Math.max(1, Math.min(maxScale, scale));
+      offset = Math.max(rightBound - rightBound * scale, Math.min(leftBound - leftBound * scale, offset));
+      plot.setAttribute("transform", "matrix(" + scale + " 0 0 1 " + offset + " 0)");
+      plot.querySelectorAll("circle").forEach(function (dot) {
+        dot.setAttribute("transform", "translate(" + dot.getAttribute("cx") + " 0) scale(" + (1 / scale) + " 1) translate(" + (-Number(dot.getAttribute("cx"))) + " 0)");
+      });
+      resizeTrendLabels();
+      hideTrendTooltip();
+    }
 
     function showTrendTooltip(event) {
       var svgRect = svg.getBoundingClientRect();
       var matrix = svg.getScreenCTM();
       if (!svgRect.width || !matrix) return;
-      var pointer = svg.createSVGPoint();
-      pointer.x = event.clientX;
-      pointer.y = event.clientY;
-      var viewX = pointer.matrixTransform(matrix.inverse()).x;
-      var nearest = points[0];
+      var pointer = pointerPosition(event);
+      if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) {
+        hideTrendTooltip();
+        return;
+      }
+      var viewX = (pointer.x - offset) / scale;
+      var nearest = null;
       points.forEach(function (point) {
-        if (Math.abs(Number(point.dataset.x) - viewX) < Math.abs(Number(nearest.dataset.x) - viewX)) nearest = point;
+        var x = Number(point.dataset.x);
+        if (screenX(x) >= leftBound && screenX(x) <= rightBound && (!nearest || Math.abs(x - viewX) < Math.abs(Number(nearest.dataset.x) - viewX))) nearest = point;
       });
-      var x = Number(nearest.dataset.x);
+      if (!nearest) { hideTrendTooltip(); return; }
+      var x = screenX(Number(nearest.dataset.x));
       var y = Math.min(Number(nearest.dataset.y), Number(nearest.dataset.tokenY));
       tooltip.querySelector("[data-trend-date]").textContent = nearest.dataset.date;
       tooltip.querySelector("[data-trend-requests]").textContent = nearest.dataset.requests;
@@ -274,7 +328,49 @@
       tooltip.style.top = top + "px";
     }
 
-    chart.addEventListener("pointermove", showTrendTooltip);
+    chart.addEventListener("wheel", function (event) {
+      if (!zoomable) return;
+      var pointer = pointerPosition(event);
+      if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
+      event.preventDefault();
+      var delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? chart.clientHeight : 1);
+      var newScale = Math.max(1, Math.min(maxScale, scale * Math.exp(-delta * 0.002)));
+      offset = pointer.x - (pointer.x - offset) * newScale / scale;
+      scale = newScale;
+      updateViewport();
+    }, { passive: false });
+    chart.addEventListener("pointerdown", function (event) {
+      if (!zoomable || event.button !== 0) return;
+      var pointer = pointerPosition(event);
+      if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
+      drag = { id: event.pointerId, x: pointer.x, offset: offset };
+      chart.setPointerCapture(event.pointerId);
+      chart.classList.add("trend-dragging");
+    });
+    chart.addEventListener("pointermove", function (event) {
+      if (drag && drag.id === event.pointerId) {
+        var pointer = pointerPosition(event);
+        if (pointer) { offset = drag.offset + pointer.x - drag.x; updateViewport(); }
+      } else {
+        showTrendTooltip(event);
+      }
+    });
+    function finishDrag(event) {
+      if (!drag || drag.id !== event.pointerId) return;
+      drag = null;
+      chart.classList.remove("trend-dragging");
+      if (chart.hasPointerCapture(event.pointerId)) chart.releasePointerCapture(event.pointerId);
+      hideTrendTooltip();
+    }
+    chart.addEventListener("pointerup", finishDrag);
+    chart.addEventListener("pointercancel", finishDrag);
+    chart.addEventListener("lostpointercapture", finishDrag);
+    chart.addEventListener("dblclick", function (event) {
+      if (!zoomable) return;
+      var pointer = pointerPosition(event);
+      if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
+      scale = 1; offset = 0; updateViewport();
+    });
     chart.addEventListener("pointerleave", hideTrendTooltip);
     chart.addEventListener("pointercancel", hideTrendTooltip);
   });

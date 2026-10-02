@@ -370,6 +370,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-cursor { stroke: #8793a6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .trend-cursor[hidden] { display: none; }
 .trend-x-label { position: absolute; top: 94.6%; color: var(--muted); font-size: 11px; white-space: nowrap; transform: translate(-50%, -50%); pointer-events: none; }
+.trend-interactive { touch-action: pan-y; user-select: none; }
+.trend-interactive svg { cursor: grab; }
+.trend-dragging svg { cursor: grabbing; }
 .trend-axis-label { position: absolute; color: var(--muted); font-size: 11px; white-space: nowrap; pointer-events: none; }
 .trend-axis-label.tokens { left: 8.8%; color: #5ab38e; transform: translate(-100%, -50%); }
 .trend-axis-label.requests { left: 91.4%; color: #5c83ee; transform: translateY(-50%); }

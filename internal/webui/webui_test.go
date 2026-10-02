@@ -297,6 +297,7 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := UsageView{Trend: UsageTrendView{
+		ShowSymbols: true,
 		Points: []UsageTrendPointView{
 			{X: 290, RequestY: 28, TokenY: 180, BarX: 272, BarWidth: 36, BarHeight: 38, Date: "08-20", Requests: "12", Tokens: "1,234", ShowLabel: true},
 			{X: 710, RequestY: 123, TokenY: 28, BarX: 692, BarWidth: 36, BarHeight: 190, Date: "08-21", Requests: "6", Tokens: "4,567", ShowLabel: true},
@@ -335,6 +336,30 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 				t.Fatal("user detail chart lost its detailed usage link")
 			}
 		})
+	}
+}
+
+func TestDenseUsageTrendHidesOnlySymbols(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	trend := UsageTrendView{RequestPath: "M100,218 L900,28"}
+	for i := 0; i < 168; i++ {
+		trend.Points = append(trend.Points, UsageTrendPointView{X: 100 + i*4, Date: "10-02 12:00", Requests: "2", Tokens: "1234"})
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageUsage, UsageView{Trend: trend}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if strings.Count(got, "data-trend-point ") != 168 || strings.Count(got, "data-trend-label ") != 168 || strings.Count(got, `class="trend-bar tokens"`) != 168 || strings.Contains(got, `class="trend-dot requests"`) {
+		t.Fatal("dense chart must retain every bar, point and tooltip while hiding circles")
+	}
+	for _, want := range []string{"data-trend-clip", "data-trend-plot", `data-requests="2"`, `data-tokens="1234"`, `d="M100,218 L900,28"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing dense chart content %q", want)
+		}
 	}
 }
 
