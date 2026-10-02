@@ -73,12 +73,13 @@ func NewRenderer() (*Renderer, error) {
 				}
 				return 0
 			},
-			"formatNumber": formatNumber,
-			"formatTime":   formatTime,
-			"inc":          func(n int) int { return n + 1 },
-			"join":         strings.Join,
-			"statusClass":  statusClass,
-			"statusLabel":  statusLabel,
+			"formatNumber":      formatNumber,
+			"formatTime":        formatTime,
+			"unobfuscatedEmail": unobfuscatedEmail,
+			"inc":               func(n int) int { return n + 1 },
+			"join":              strings.Join,
+			"statusClass":       statusClass,
+			"statusLabel":       statusLabel,
 		}).ParseFS(assets, "templates/base.html", "templates/quota-pool.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", page, err)
@@ -151,6 +152,13 @@ func (r *Renderer) TemplateNames() []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// unobfuscatedEmail preserves Cloudflare's opt-out comments, which html/template
+// strips from static markup. Escape the value before marking the wrapper as HTML.
+// Quota refresh imports HTML fragments without running Cloudflare's decode script.
+func unobfuscatedEmail(value string) template.HTML {
+	return template.HTML("<!--email_off-->" + template.HTMLEscapeString(value) + "<!--/email_off-->")
 }
 
 func formatNumber(v any) string {

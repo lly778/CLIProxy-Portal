@@ -8,7 +8,7 @@
     {{range .Accounts}}
     <article class="upstream-row">
       <span class="upstream-icon" aria-hidden="true">C</span>
-      <div class="upstream-main"><strong>{{.Account}}</strong><span class="muted mono">{{.Name}}</span>{{if .AuthIndex}}<small class="muted">身份索引 {{.AuthIndex}}</small>{{end}}</div>
+      <div class="upstream-main"><strong>{{unobfuscatedEmail .Account}}</strong><span class="muted mono">{{unobfuscatedEmail .Name}}</span>{{if .AuthIndex}}<small class="muted">身份索引 {{.AuthIndex}}</small>{{end}}</div>
       <div class="upstream-account-quotas">{{range .Quotas}}<div class="upstream-account-quota"><div><span class="badge neutral">{{.Label}}</span><strong>{{.RemainingPercent}}%</strong><small class="muted">{{.Plan}}</small></div><div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}额度剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div><small class="muted">重置 {{.ResetAt}}</small></div>{{else}}<span class="muted small">{{.QuotaStatus}}</span>{{end}}</div>
       {{if .Disabled}}<span class="badge danger">{{.StatusLabel}}</span>{{else}}<span class="badge success">{{.StatusLabel}}</span>{{end}}
       <form method="post" action="/admin/upstreams/{{.ID}}/status" data-confirm="{{if .Disabled}}确定启用该上游账号吗？{{else}}确定停用该上游账号吗？停用后新请求将不再调度到此账号。{{end}}">

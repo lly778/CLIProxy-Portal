@@ -258,6 +258,39 @@ func TestAllPagesExecuteWithZeroViews(t *testing.T) {
 	}
 }
 
+func TestUpstreamEmailObfuscationOptOutSurvivesRendering(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, account, filename, escapedAccount, escapedFilename string
+	}{
+		{"email and credential filename", "test@example.com", "codex-test@example.com-plus.json", "test@example.com", "codex-test@example.com-plus.json"},
+		{"escape HTML and opt-out injection", `<script>alert("x")</script>@example.com`, `<!--/email_off--><img src=x onerror=alert(1)>@example.com`, `&lt;script&gt;alert(&#34;x&#34;)&lt;/script&gt;@example.com`, `&lt;!--/email_off--&gt;&lt;img src=x onerror=alert(1)&gt;@example.com`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			view := AdminUpstreamsView{Accounts: []UpstreamAccountView{{Account: tc.account, Name: tc.filename}}}
+			if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			for _, want := range []string{
+				`<strong><!--email_off-->` + tc.escapedAccount + `<!--/email_off--></strong>`,
+				`<span class="muted mono"><!--email_off-->` + tc.escapedFilename + `<!--/email_off--></span>`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("rendered upstream credentials missing %q", want)
+				}
+			}
+			if strings.Count(got, "<!--email_off-->") != 2 || strings.Count(got, "<!--/email_off-->") != 2 {
+				t.Fatal("both credential fields must have intact opt-out boundaries")
+			}
+		})
+	}
+}
+
 func TestUsageTrendRendersBothSeries(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
