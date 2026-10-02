@@ -379,6 +379,26 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
 	adminDashboard := getBody(t, adminClient, portal.URL+"/admin", http.StatusOK)
+	mu.Lock()
+	adminWeekly := lastUsageAnalytics
+	mu.Unlock()
+	if adminWeekly.Include.Granularity != "hour" || adminWeekly.ToMS-adminWeekly.FromMS != int64((7*24*time.Hour)/time.Millisecond) {
+		t.Fatalf("admin overview must query exactly seven days, not seven days plus clock drift: %+v", adminWeekly)
+	}
+	// The screenshot regression: navigating from overview into a queryless
+	// /admin/usage used to pick up the overview's daily cache within that minute.
+	defaultAdminUsage := getBody(t, adminClient, portal.URL+"/admin/usage", http.StatusOK)
+	for _, marker := range []string{"data-usage-trend", "data-health-trend"} {
+		_, chart, found := strings.Cut(defaultAdminUsage, marker)
+		if !found {
+			t.Fatalf("missing %s", marker)
+		}
+		chart, _, _ = strings.Cut(chart, "</svg>")
+		count := strings.Count(chart, "data-trend-point")
+		if count < 56 || count > 57 {
+			t.Fatalf("%s has %d points after overview, want 56/57 three-hour points", marker, count)
+		}
+	}
 	for _, label := range []string{"模型网关", "CPA 上游", "Key 对账"} {
 		if !strings.Contains(adminDashboard, label) {
 			t.Fatalf("admin dashboard missing component %q", label)

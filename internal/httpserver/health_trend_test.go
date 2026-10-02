@@ -164,3 +164,25 @@ func TestHealthTrendStacksSameCohortAveragesAndPreservesLegacyTotal(t *testing.T
 		t.Fatal("missing stages must not be zero")
 	}
 }
+
+func TestHealthAndUsageBarsShareWidthsAcrossGranularities(t *testing.T) {
+	for _, count := range []int{8, 12, 24, 31, 56, 57, 168} {
+		points := make([]webui.UsagePointView, count)
+		var totals []store.GatewayTimingTotal
+		for i := range points {
+			points[i] = webui.UsagePointView{BucketMS: int64(i + 1), TokenValue: 1000}
+			totals = append(totals, store.GatewayTimingTotal{BucketMS: int64(i + 1), Samples: 1, StageSamples: 1, TotalMS: 1000, UploadMS: 200, WaitMS: 300, ResponseMS: 500})
+		}
+		usage, health := usageTrend(points), healthTrend(points, totals)
+		for i, point := range health.Points {
+			if point.BarWidth != usage.Points[i].BarWidth || point.BarX != usage.Points[i].BarX {
+				t.Fatalf("%d points: widths/positions differ: usage=%+v health=%+v", count, usage.Points[i], point)
+			}
+			for _, stage := range point.Stages {
+				if stage.BarWidth != point.BarWidth || stage.BarX != point.BarX {
+					t.Fatal("stack segment width differs from total")
+				}
+			}
+		}
+	}
+}

@@ -71,8 +71,6 @@ func healthTrend(points []webui.UsagePointView, totals []store.GatewayTimingTota
 	}
 	for i, point := range points {
 		view := webui.HealthTrendPointView{UsageTrendPointView: base.Points[i], SuccessRate: "—", FailureRate: "—", AverageTotal: "—", Samples: "0", SuccessY: bottom, FailureY: bottom, AverageUpload: "—", AverageWait: "—", AverageResponse: "—"}
-		view.BarWidth = min(view.BarWidth, 16)
-		view.BarX = view.X - view.BarWidth/2
 		view.TokenY, view.BarHeight = bottom, 0
 		view.HasRequests = point.RequestValue > 0
 		if view.HasRequests {

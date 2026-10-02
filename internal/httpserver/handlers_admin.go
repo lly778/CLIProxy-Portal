@@ -21,7 +21,8 @@ import (
 
 func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
-	from, to := time.Now().UTC().AddDate(0, 0, -7), time.Now().UTC()
+	to := time.Now().UTC()
+	from := to.Add(-7 * 24 * time.Hour)
 	a, usageErr := s.Keys.GlobalUsage(r.Context(), from, to, 0)
 	summary, _, _, _ := s.usageViews(a, from, to)
 	statuses := []struct{ label, status string }{{"待审批", string(domain.StatusPending)}, {"已批准", string(domain.StatusApproved)}, {"已停用", string(domain.StatusSuspended)}, {"全部用户", ""}}

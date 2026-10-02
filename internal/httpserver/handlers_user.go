@@ -31,7 +31,8 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/status", http.StatusSeeOther)
 		return
 	}
-	from, to := time.Now().UTC().AddDate(0, 0, -7), time.Now().UTC()
+	to := time.Now().UTC()
+	from := to.Add(-7 * 24 * time.Hour)
 	analytics, err := s.Keys.Usage(r.Context(), u.ID, from, to, 10)
 	summary, _, _, requests := s.usageViews(analytics, from, to)
 	v := webui.DashboardView{LayoutView: s.layout(u, currentToken(r), "账户概览", "dashboard"), Greeting: u.Name + "，你好", StatusCard: s.statusCard(u), Key: s.keyView(u), Usage: summary, RecentUsage: requests}

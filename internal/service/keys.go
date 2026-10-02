@@ -646,7 +646,8 @@ func (k *Keys) RefreshUsage(ctx context.Context, userID string, from, to time.Ti
 }
 
 func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, events int, refresh bool) (cpamp.AnalyticsResponse, error) {
-	cacheKey := fmt.Sprintf("user:%s:%d:%d:%d", userID, from.Unix()/60, to.Unix()/60, events)
+	granularity := usageGranularity(from, to)
+	cacheKey := fmt.Sprintf("user:%s:%d:%d:%d:%s", userID, from.Unix()/60, to.Unix()/60, events, granularity)
 	if !refresh {
 		if value, ok := k.cached(cacheKey); ok {
 			return value, nil
@@ -659,7 +660,7 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	if len(hashes) == 0 {
 		return cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}}, nil
 	}
-	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, Granularity: usageGranularity(from, to)}}
+	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, Granularity: granularity}}
 	if events > 0 {
 		req.Include.EventsPage = &cpamp.EventsPage{Limit: events}
 	}
@@ -702,11 +703,14 @@ func usageStatusFromTimeline(value cpamp.AnalyticsResponse) cpamp.AnalyticsRespo
 }
 
 func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
-	cacheKey := fmt.Sprintf("global:%d:%d:%d", from.Unix()/60, to.Unix()/60, events)
+	// Minute-level cache reuse must never cross the hourly/daily boundary.
+	// Ranges a few nanoseconds apart can select different upstream aggregates.
+	granularity := usageGranularity(from, to)
+	cacheKey := fmt.Sprintf("global:%d:%d:%d:%s", from.Unix()/60, to.Unix()/60, events, granularity)
 	if value, ok := k.cached(cacheKey); ok {
 		return value, nil
 	}
-	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, APIKeyStats: true, Granularity: usageGranularity(from, to)}}
+	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, APIKeyStats: true, Granularity: granularity}}
 	if events > 0 {
 		req.Include.EventsPage = &cpamp.EventsPage{Limit: events}
 	}
