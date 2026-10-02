@@ -5,7 +5,7 @@
 {{template "quota-pool" .Quota}}
 <section class="card usage-trend-card section-gap">
   <div class="usage-trend-head">
-    <div><h2>用量趋势总览</h2><p class="muted">请求数与 Token 数在同一时间范围内联动展示。</p><p class="muted small">Token 柱按输入、缓存、输出、推理四段堆叠；输入不含缓存，输出不含推理。</p></div>
+    <div><h2>用量趋势总览</h2><p class="muted">请求数与 Token 数在同一时间范围内联动展示。</p></div>
     <div class="usage-trend-meta"><span class="muted small">{{.Summary.WindowLabel}}</span>{{template "usage-trend-legend"}}</div>
   </div>
   {{template "usage-trend-chart" .Trend}}

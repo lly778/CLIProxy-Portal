@@ -7,7 +7,10 @@
     {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
     <g data-trend-clip-target><g data-trend-plot>
     <path class="trend-area requests" d="{{.RequestAreaPath}}"></path>
-    {{range .Points}}{{if .HasTokenBreakdown}}{{range .TokenSegments}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}{{else}}<path class="trend-bar tokens" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
+    {{range .Points}}{{if .HasTokenBreakdown}}<g data-trend-bar-stack>
+      <defs><clipPath data-trend-bar-clip clipPathUnits="userSpaceOnUse"><path data-trend-bar-outline data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path></clipPath></defs>
+      <g data-trend-bar-stack-target>{{range .TokenSegments}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}</g>
+    </g>{{else}}<path class="trend-bar tokens" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
     <path class="trend-line requests" d="{{.RequestPath}}"></path>
     {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}" data-input-tokens="{{.InputTokens}}" data-cache-tokens="{{.CacheTokens}}" data-output-tokens="{{.OutputTokens}}" data-reasoning-tokens="{{.ReasoningTokens}}"><circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle></g>{{end}}
     </g></g>
@@ -27,7 +30,10 @@
     <defs><clipPath data-trend-clip><rect x="100" y="24" width="800" height="198"></rect></clipPath></defs>
     {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
     <g data-trend-clip-target><g data-trend-plot>
-      {{range .Points}}{{if .HasTiming}}{{if .HasStages}}{{range .Stages}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}{{else}}<path class="trend-bar duration" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}{{end}}
+      {{range .Points}}{{if .HasTiming}}{{if .HasStages}}<g data-trend-bar-stack>
+        <defs><clipPath data-trend-bar-clip clipPathUnits="userSpaceOnUse"><path data-trend-bar-outline data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path></clipPath></defs>
+        <g data-trend-bar-stack-target>{{range .Stages}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}</g>
+      </g>{{else}}<path class="trend-bar duration" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}{{end}}
       <path class="trend-line success-rate" d="{{.SuccessPath}}"></path>
       <path class="trend-line failure-rate" d="{{.FailurePath}}"></path>
       {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-success-rate="{{.SuccessRate}}" data-failure-rate="{{.FailureRate}}" data-average-total="{{.AverageTotal}}" data-average-upload="{{.AverageUpload}}" data-average-wait="{{.AverageWait}}" data-average-response="{{.AverageResponse}}" data-samples="{{.Samples}}">

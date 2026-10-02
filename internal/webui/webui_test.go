@@ -121,7 +121,7 @@ func TestHealthTrendRendersStageBarsAndTooltipWithoutChangingLegacyBars(t *testi
 	}
 	var out bytes.Buffer
 	view := UsageView{IsAdmin: true, HealthTrend: HealthTrendView{Points: []HealthTrendPointView{
-		{HasTiming: true, HasStages: true, AverageUpload: "200 ms", AverageWait: "1 s", AverageResponse: "2 s", Stages: []TrendBarSegmentView{
+		{UsageTrendPointView: UsageTrendPointView{BarX: 100, BarWidth: 8, TokenY: 100, BarHeight: 118}, HasTiming: true, HasStages: true, AverageUpload: "200 ms", AverageWait: "1 s", AverageResponse: "2 s", Stages: []TrendBarSegmentView{
 			{Class: "duration-upload", Y: 200, Height: 18, Square: true},
 			{Class: "duration-wait", Y: 180, Height: 20, Square: true},
 			{Class: "duration-response", Y: 100, Height: 80},
@@ -140,6 +140,11 @@ func TestHealthTrendRendersStageBarsAndTooltipWithoutChangingLegacyBars(t *testi
 	if strings.Count(html, `class="trend-bar duration"`) != 1 {
 		t.Fatal("legacy total-only bar must remain")
 	}
+	for _, want := range []string{`data-trend-bar-stack`, `data-trend-bar-stack-target`, `data-trend-bar-clip clipPathUnits="userSpaceOnUse"`, `data-trend-bar-outline data-bar-x="100" data-bar-y="100" data-bar-width="8" data-bar-height="118"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("health stack missing total-column corner clip: %s", want)
+		}
+	}
 }
 
 func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *testing.T) {
@@ -152,9 +157,9 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 		{"duration-wait", "#8dbded"},
 		{"duration-response", "#357dc4"},
 		{"tokens-input", "#5ab38e"},
-		{"tokens-cache", "#87c9ad"},
-		{"tokens-output", "#429671"},
-		{"tokens-reasoning", "#b1ddca"},
+		{"tokens-cache", "#d2ebdf"},
+		{"tokens-output", "#1f5d43"},
+		{"tokens-reasoning", "#86c5a5"},
 	} {
 		rule := ".trend-bar." + part.class + ", .trend-tooltip ." + part.class + " i { fill: " + part.color + "; background: " + part.color + "; }"
 		if !bytes.Contains(css, []byte(rule)) {
@@ -613,7 +618,7 @@ func TestUsageTrendRendersFourTokenPartsAndLegacyFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	point := UsageTrendPointView{HasTokenBreakdown: true, InputTokens: "35", CacheTokens: "65", OutputTokens: "25", ReasoningTokens: "15", Tokens: "140"}
+	point := UsageTrendPointView{BarX: 100, BarWidth: 8, TokenY: 138, BarHeight: 80, HasTokenBreakdown: true, InputTokens: "35", CacheTokens: "65", OutputTokens: "25", ReasoningTokens: "15", Tokens: "140"}
 	for i, class := range []string{"tokens-input", "tokens-cache", "tokens-output", "tokens-reasoning"} {
 		point.TokenSegments = append(point.TokenSegments, TrendBarSegmentView{Class: class, BarX: 100, BarWidth: 8, Y: float64(200 - i*20), Height: 20, Square: i < 3})
 	}
@@ -623,6 +628,9 @@ func TestUsageTrendRendersFourTokenPartsAndLegacyFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
+	if strings.Contains(html, "Token 柱按输入、缓存、输出、推理四段堆叠") {
+		t.Fatal("removed Token stack description must not appear")
+	}
 	for _, want := range []string{`class="trend-bar tokens-input"`, `class="trend-bar tokens-cache"`, `class="trend-bar tokens-output"`, `class="trend-bar tokens-reasoning"`, `data-input-tokens="35"`, `data-cache-tokens="65"`, `data-output-tokens="25"`, `data-reasoning-tokens="15"`, `data-trend-value="inputTokens"`, `data-trend-value="cacheTokens"`, `data-trend-value="outputTokens"`, `data-trend-value="reasoningTokens"`, "输入（不含缓存）", "输出（不含推理）", `data-reasoning-tokens="—"`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing %s", want)
@@ -630,6 +638,11 @@ func TestUsageTrendRendersFourTokenPartsAndLegacyFallback(t *testing.T) {
 	}
 	if strings.Count(html, `class="trend-bar tokens"`) != 1 || strings.Count(html, `data-bar-square="true"`) != 3 || strings.Count(html, `data-bar-square="false"`) != 1 {
 		t.Fatal("fallback or top-only rounded corners lost")
+	}
+	for _, want := range []string{`data-trend-bar-stack`, `data-trend-bar-stack-target`, `data-trend-bar-clip clipPathUnits="userSpaceOnUse"`, `data-trend-bar-outline data-bar-x="100" data-bar-y="138" data-bar-width="8" data-bar-height="80"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("Token stack missing total-column corner clip: %s", want)
+		}
 	}
 }
 

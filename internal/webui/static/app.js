@@ -227,6 +227,20 @@
     var clipID = "usage-trend-clip-" + chartIndex;
     clip.id = clipID;
     clipTarget.setAttribute("clip-path", "url(#" + clipID + ")");
+    // Clip each complete stack to a rounded outer outline. A very thin top
+    // segment must not shrink the whole column's corner radius to near zero.
+    var stackOutlines = [];
+    chart.querySelectorAll("[data-trend-bar-stack]").forEach(function (stack, stackIndex) {
+      var stackClip = stack.querySelector("[data-trend-bar-clip]");
+      var outline = stack.querySelector("[data-trend-bar-outline]");
+      var target = stack.querySelector("[data-trend-bar-stack-target]");
+      if (!stackClip || !outline || !target) return;
+      var stackID = "trend-bar-clip-" + chartIndex + "-" + stackIndex;
+      stackClip.id = stackID;
+      target.setAttribute("clip-path", "url(#" + stackID + ")");
+      stack.querySelectorAll(".trend-bar[data-bar-x]").forEach(function (bar) { bar.dataset.barStackSegment = "true"; });
+      stackOutlines.push(outline);
+    });
     var leftBound = 100, rightBound = 900;
     var scale = 1, offset = 0, drag = null;
     var touchGesture = null;
@@ -250,13 +264,13 @@
       var xScale = Math.hypot(matrix.a, matrix.b) * scale;
       var yScale = Math.hypot(matrix.c, matrix.d);
       if (!xScale || !yScale) return;
-      bars.forEach(function (bar) {
+      bars.concat(stackOutlines).forEach(function (bar) {
         var x = Number(bar.dataset.barX), y = Number(bar.dataset.barY);
         var width = Number(bar.dataset.barWidth), height = Number(bar.dataset.barHeight);
         if (width <= 0 || height <= 0) { bar.setAttribute("d", ""); return; }
-        // Internal stack boundaries stay square and contiguous. Only the
-        // uppermost nonzero segment uses the shared outer corner rounding.
-        if (bar.dataset.barSquare === "true") {
+        // Internal stack boundaries stay square and contiguous. The shared
+        // complete-column clip supplies the outer rounding across segments.
+        if (bar.dataset.barStackSegment === "true" || bar.dataset.barSquare === "true") {
           bar.setAttribute("d", "M" + x + "," + y + " h" + width + " v" + height + " h-" + width + " Z");
           return;
         }

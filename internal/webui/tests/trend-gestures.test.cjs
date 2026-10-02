@@ -28,11 +28,13 @@ function element(dataset = {}) {
   };
 }
 
-function fixture(count, width, health = false) {
+function fixture(count, width, health = false, options = {}) {
   const chart = element();
   const svg = element();
   const plot = element();
-  const bars = health ? [
+  const bars = options.stacked === false ? [
+    element({ barX: 496, barY: 118, barWidth: 8, barHeight: 100 }),
+  ] : health ? [
     element({ barX: 496, barY: 208, barWidth: 8, barHeight: 10, barSquare: 'true' }),
     element({ barX: 496, barY: 138, barWidth: 8, barHeight: 70, barSquare: 'true' }),
     element({ barX: 496, barY: 118, barWidth: 8, barHeight: 20, barSquare: 'false' }),
@@ -42,6 +44,16 @@ function fixture(count, width, health = false) {
     element({ barX: 496, barY: 128, barWidth: 8, barHeight: 20, barSquare: 'true' }),
     element({ barX: 496, barY: 118, barWidth: 8, barHeight: 10, barSquare: 'false' }),
   ];
+  if (options.thinTop) {
+    const top = bars.at(-1), below = bars.at(-2);
+    below.dataset.barHeight += top.dataset.barHeight - 0.01;
+    below.dataset.barY = 118.01;
+    top.dataset.barHeight = 0.01;
+  }
+  const stack = element(), stackClip = element(), stackTarget = element();
+  const stackOutline = element({ barX: 496, barY: 118, barWidth: 8, barHeight: 100 });
+  stack.querySelector = (selector) => ({ '[data-trend-bar-clip]': stackClip, '[data-trend-bar-outline]': stackOutline, '[data-trend-bar-stack-target]': stackTarget })[selector] ?? null;
+  stack.querySelectorAll = (selector) => selector === '.trend-bar[data-bar-x]' ? bars : [];
   const tooltip = element();
   tooltip.hidden = true;
   tooltip.getBoundingClientRect = () => ({ width: 230, height: 100 });
@@ -64,7 +76,7 @@ function fixture(count, width, health = false) {
   chart.clientWidth = width; chart.clientHeight = 260;
   chart.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 260 });
   chart.querySelector = (selector) => selection[selector] ?? null;
-  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels, '.trend-bar[data-bar-x]': bars })[selector] ?? [];
+  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels, '.trend-bar[data-bar-x]': bars, '[data-trend-bar-stack]': options.stacked === false ? [] : [stack] })[selector] ?? [];
   chart.contains = (target) => target === svg || target === chart;
   chart.setPointerCapture = () => {};
   chart.hasPointerCapture = () => false;
@@ -72,8 +84,15 @@ function fixture(count, width, health = false) {
   svg.getScreenCTM = () => matrix;
   svg.getBoundingClientRect = () => ({ width, height: 260 });
   svg.createSVGPoint = () => ({ x: 0, y: 0, matrixTransform(m) { return { x: this.x * m.a + this.y * m.c + m.e, y: this.x * m.b + this.y * m.d + m.f }; } });
-  const document = { querySelector: () => null, querySelectorAll: (selector) => selector === '[data-usage-trend], [data-health-trend]' ? [chart] : [], addEventListener() {} };
-  vm.runInNewContext(script, { document, window: { addEventListener() {} } }, { filename: 'app.js' });
+  const document = { querySelector: () => null, querySelectorAll: (selector) => selector === '[data-usage-trend], [data-health-trend]' ? (options.chartIndex ? [element(), chart] : [chart]) : [], addEventListener() {} };
+  const windowListeners = new Map();
+  vm.runInNewContext(script, { document, window: { addEventListener(name, callback) { windowListeners.set(name, callback); } } }, { filename: 'app.js' });
+  function resize(nextWidth) {
+    width = nextWidth;
+    chart.clientWidth = width;
+    matrix.a = width / 1000;
+    windowListeners.get('resize')();
+  }
   function touch(id, x, y = 100) { return { identifier: id, clientX: x * width / 1000, clientY: y, target: svg }; }
   function send(name, touches, changedTouches = []) { return chart.dispatch(name, { touches, changedTouches }); }
   function viewport() {
@@ -87,7 +106,7 @@ function fixture(count, width, health = false) {
     send('touchstart', [touch(1, 400)]);
     return send('touchstart', [touch(1, 400), touch(2, 600)]);
   }
-  return { chart, tooltip, tooltipDate, healthValues, tokenValues, points, bars, touch, send, viewport, visiblePoints, pinch };
+  return { chart, tooltip, tooltipDate, healthValues, tokenValues, points, bars, stackOutline, stackClip, stackTarget, resize, touch, send, viewport, visiblePoints, pinch };
 }
 
 for (const health of [false, true]) {
@@ -99,11 +118,11 @@ for (const health of [false, true]) {
       assert.ok(f.pinch().defaultPrevented);
       assert.ok(f.send('touchmove', [f.touch(1, 200), f.touch(2, 800)]).defaultPrevented);
       assert.equal(f.viewport().scale, 3);
-      assert.ok(f.bars.slice(0, -1).every((bar) => !bar.getAttribute('d').includes(' A')));
-      assert.ok(f.bars.at(-1).getAttribute('d').includes(' A'));
+      assert.ok(f.bars.every((bar) => !bar.getAttribute('d').includes(' A')));
+      assert.ok(f.stackOutline.getAttribute('d').includes(' A'));
       if (health) {
         assert.ok(f.bars.slice(0, 2).every((bar) => !bar.getAttribute('d').includes(' A')));
-        assert.ok(f.bars[2].getAttribute('d').includes(' A'));
+        assert.ok(!f.bars[2].getAttribute('d').includes(' A'));
         assert.equal(f.bars[0].getAttribute('d'), 'M496,208 h8 v10 h-8 Z');
         assert.equal(f.bars[1].getAttribute('d'), 'M496,138 h8 v70 h-8 Z');
       }
@@ -188,4 +207,48 @@ test('12 or fewer points stay unzoomable but support tap values', () => {
   f.send('touchmove', [f.touch(1, 100), f.touch(2, 900)]);
   assert.equal(f.viewport().scale, 1);
   assert.equal(f.points.length, 12);
+});
+
+for (const health of [false, true]) {
+  test(`${health ? 'health' : 'usage'}: thin top segments retain full-column rounded corners on resize and zoom`, () => {
+    const f = fixture(60, 400, health, { thinTop: true });
+    const radiusY = () => Number(f.stackOutline.getAttribute('d').match(/ A[^,]+,([^ ]+)/)[1]);
+    assert.equal(f.stackClip.id, 'trend-bar-clip-0-0');
+    assert.equal(f.stackTarget.getAttribute('clip-path'), 'url(#trend-bar-clip-0-0)');
+    assert.ok(Math.abs(radiusY() - 0.8) < 1e-9, 'radius must not depend on the 0.01px top segment');
+    assert.ok(f.bars.every((bar) => !bar.getAttribute('d').includes(' A')));
+    f.pinch();
+    f.send('touchmove', [f.touch(1, 200), f.touch(2, 800)]);
+    assert.ok(Math.abs(radiusY() - 2.4) < 1e-9);
+    f.resize(1000);
+    assert.equal(radiusY(), 4);
+    const first = f.bars[0], top = f.bars.at(-1);
+    assert.equal(first.dataset.barY + first.dataset.barHeight, 218, 'bottom baseline stays square and fixed');
+    assert.equal(top.dataset.barY, 118, 'total top and segment proportions stay fixed');
+    assert.equal(top.dataset.barHeight, 0.01);
+    const otherChart = fixture(60, 400, !health, { chartIndex: 1 });
+    assert.notEqual(otherChart.stackClip.id, f.stackClip.id, 'the two charts must not share clip IDs');
+  });
+  test(`${health ? 'health' : 'usage'}: legacy total-only bars still have rounded top corners`, () => {
+    const f = fixture(60, 400, health, { stacked: false });
+    assert.ok(f.bars[0].getAttribute('d').includes(' A'));
+    f.resize(1000);
+    assert.ok(f.bars[0].getAttribute('d').includes(' A'));
+  });
+}
+
+test('Token greens alternate dark/light between every adjacent stack segment', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
+  function luminance(color) {
+    const rgb = color.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16) / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+  }
+  function color(part) { return css.match(new RegExp(`\\.trend-bar\\.tokens-${part},[^\\n]+fill: (#[\\da-f]{6});`))[1]; }
+  for (const [one, two] of [['input', 'cache'], ['cache', 'output'], ['output', 'reasoning']]) {
+    const values = [luminance(color(one)), luminance(color(two))].sort((a, b) => b - a);
+    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= 2, `${one}/${two} need a substantial luminance difference`);
+  }
+  assert.ok(luminance(color('input')) < luminance(color('cache')));
+  assert.ok(luminance(color('cache')) > luminance(color('output')));
+  assert.ok(luminance(color('output')) < luminance(color('reasoning')));
 });
