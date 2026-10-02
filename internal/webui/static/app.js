@@ -231,7 +231,7 @@
     for (var i = 12; i < points.length; i++) {
       minimumSpan = Math.max(minimumSpan, Number(points[i].dataset.x) - Number(points[i - 12].dataset.x));
     }
-    var maxScale = zoomable ? Math.min(10, (rightBound - leftBound) / minimumSpan) : 1;
+    var maxScale = zoomable ? (rightBound - leftBound) / minimumSpan : 1;
     if (zoomable) chart.classList.add("trend-interactive");
     function screenX(x) { return x * scale + offset; }
     function pointerPosition(event) {
