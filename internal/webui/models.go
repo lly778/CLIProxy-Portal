@@ -151,6 +151,9 @@ type UsageTrendPointView struct {
 	X         int
 	RequestY  int
 	TokenY    int
+	BarX      int
+	BarWidth  int
+	BarHeight int
 	Date      string
 	Requests  string
 	Tokens    string
@@ -160,10 +163,17 @@ type UsageTrendPointView struct {
 type UsageTrendView struct {
 	Points           []UsageTrendPointView
 	RequestPath      string
-	TokenPath        string
+	RequestAreaPath  string
+	AxisTicks        []UsageTrendAxisTickView
 	MaxRequests      string
 	MaxTokens        string
 	GranularityLabel string
+}
+
+type UsageTrendAxisTickView struct {
+	Y        int
+	Requests string
+	Tokens   string
 }
 
 type ModelUsageView struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -391,14 +392,16 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 			maxTokens = point.TokenValue
 		}
 	}
-	requestScale, tokenScale := maxRequests, maxTokens
-	if requestScale <= 0 {
-		requestScale = 1
+	requestScale, tokenScale := usageTrendAxisScale(maxRequests), usageTrendAxisScale(maxTokens)
+	const left, right, top, bottom = 100, 900, 28, 218
+	for i := 0; i <= 5; i++ {
+		trend.AxisTicks = append(trend.AxisTicks, webui.UsageTrendAxisTickView{
+			Y:        bottom - i*(bottom-top)/5,
+			Requests: compactNumber(int64(math.Round(requestScale * float64(i) / 5))),
+			Tokens:   compactNumber(int64(math.Round(tokenScale * float64(i) / 5))),
+		})
 	}
-	if tokenScale <= 0 {
-		tokenScale = 1
-	}
-	const left, right, top, bottom = 48, 952, 28, 218
+	barWidth := max(1, min(36, (right-left)*3/(len(points)*5)))
 	labelCount := len(points)
 	if len(points) > 14 || strings.Contains(points[0].Date, ":") {
 		labelCount = min(labelCount, 6)
@@ -412,17 +415,14 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		labels[index] = true
 	}
 	for i, point := range points {
-		x := (left + right) / 2
-		if len(points) > 1 {
-			x = left + i*(right-left)/(len(points)-1)
-		}
+		x := left + (2*i+1)*(right-left)/(2*len(points))
 		requestY := bottom - int(float64(point.RequestValue)/float64(requestScale)*float64(bottom-top))
 		tokenY := bottom - int(float64(point.TokenValue)/float64(tokenScale)*float64(bottom-top))
-		view := webui.UsageTrendPointView{X: x, RequestY: requestY, TokenY: tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: labels[i]}
+		view := webui.UsageTrendPointView{X: x, RequestY: requestY, TokenY: tokenY, BarX: x - barWidth/2, BarWidth: barWidth, BarHeight: bottom - tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: labels[i]}
 		trend.Points = append(trend.Points, view)
 	}
 	trend.RequestPath = smoothUsageTrendPath(trend.Points, func(p webui.UsageTrendPointView) int { return p.RequestY })
-	trend.TokenPath = smoothUsageTrendPath(trend.Points, func(p webui.UsageTrendPointView) int { return p.TokenY })
+	trend.RequestAreaPath = fmt.Sprintf("%s L%d,%d L%d,%d Z", trend.RequestPath, trend.Points[len(points)-1].X, bottom, trend.Points[0].X, bottom)
 	trend.MaxRequests = compactNumber(maxRequests)
 	trend.MaxTokens = compactNumber(maxTokens)
 	trend.GranularityLabel = "按天"

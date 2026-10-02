@@ -92,6 +92,39 @@ func TestUsageTrendTimestampLabelsAreEvenlySpaced(t *testing.T) {
 	}
 }
 
+func TestUsageTrendBarsStayInsidePlotAndMatchTokenValues(t *testing.T) {
+	for _, count := range []int{1, 2, 24, 29, 90} {
+		points := make([]webui.UsagePointView, count)
+		for i := range points {
+			points[i] = webui.UsagePointView{RequestValue: 100, TokenValue: int64(i) * 1000}
+		}
+		trend := usageTrend(points)
+		for i, point := range trend.Points {
+			if point.BarX < 100 || point.BarX+point.BarWidth > 900 || point.BarWidth <= 0 || point.TokenY+point.BarHeight != 218 || point.TokenY < 28 {
+				t.Fatalf("%d points: invalid bar %#v", count, point)
+			}
+			if i == 0 && point.BarHeight != 0 {
+				t.Fatal("zero Tokens must not produce a nonzero bar")
+			}
+			if i > 0 && trend.Points[i-1].BarX+trend.Points[i-1].BarWidth >= point.BarX {
+				t.Fatal("adjacent Token bars overlap")
+			}
+		}
+		if trend.AxisTicks[0].Requests != "0" || trend.AxisTicks[0].Tokens != "0" || trend.AxisTicks[5].Y != 28 || !strings.HasSuffix(trend.RequestAreaPath, " Z") {
+			t.Fatal("missing zero baseline, axis labels or closed area")
+		}
+	}
+}
+
+func TestUsageTrendAxisScaleIsReadableAndNeverClipsData(t *testing.T) {
+	for _, maximum := range []int64{0, 1, 5, 10, 11, 104, 400, 123456, 21000000} {
+		scale := usageTrendAxisScale(maximum)
+		if scale < float64(maximum) || scale <= 0 || math.Mod(scale/5, 1) != 0 {
+			t.Fatalf("invalid axis scale %f for %d", scale, maximum)
+		}
+	}
+}
+
 func TestSmoothUsageTrendPathSparseData(t *testing.T) {
 	value := func(p webui.UsageTrendPointView) int { return p.RequestY }
 	for _, tc := range []struct {

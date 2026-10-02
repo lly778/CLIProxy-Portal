@@ -216,15 +216,34 @@
     var points = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-point]"));
     if (!svg || !tooltip || !cursor || !points.length) return;
 
+    // Text stays in HTML so mobile resizing does not shrink axis labels with
+    // the SVG. Reduce only the displayed labels, never the underlying points.
+    var labels = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-label]"));
+    function resizeTrendLabels() {
+      labels.forEach(function (label, index) {
+        label.hidden = chart.clientWidth < 540 && index !== 0 && index !== Math.floor((labels.length - 1) / 2) && index !== labels.length - 1;
+      });
+    }
+    resizeTrendLabels();
+    if (window.ResizeObserver) {
+      new ResizeObserver(resizeTrendLabels).observe(chart);
+    } else {
+      window.addEventListener("resize", resizeTrendLabels);
+    }
+
     function hideTrendTooltip() {
       tooltip.hidden = true;
-      cursor.hidden = true;
+      cursor.setAttribute("hidden", "");
     }
 
     function showTrendTooltip(event) {
       var svgRect = svg.getBoundingClientRect();
-      if (!svgRect.width) return;
-      var viewX = (event.clientX - svgRect.left) * 1000 / svgRect.width;
+      var matrix = svg.getScreenCTM();
+      if (!svgRect.width || !matrix) return;
+      var pointer = svg.createSVGPoint();
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+      var viewX = pointer.matrixTransform(matrix.inverse()).x;
       var nearest = points[0];
       points.forEach(function (point) {
         if (Math.abs(Number(point.dataset.x) - viewX) < Math.abs(Number(nearest.dataset.x) - viewX)) nearest = point;
@@ -236,13 +255,17 @@
       tooltip.querySelector("[data-trend-tokens]").textContent = nearest.dataset.tokens;
       cursor.setAttribute("x1", x);
       cursor.setAttribute("x2", x);
-      cursor.hidden = false;
+      cursor.removeAttribute("hidden");
       tooltip.hidden = false;
 
       var chartRect = chart.getBoundingClientRect();
       var tooltipRect = tooltip.getBoundingClientRect();
-      var pointX = svgRect.left - chartRect.left + x / 1000 * svgRect.width;
-      var pointY = svgRect.top - chartRect.top + y / 260 * svgRect.height;
+      var position = svg.createSVGPoint();
+      position.x = x;
+      position.y = y;
+      position = position.matrixTransform(matrix);
+      var pointX = position.x - chartRect.left;
+      var pointY = position.y - chartRect.top;
       var left = pointX + 14;
       if (left + tooltipRect.width > chart.clientWidth - 8) left = pointX - tooltipRect.width - 14;
       left = Math.max(8, Math.min(left, chart.clientWidth - tooltipRect.width - 8));

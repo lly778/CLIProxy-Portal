@@ -298,11 +298,12 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 	}
 	view := UsageView{Trend: UsageTrendView{
 		Points: []UsageTrendPointView{
-			{X: 48, RequestY: 28, TokenY: 180, Date: "08-20", Requests: "12", Tokens: "1,234", ShowLabel: true},
-			{X: 952, RequestY: 123, TokenY: 28, Date: "08-21", Requests: "6", Tokens: "4,567", ShowLabel: true},
+			{X: 290, RequestY: 28, TokenY: 180, BarX: 272, BarWidth: 36, BarHeight: 38, Date: "08-20", Requests: "12", Tokens: "1,234", ShowLabel: true},
+			{X: 710, RequestY: 123, TokenY: 28, BarX: 692, BarWidth: 36, BarHeight: 190, Date: "08-21", Requests: "6", Tokens: "4,567", ShowLabel: true},
 		},
-		RequestPath:      "M48,28 L952,123",
-		TokenPath:        "M48,180 L952,28",
+		RequestPath:      "M290,28 L710,123",
+		RequestAreaPath:  "M290,28 L710,123 L710,218 L290,218 Z",
+		AxisTicks:        []UsageTrendAxisTickView{{Y: 218, Requests: "0", Tokens: "0"}, {Y: 28, Requests: "15", Tokens: "5K"}},
 		MaxRequests:      "12",
 		MaxTokens:        "4,567",
 		GranularityLabel: "按小时",
@@ -312,13 +313,16 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{`<path class="trend-line requests" d="M48,28 L952,123">`, `<path class="trend-line tokens" d="M48,180 L952,28">`, "请求峰值 12", "Token 峰值 4,567", "按小时", "data-trend-tooltip", `data-requests="12"`} {
+	for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, "请求峰值 12", "Token 峰值 4,567", "按小时", "data-trend-tooltip", `data-requests="12"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage trend output does not contain %q", want)
 		}
 	}
 	if strings.Contains(got, "预估成本") {
 		t.Fatal("usage trend unexpectedly renders cost")
+	}
+	if strings.Contains(got, `class="trend-line tokens"`) {
+		t.Fatal("Token must render as bars, not a second curve")
 	}
 }
 

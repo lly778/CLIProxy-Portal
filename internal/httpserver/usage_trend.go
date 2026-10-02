@@ -10,6 +10,22 @@ import (
 	"cliproxy-portal/internal/webui"
 )
 
+// usageTrendAxisScale rounds up to five readable intervals. Each series has its
+// own scale, while integer steps avoid fractional request counts on the axis.
+func usageTrendAxisScale(maximum int64) float64 {
+	if maximum <= 5 {
+		return 5
+	}
+	step := float64(maximum) / 5
+	magnitude := math.Pow(10, math.Floor(math.Log10(step)))
+	for _, unit := range []float64{1, 2, 2.5, 5, 10} {
+		if unit*magnitude >= step {
+			return math.Ceil(unit*magnitude) * 5
+		}
+	}
+	return math.Ceil(step) * 5
+}
+
 // usageTimeline groups CPAMP's hourly data into local six-hour intervals for
 // week-long ranges. Empty intervals are included; partially covered boundary
 // intervals retain their data rather than dropping requests at either end.
