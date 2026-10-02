@@ -126,6 +126,29 @@ func TestUserManagementTableContentsAreCentered(t *testing.T) {
 	}
 }
 
+func TestRequestLogColumnsBalanceModelsNumbersAndFailureDetails(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		".request-log-table table { min-width: 1100px; table-layout: fixed; }",
+		".request-log-table th:nth-child(1) { width: 10%; }",
+		".request-log-table th:nth-child(2) { width: 12%; }",
+		".request-log-table th:nth-child(3) { width: 19%; }",
+		".request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 5.5%; }",
+		".request-log-table th:nth-child(9) { width: 7%; }",
+		".request-log-table th:nth-child(10) { width: 8.5%; }",
+		".request-log-table th:nth-child(11) { width: 10%; }",
+		".request-log-table th:nth-child(12) { width: 6%; }",
+		".request-log-table table { min-width: 1120px; table-layout: auto; }",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing balanced request table column rule: %s", rule)
+		}
+	}
+}
+
 func TestLogTablesCenterContentsWithTextColumnExceptions(t *testing.T) {
 	css, err := fs.ReadFile(Assets(), "style.css")
 	if err != nil {
