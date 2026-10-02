@@ -356,8 +356,8 @@ func TestDenseUsageTrendHidesOnlySymbols(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	if strings.Count(got, "data-trend-point ") != 168 || strings.Count(got, "data-trend-label ") != 168 || strings.Count(got, `class="trend-bar tokens"`) != 168 || strings.Contains(got, `class="trend-dot requests"`) {
-		t.Fatal("dense chart must retain every bar, point and tooltip while hiding circles")
+	if strings.Count(got, "data-trend-point ") != 168 || strings.Count(got, "data-trend-label ") != 168 || strings.Count(got, `class="trend-bar tokens"`) != 168 || strings.Count(got, `class="trend-dot requests"`) != 168 || strings.Count(got, `r="3" hidden`) != 168 {
+		t.Fatal("dense chart must retain every bar, point, tooltip and hidden circle for zooming")
 	}
 	for _, want := range []string{"data-trend-clip", "data-trend-plot", `data-requests="2"`, `data-tokens="1234"`, `d="M100,218 L900,28"`} {
 		if !strings.Contains(got, want) {

@@ -365,6 +365,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-area { fill: #5c83ee; fill-opacity: .07; pointer-events: none; }
 .trend-bar { fill: #5ab38e; }
 .trend-dot { fill: #5c83ee; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.trend-dot[hidden] { display: none; }
 .trend-dot.requests:hover { r: 5; }
 .trend-tooltip .tokens i { border-radius: 1px; }
 .trend-cursor { stroke: #8793a6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }

@@ -214,6 +214,8 @@
     var tooltip = chart.querySelector("[data-trend-tooltip]");
     var cursor = chart.querySelector(".trend-cursor");
     var points = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-point]"));
+    var dots = points.map(function (point) { return point.querySelector(".trend-dot.requests"); });
+    var bars = Array.prototype.slice.call(chart.querySelectorAll(".trend-bar.tokens"));
     if (!svg || !tooltip || !cursor || !points.length) return;
     var plot = chart.querySelector("[data-trend-plot]");
     var clip = chart.querySelector("[data-trend-clip]");
@@ -234,6 +236,36 @@
     var maxScale = zoomable ? (rightBound - leftBound) / minimumSpan : 1;
     if (zoomable) chart.classList.add("trend-interactive");
     function screenX(x) { return x * scale + offset; }
+    function isVisibleX(x) {
+      // SVG matrices round to float32; keep boundary-point decisions stable.
+      return x >= leftBound - 0.001 && x <= rightBound + 0.001;
+    }
+    function updateTrendBars() {
+      var matrix = svg.getScreenCTM();
+      if (!matrix) return;
+      var xScale = Math.hypot(matrix.a, matrix.b) * scale;
+      var yScale = Math.hypot(matrix.c, matrix.d);
+      if (!xScale || !yScale) return;
+      bars.forEach(function (bar) {
+        // Small, screen-sized corners with a flat top, even on a zoomed bar.
+        // Thin/short bars use smaller corners instead of becoming capsules.
+        bar.setAttribute("rx", Math.min(3 / xScale, Number(bar.getAttribute("width")) / 4));
+        bar.setAttribute("ry", Math.min(3 / yScale, Number(bar.getAttribute("height")) / 4));
+      });
+    }
+    function updateTrendSymbols() {
+      var visible = points.map(function (point) {
+        var x = screenX(Number(point.dataset.x));
+        return isVisibleX(x);
+      });
+      var showSymbols = visible.filter(Boolean).length <= 36;
+      dots.forEach(function (dot, index) {
+        if (!dot) return;
+        dot.toggleAttribute("hidden", !showSymbols || !visible[index]);
+        // Cancel only horizontal stretching so marker size stays unchanged.
+        dot.setAttribute("transform", "translate(" + dot.getAttribute("cx") + " 0) scale(" + (1 / scale) + " 1) translate(" + (-Number(dot.getAttribute("cx"))) + " 0)");
+      });
+    }
     function pointerPosition(event) {
       var matrix = svg.getScreenCTM();
       if (!matrix) return null;
@@ -251,7 +283,7 @@
         var x = screenX(Number(label.dataset.x));
         label.hidden = true;
         label.style.left = (x / 10) + "%";
-        return x >= leftBound && x <= rightBound;
+        return isVisibleX(x);
       });
       if (!visible.length) return;
       var maxLabels = chart.clientWidth < 540 ? 3 : 6;
@@ -281,11 +313,16 @@
         step = steps.find(function (value) { return value > step; }) || step * 2;
       }
     }
-    resizeTrendLabels();
+    function resizeTrend() {
+      resizeTrendLabels();
+      updateTrendBars();
+    }
+    resizeTrend();
+    updateTrendSymbols();
     if (window.ResizeObserver) {
-      new ResizeObserver(resizeTrendLabels).observe(chart);
+      new ResizeObserver(resizeTrend).observe(chart);
     } else {
-      window.addEventListener("resize", resizeTrendLabels);
+      window.addEventListener("resize", resizeTrend);
     }
 
     function hideTrendTooltip() {
@@ -296,9 +333,8 @@
       scale = Math.max(1, Math.min(maxScale, scale));
       offset = Math.max(rightBound - rightBound * scale, Math.min(leftBound - leftBound * scale, offset));
       plot.setAttribute("transform", "matrix(" + scale + " 0 0 1 " + offset + " 0)");
-      plot.querySelectorAll("circle").forEach(function (dot) {
-        dot.setAttribute("transform", "translate(" + dot.getAttribute("cx") + " 0) scale(" + (1 / scale) + " 1) translate(" + (-Number(dot.getAttribute("cx"))) + " 0)");
-      });
+      updateTrendBars();
+      updateTrendSymbols();
       resizeTrendLabels();
       hideTrendTooltip();
     }
@@ -316,7 +352,7 @@
       var nearest = null;
       points.forEach(function (point) {
         var x = Number(point.dataset.x);
-        if (screenX(x) >= leftBound && screenX(x) <= rightBound && (!nearest || Math.abs(x - viewX) < Math.abs(Number(nearest.dataset.x) - viewX))) nearest = point;
+        if (isVisibleX(screenX(x)) && (!nearest || Math.abs(x - viewX) < Math.abs(Number(nearest.dataset.x) - viewX))) nearest = point;
       });
       if (!nearest) { hideTrendTooltip(); return; }
       var x = screenX(Number(nearest.dataset.x));

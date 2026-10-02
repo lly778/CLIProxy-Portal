@@ -9,7 +9,7 @@
     <path class="trend-area requests" d="{{.RequestAreaPath}}"></path>
     {{range .Points}}<rect class="trend-bar tokens" x="{{.BarX}}" y="{{.TokenY}}" width="{{.BarWidth}}" height="{{.BarHeight}}" rx="3"></rect>{{end}}
     <path class="trend-line requests" d="{{.RequestPath}}"></path>
-    {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}">{{if $.ShowSymbols}}<circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"></circle>{{end}}</g>{{end}}
+    {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}"><circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle></g>{{end}}
     </g></g>
     <line class="trend-cursor" x1="0" y1="28" x2="0" y2="218" hidden></line>
   </svg>
