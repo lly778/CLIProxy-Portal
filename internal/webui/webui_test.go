@@ -119,6 +119,36 @@ func TestHealthTrendRendersStageBarsAndTooltipWithoutChangingLegacyBars(t *testi
 	}
 }
 
+func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []struct{ class, color string }{
+		{"duration-upload", "#58a0e7"},
+		{"duration-wait", "#8dbded"},
+		{"duration-response", "#357dc4"},
+		{"tokens-input", "#5ab38e"},
+		{"tokens-cache", "#87c9ad"},
+		{"tokens-output", "#429671"},
+		{"tokens-reasoning", "#b1ddca"},
+	} {
+		rule := ".trend-bar." + part.class + ", .trend-tooltip ." + part.class + " i { fill: " + part.color + "; background: " + part.color + "; }"
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing coordinated segment and tooltip palette: %s", rule)
+		}
+	}
+	for _, rule := range []string{
+		".trend-tooltip .tokens i { background: #5ab38e; }",
+		".trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }",
+		".trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("legend base color changed: %s", rule)
+		}
+	}
+}
+
 func TestUserManagementTableKeepsAlignedAvatarsAndUserDetails(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
