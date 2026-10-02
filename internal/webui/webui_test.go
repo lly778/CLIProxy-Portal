@@ -321,7 +321,7 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := out.String()
-			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `class="trend-legend"`, "data-trend-tooltip", `data-requests="12"`, "请求数与总 Token 在同一时间范围内联动展示。"} {
+			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `<div class="trend-legend"><span class="tokens"><i></i>Token</span><span class="requests"><i></i>请求数</span></div>`, "data-trend-tooltip", `data-requests="12"`, "请求数与总 Token 在同一时间范围内联动展示。"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("usage trend output does not contain %q", want)
 				}
