@@ -110,8 +110,8 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, name)
-	if name == "today" {
-		summary.WindowLabel = "今天"
+	if name == "24h" {
+		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
 	if err != nil {

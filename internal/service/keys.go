@@ -791,7 +791,7 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 }
 
 func usageGranularity(from, to time.Time) string {
-	if to.After(from) && to.Sub(from) <= 48*time.Hour {
+	if to.After(from) && to.Sub(from) <= 7*24*time.Hour {
 		return "hour"
 	}
 	return "day"

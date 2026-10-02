@@ -226,8 +226,8 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, rangeName)
-	if rangeName == "today" {
-		summary.WindowLabel = "今天"
+	if rangeName == "24h" {
+		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "我的使用量", "usage"), FormAction: "/usage", From: formFrom, To: formTo, Range: rangeName, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
@@ -308,9 +308,9 @@ func (s *Server) usageRange(r *http.Request) (time.Time, time.Time, string) {
 	}
 	to := now
 	from := now.AddDate(0, 0, -days)
-	if name == "today" {
-		localNow := now.In(s.Cfg.TimeZone)
-		from = time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, s.Cfg.TimeZone).UTC()
+	if name == "24h" || name == "today" {
+		name = "24h"
+		from = now.Add(-24 * time.Hour)
 	} else if name == "custom" {
 		f, e1 := time.ParseInLocation("2006-01-02", r.URL.Query().Get("from"), s.Cfg.TimeZone)
 		t, e2 := time.ParseInLocation("2006-01-02", r.URL.Query().Get("to"), s.Cfg.TimeZone)

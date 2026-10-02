@@ -117,28 +117,7 @@ func (s *Server) usageViews(a cpamp.AnalyticsResponse, from, to time.Time) (webu
 			summary.Latency = "—"
 		}
 	}
-	maxCalls := int64(1)
-	maxTokens := int64(1)
-	for _, p := range a.Timeline {
-		if p.Calls > maxCalls {
-			maxCalls = p.Calls
-		}
-		if p.TotalTokens > maxTokens {
-			maxTokens = p.TotalTokens
-		}
-	}
-	daily := make([]webui.UsagePointView, 0, len(a.Timeline))
-	timelineLayout := "01-02"
-	if strings.EqualFold(a.Granularity, "hour") || (to.After(from) && to.Sub(from) <= 48*time.Hour) {
-		timelineLayout = "01-02 15:00"
-	}
-	for _, p := range a.Timeline {
-		label := p.Label
-		if p.BucketMS > 0 {
-			label = time.UnixMilli(p.BucketMS).In(s.Cfg.TimeZone).Format(timelineLayout)
-		}
-		daily = append(daily, webui.UsagePointView{Date: label, Requests: compactNumber(p.Calls), Tokens: compactNumber(p.TotalTokens), Percent: int(p.Calls * 100 / maxCalls), TokenPercent: int(p.TotalTokens * 100 / maxTokens), RequestValue: p.Calls, TokenValue: p.TotalTokens})
-	}
+	daily := s.usageTimeline(a, from, to)
 	maxModel := int64(1)
 	maxModelTokens := int64(1)
 	for _, m := range a.ModelStats {
@@ -420,6 +399,18 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		tokenScale = 1
 	}
 	const left, right, top, bottom = 48, 952, 28, 218
+	labelCount := len(points)
+	if len(points) > 14 || strings.Contains(points[0].Date, ":") {
+		labelCount = min(labelCount, 6)
+	}
+	labels := make(map[int]bool, labelCount)
+	for i := 0; i < labelCount; i++ {
+		index := 0
+		if labelCount > 1 {
+			index = i * (len(points) - 1) / (labelCount - 1)
+		}
+		labels[index] = true
+	}
 	for i, point := range points {
 		x := (left + right) / 2
 		if len(points) > 1 {
@@ -427,7 +418,7 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		}
 		requestY := bottom - int(float64(point.RequestValue)/float64(requestScale)*float64(bottom-top))
 		tokenY := bottom - int(float64(point.TokenValue)/float64(tokenScale)*float64(bottom-top))
-		view := webui.UsageTrendPointView{X: x, RequestY: requestY, TokenY: tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: len(points) <= 14 || i%5 == 0 || i == len(points)-1}
+		view := webui.UsageTrendPointView{X: x, RequestY: requestY, TokenY: tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: labels[i]}
 		trend.Points = append(trend.Points, view)
 	}
 	trend.RequestPath = smoothUsageTrendPath(trend.Points, func(p webui.UsageTrendPointView) int { return p.RequestY })
@@ -435,7 +426,9 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 	trend.MaxRequests = compactNumber(maxRequests)
 	trend.MaxTokens = compactNumber(maxTokens)
 	trend.GranularityLabel = "按天"
-	if strings.Contains(points[0].Date, ":") {
+	if points[0].BucketHours == 6 {
+		trend.GranularityLabel = "每 6 小时"
+	} else if strings.Contains(points[0].Date, ":") {
 		trend.GranularityLabel = "按小时"
 	}
 	return trend

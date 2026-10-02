@@ -34,6 +34,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var lastSeenMS int64
 	var lastSeenAnalyticsCalls int
 	var eventAnalyticsCalls int
+	var lastUsageAnalytics cpamp.AnalyticsRequest
 	var cpampStatusCalls int
 	var apiKeyListCalls int
 	var upstreamDisabled bool
@@ -153,6 +154,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 				t.Errorf("decode analytics: %v", err)
 			}
 			response := map[string]any{"generated_at_ms": time.Now().UnixMilli()}
+			if req.Include.Summary && req.Include.Timeline && req.Include.ModelStats {
+				lastUsageAnalytics = req
+			}
 			if req.Include.APIKeyStats {
 				lastSeenAnalyticsCalls++
 				stats := make([]map[string]any, 0, len(keys))
@@ -354,6 +358,13 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	usagePage := getBody(t, client, portal.URL+"/usage?range=7d", http.StatusOK)
 	if strings.Contains(usagePage, "逐请求记录") {
 		t.Fatalf("usage page still rendered request records: %s", usagePage)
+	}
+	getBody(t, client, portal.URL+"/usage?range=24h", http.StatusOK)
+	mu.Lock()
+	user24h := lastUsageAnalytics
+	mu.Unlock()
+	if user24h.ToMS-user24h.FromMS != (24*time.Hour).Milliseconds() || len(user24h.Filters.APIKeyHashes) == 0 {
+		t.Fatalf("user usage did not query all statistics over the last 24 hours: %#v", user24h)
 	}
 	adminJar, _ := cookiejar.New(nil)
 	adminClient := &http.Client{Jar: adminJar, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -697,6 +708,13 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminUsagePage, "按用户") || !strings.Contains(adminUsagePage, "张三") || !strings.Contains(adminUsagePage, "2.3K 请求") || !strings.Contains(adminUsagePage, "5.1M tokens") {
 		t.Fatalf("admin global usage did not show per-user statistics: %s", adminUsagePage)
 	}
+	getBody(t, adminClient, portal.URL+"/admin/usage?range=24h", http.StatusOK)
+	mu.Lock()
+	admin24h := lastUsageAnalytics
+	mu.Unlock()
+	if admin24h.ToMS-admin24h.FromMS != (24*time.Hour).Milliseconds() || !admin24h.Include.APIKeyStats {
+		t.Fatalf("admin usage did not query user statistics over the last 24 hours: %#v", admin24h)
+	}
 	filteredAdminUsagePage := getBody(t, adminClient, portal.URL+"/admin/usage?user="+u.ID+"&range=7d", http.StatusOK)
 	if strings.Contains(filteredAdminUsagePage, "<h2>按用户</h2>") {
 		t.Fatalf("per-user usage page rendered the global user chart: %s", filteredAdminUsagePage)
@@ -815,26 +833,23 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 }
 
-func TestUsageRangeTodayStartsAtLocalMidnight(t *testing.T) {
+func TestUsageRangeUsesRolling24HoursAndAcceptsLegacyToday(t *testing.T) {
 	zone := time.FixedZone("CST", 8*60*60)
 	server := &Server{Cfg: config.Config{TimeZone: zone}}
-	request := httptest.NewRequest(http.MethodGet, "/usage?range=today", nil)
-	before := time.Now().UTC()
-	from, to, name := server.usageRange(request)
-	after := time.Now().UTC()
-	if name != "today" {
-		t.Fatalf("range name = %q", name)
-	}
-	localFrom := from.In(zone)
-	if localFrom.Hour() != 0 || localFrom.Minute() != 0 || localFrom.Second() != 0 || localFrom.Nanosecond() != 0 {
-		t.Fatalf("today starts at %s", localFrom)
-	}
-	localTo := to.In(zone)
-	if localFrom.Year() != localTo.Year() || localFrom.YearDay() != localTo.YearDay() {
-		t.Fatalf("today crosses local dates: %s to %s", localFrom, localTo)
-	}
-	if to.Before(before) || to.After(after) {
-		t.Fatalf("today end = %s, want between %s and %s", to, before, after)
+	for _, rangeName := range []string{"24h", "today"} {
+		request := httptest.NewRequest(http.MethodGet, "/usage?range="+rangeName, nil)
+		before := time.Now().UTC()
+		from, to, name := server.usageRange(request)
+		after := time.Now().UTC()
+		if name != "24h" {
+			t.Fatalf("range name = %q", name)
+		}
+		if to.Sub(from) != 24*time.Hour {
+			t.Fatalf("rolling window = %s to %s", from, to)
+		}
+		if to.Before(before) || to.After(after) {
+			t.Fatalf("rolling window end = %s, want between %s and %s", to, before, after)
+		}
 	}
 }
 
@@ -906,11 +921,11 @@ func TestUsageViewsFormatsHourlyTimelineLabels(t *testing.T) {
 		Granularity: "hour",
 		Timeline:    []cpamp.UsageTimelinePoint{{BucketMS: bucket.UnixMilli(), Calls: 2_300, TotalTokens: 5_100_000}},
 	}, bucket.Add(-time.Hour), bucket.Add(time.Hour))
-	if len(points) != 1 {
+	if len(points) != 2 {
 		t.Fatalf("hourly points = %d", len(points))
 	}
-	if points[0].Date != "08-21 01:00" || points[0].Requests != "2.3K" || points[0].Tokens != "5.1M" {
-		t.Fatalf("hourly point = %#v", points[0])
+	if points[0].Requests != "0" || points[1].Date != "08-21 01:00" || points[1].Requests != "2.3K" || points[1].Tokens != "5.1M" {
+		t.Fatalf("hourly points = %#v", points)
 	}
 }
 

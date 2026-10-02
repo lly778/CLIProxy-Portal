@@ -4,9 +4,76 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/webui"
 )
+
+// usageTimeline groups CPAMP's hourly data into local six-hour intervals for
+// week-long ranges. Empty intervals are included; partially covered boundary
+// intervals retain their data rather than dropping requests at either end.
+func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []webui.UsagePointView {
+	step := time.Duration(0)
+	if to.After(from) && to.Sub(from) <= 7*24*time.Hour && !strings.EqualFold(a.Granularity, "day") {
+		step = time.Hour
+		if to.Sub(from) > 48*time.Hour {
+			step = 6 * time.Hour
+		}
+	}
+	for _, point := range a.Timeline {
+		if point.BucketMS <= 0 {
+			step = 0 // Preserve older responses with labels but no timestamps.
+			break
+		}
+	}
+	if len(a.Timeline) == 0 && a.Summary == nil {
+		return nil
+	}
+	timeline := a.Timeline
+	if step > 0 {
+		local := from.In(s.Cfg.TimeZone)
+		hours := int(step / time.Hour)
+		start := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()/hours*hours, 0, 0, 0, s.Cfg.TimeZone)
+		grouped := make(map[int64]cpamp.UsageTimelinePoint)
+		for _, point := range timeline {
+			at := time.UnixMilli(point.BucketMS)
+			if !at.Before(to) || !at.Add(time.Hour).After(from) {
+				continue
+			}
+			index := int64(at.Sub(start) / step)
+			bucket := start.Add(time.Duration(index) * step).UnixMilli()
+			value := grouped[bucket]
+			value.Calls += point.Calls
+			value.TotalTokens += point.TotalTokens
+			grouped[bucket] = value
+		}
+		timeline = nil
+		for at := start; at.Before(to); at = at.Add(step) {
+			point := grouped[at.UnixMilli()]
+			point.BucketMS = at.UnixMilli()
+			timeline = append(timeline, point)
+		}
+	}
+	maxCalls, maxTokens := int64(1), int64(1)
+	for _, point := range timeline {
+		maxCalls = max(maxCalls, point.Calls)
+		maxTokens = max(maxTokens, point.TotalTokens)
+	}
+	layout := "01-02"
+	if step > 0 || strings.EqualFold(a.Granularity, "hour") {
+		layout = "01-02 15:00"
+	}
+	points := make([]webui.UsagePointView, 0, len(timeline))
+	for _, point := range timeline {
+		label := point.Label
+		if point.BucketMS > 0 {
+			label = time.UnixMilli(point.BucketMS).In(s.Cfg.TimeZone).Format(layout)
+		}
+		points = append(points, webui.UsagePointView{BucketHours: int(step / time.Hour), Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
+	}
+	return points
+}
 
 // smoothUsageTrendPath interpolates the measured points with a monotone cubic
 // curve. Flat intervals and local extrema have zero tangents, and each segment's

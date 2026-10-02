@@ -5,9 +5,92 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"cliproxy-portal/internal/config"
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/webui"
 )
+
+func TestWeeklyTimelineHasFourPointsPerDayAndPreservesTotals(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 9, 25, 0, 0, 0, 0, zone)
+	a := cpamp.AnalyticsResponse{Granularity: "hour"}
+	for i := 0; i < 168; i++ {
+		a.Timeline = append(a.Timeline, cpamp.UsageTimelinePoint{BucketMS: from.Add(time.Duration(i) * time.Hour).UnixMilli(), Calls: 1, TotalTokens: 1000})
+	}
+	points := s.usageTimeline(a, from, from.Add(7*24*time.Hour))
+	if len(points) != 28 || usageTrend(points).GranularityLabel != "每 6 小时" {
+		t.Fatalf("weekly timeline has %d points with wrong granularity", len(points))
+	}
+	for i, point := range points {
+		if point.Date != from.Add(time.Duration(i)*6*time.Hour).Format("01-02 15:00") || point.RequestValue != 6 || point.TokenValue != 6000 {
+			t.Fatalf("weekly interval %d = %#v", i, point)
+		}
+	}
+}
+
+func TestWeeklyTimelineIncludesEmptyAndPartialBoundaryIntervals(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 9, 25, 3, 15, 0, 0, zone)
+	to := from.Add(7 * 24 * time.Hour)
+	a := cpamp.AnalyticsResponse{Granularity: "hour", Timeline: []cpamp.UsageTimelinePoint{
+		{BucketMS: from.Truncate(time.Hour).UnixMilli(), Calls: 2, TotalTokens: 200},
+		{BucketMS: to.Truncate(time.Hour).UnixMilli(), Calls: 5, TotalTokens: 500},
+		{BucketMS: from.Truncate(time.Hour).Add(-time.Hour).UnixMilli(), Calls: 99, TotalTokens: 9900},
+		{BucketMS: to.Truncate(time.Hour).Add(time.Hour).UnixMilli(), Calls: 99, TotalTokens: 9900},
+	}}
+	points := s.usageTimeline(a, from, to)
+	if len(points) != 29 || points[0].RequestValue != 2 || points[len(points)-1].RequestValue != 5 {
+		t.Fatalf("partial boundary interval data lost: %#v", points)
+	}
+	for _, point := range points[1 : len(points)-1] {
+		if point.RequestValue != 0 || point.TokenValue != 0 {
+			t.Fatalf("empty interval contains fabricated data: %#v", point)
+		}
+	}
+}
+
+func TestRolling24HourTimelineIncludesPreviousDayAndKeepsHourlyData(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	to := time.Date(2026, 10, 2, 21, 0, 0, 0, zone)
+	from := to.Add(-24 * time.Hour)
+	a := cpamp.AnalyticsResponse{Granularity: "hour", Timeline: []cpamp.UsageTimelinePoint{{BucketMS: from.UnixMilli(), Calls: 10, TotalTokens: 1000}}}
+	points := s.usageTimeline(a, from, to)
+	if len(points) != 24 || points[0].Date != "10-01 21:00" || points[0].RequestValue != 10 || points[23].Date != "10-02 20:00" || points[23].RequestValue != 0 {
+		t.Fatalf("rolling 24-hour data = %#v", points)
+	}
+	if points[0].BucketHours != 1 || usageTrend(points).GranularityLabel != "按小时" {
+		t.Fatal("rolling 24-hour chart must retain hourly granularity")
+	}
+}
+
+func TestUsageTrendTimestampLabelsAreEvenlySpaced(t *testing.T) {
+	for _, count := range []int{7, 24, 25, 28, 29, 30} {
+		points := make([]webui.UsagePointView, count)
+		for i := range points {
+			points[i].Date = "10-02 12:00"
+		}
+		trend := usageTrend(points)
+		previous, labels := -1, 0
+		for i, point := range trend.Points {
+			if !point.ShowLabel {
+				continue
+			}
+			if previous >= 0 && i-previous < (count-1)/5 {
+				t.Fatalf("%d points: adjacent labels at %d and %d", count, previous, i)
+			}
+			previous = i
+			labels++
+		}
+		if labels != 6 || !trend.Points[0].ShowLabel || !trend.Points[count-1].ShowLabel {
+			t.Fatalf("%d points: expected six labels including both boundaries", count)
+		}
+	}
+}
 
 func TestSmoothUsageTrendPathSparseData(t *testing.T) {
 	value := func(p webui.UsageTrendPointView) int { return p.RequestY }

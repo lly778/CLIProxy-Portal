@@ -137,6 +137,7 @@ type UsageSummaryView struct {
 }
 
 type UsagePointView struct {
+	BucketHours  int
 	Date         string
 	Requests     string
 	Tokens       string
