@@ -565,20 +565,19 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .audit-action-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .request-log-table table { min-width: 1100px; table-layout: fixed; }
 .request-log-table th, .request-log-table td { padding-right: 8px; padding-left: 8px; overflow: hidden; text-overflow: ellipsis; }
-.request-log-table th:nth-child(1) { width: 10%; }
-.request-log-table th:nth-child(2) { width: 12.5%; }
-.request-log-table th:nth-child(3) { width: 19.5%; }
+.request-log-table th:nth-child(1) { width: 9.5%; }
+.request-log-table th:nth-child(2) { width: 11.5%; }
+.request-log-table th:nth-child(3) { width: 22%; }
 .request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 5.5%; }
 .request-log-table th:nth-child(9) { width: 7%; }
 .request-log-table th:nth-child(10) { width: 7.5%; }
-.request-log-table th:nth-child(11) { width: 10%; }
+.request-log-table th:nth-child(11) { width: 9%; }
 .request-log-table th:nth-child(12) { width: 6%; }
-.request-log-table .request-status-cell { width: 10%; min-width: 0; }
+.request-log-table .request-status-cell { width: 9%; min-width: 0; }
 .request-log-table .request-download-cell { width: 6%; min-width: 0; }
 .request-log-table .request-time-cell, .request-log-table td:nth-child(2) { line-height: 1.45; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
 .request-log-table td:nth-child(2) .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }
-.request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }
 .request-model-cell { min-width: 0; white-space: normal; }
 .request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .request-detail-table .request-model-cell { width: 20%; }
@@ -690,6 +689,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .request-log-table table { min-width: 1120px; table-layout: auto; }
   .request-log-table th { width: auto !important; }
   .request-log-table .request-model-cell, .request-detail-table .request-model-cell { min-width: 220px; }
+  .request-log-table .request-model-cell { min-width: 250px; }
   .request-model-text { -webkit-line-clamp: unset; }
   .request-log-table .request-status-cell, .request-detail-table .request-status-cell { width: 90px; min-width: 90px; }
   .request-log-table .request-download-cell, .request-detail-table .request-download-cell { width: 100px; min-width: 100px; }

@@ -133,15 +133,16 @@ func TestRequestLogColumnsBalanceModelsNumbersAndFailureDetails(t *testing.T) {
 	}
 	for _, rule := range []string{
 		".request-log-table table { min-width: 1100px; table-layout: fixed; }",
-		".request-log-table th:nth-child(1) { width: 10%; }",
-		".request-log-table th:nth-child(2) { width: 12.5%; }",
-		".request-log-table th:nth-child(3) { width: 19.5%; }",
+		".request-log-table th:nth-child(1) { width: 9.5%; }",
+		".request-log-table th:nth-child(2) { width: 11.5%; }",
+		".request-log-table th:nth-child(3) { width: 22%; }",
 		".request-log-table th:nth-child(n+4):nth-child(-n+8) { width: 5.5%; }",
 		".request-log-table th:nth-child(9) { width: 7%; }",
 		".request-log-table th:nth-child(10) { width: 7.5%; }",
-		".request-log-table th:nth-child(11) { width: 10%; }",
+		".request-log-table th:nth-child(11) { width: 9%; }",
 		".request-log-table th:nth-child(12) { width: 6%; }",
 		".request-log-table table { min-width: 1120px; table-layout: auto; }",
+		".request-log-table .request-model-cell { min-width: 250px; }",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing balanced request table column rule: %s", rule)
@@ -149,14 +150,13 @@ func TestRequestLogColumnsBalanceModelsNumbersAndFailureDetails(t *testing.T) {
 	}
 }
 
-func TestLogTablesCenterContentsWithTextColumnExceptions(t *testing.T) {
+func TestLogTablesCenterContentsWithAuditTextColumnExceptions(t *testing.T) {
 	css, err := fs.ReadFile(Assets(), "style.css")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, rule := range []string{
 		".request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }",
-		".request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }",
 		".audit-table th, .audit-table td { text-align: center; }",
 		".audit-table .audit-action-cell, .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }",
 	} {
@@ -166,6 +166,9 @@ func TestLogTablesCenterContentsWithTextColumnExceptions(t *testing.T) {
 	}
 	if bytes.Contains(css, []byte(".request-log-table td:nth-child(1), .request-log-table td:nth-child(2)")) {
 		t.Fatal("request time and user columns must no longer be left-aligned")
+	}
+	if bytes.Contains(css, []byte(".request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }")) {
+		t.Fatal("request model columns must also be centered")
 	}
 }
 

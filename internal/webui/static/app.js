@@ -229,6 +229,7 @@
     clipTarget.setAttribute("clip-path", "url(#" + clipID + ")");
     var leftBound = 100, rightBound = 900;
     var scale = 1, offset = 0, drag = null;
+    var touchGesture = null;
     var zoomable = points.length > 12;
     // Keep at least twelve actual points in every panned viewport. Use the
     // widest twelve intervals so rounded SVG coordinates cannot leave only 11.
@@ -396,6 +397,98 @@
       tooltip.style.top = top + "px";
     }
 
+    // Use touch events for mobile gestures and leave pointer events for mouse
+    // and pen. A second finger cancels native page pinch; single-finger vertical
+    // moves still scroll the page through touch-action: pan-y.
+    function chartTouches(event) {
+      return Array.prototype.filter.call(event.touches, function (touch) { return chart.contains(touch.target); });
+    }
+    function inPlot(pointer) {
+      return pointer && pointer.x >= leftBound && pointer.x <= rightBound && pointer.y >= 24 && pointer.y <= 222;
+    }
+    function beginTouchPan(touch, moved) {
+      var pointer = pointerPosition(touch);
+      if (!pointer) return;
+      touchGesture = { kind: "pan", id: touch.identifier, x: pointer.x, clientX: touch.clientX, clientY: touch.clientY, offset: offset, moved: moved };
+    }
+    function beginTouchPinch(touches, rebasing) {
+      var first = pointerPosition(touches[0]), second = pointerPosition(touches[1]);
+      if (!first || !second || (!rebasing && (!inPlot(first) || !inPlot(second)))) return false;
+      touchGesture = { kind: "pinch", x: (first.x + second.x) / 2, distance: Math.max(1, Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY)) };
+      chart.classList.add("trend-dragging");
+      hideTrendTooltip();
+      return true;
+    }
+    chart.addEventListener("touchstart", function (event) {
+      var touches = chartTouches(event);
+      if (!touches.length) return;
+      if (!zoomable) { showTrendTooltip(touches[0]); return; }
+      if (touches.length >= 2) {
+        if (beginTouchPinch(touches) && event.cancelable) event.preventDefault();
+      } else if (inPlot(pointerPosition(touches[0]))) {
+        beginTouchPan(touches[0], false);
+      }
+    }, { passive: false });
+    chart.addEventListener("touchmove", function (event) {
+      if (!zoomable) { hideTrendTooltip(); return; }
+      if (!touchGesture || touchGesture.kind === "scroll") return;
+      var touches = chartTouches(event);
+      if (touches.length >= 2) {
+        if (touchGesture.kind !== "pinch" && !beginTouchPinch(touches)) return;
+        var first = pointerPosition(touches[0]), second = pointerPosition(touches[1]);
+        if (!first || !second) return;
+        if (event.cancelable) event.preventDefault();
+        var center = (first.x + second.x) / 2;
+        var distance = Math.max(1, Math.hypot(touches[1].clientX - touches[0].clientX, touches[1].clientY - touches[0].clientY));
+        var newScale = Math.max(1, Math.min(maxScale, scale * distance / touchGesture.distance));
+        offset = center - (touchGesture.x - offset) * newScale / scale;
+        scale = newScale;
+        touchGesture.x = center;
+        touchGesture.distance = distance;
+        updateViewport();
+      } else if (touches.length === 1 && touchGesture.kind === "pan" && touchGesture.id === touches[0].identifier) {
+        var touch = touches[0];
+        var dx = touch.clientX - touchGesture.clientX, dy = touch.clientY - touchGesture.clientY;
+        if (!touchGesture.moved) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return;
+          if (Math.abs(dy) >= Math.abs(dx)) {
+            touchGesture.kind = "scroll";
+            hideTrendTooltip();
+            return;
+          }
+          touchGesture.moved = true;
+          chart.classList.add("trend-dragging");
+        }
+        var pointer = pointerPosition(touch);
+        if (!pointer) return;
+        if (event.cancelable) event.preventDefault();
+        offset = touchGesture.offset + pointer.x - touchGesture.x;
+        updateViewport();
+      }
+    }, { passive: false });
+    chart.addEventListener("touchend", function (event) {
+      if (!touchGesture) return;
+      var touches = chartTouches(event);
+      if (touches.length >= 2) {
+        if (touchGesture.kind === "pinch") beginTouchPinch(touches, true);
+        return;
+      }
+      if (touches.length === 1) {
+        if (touchGesture.kind === "pinch") beginTouchPan(touches[0], true);
+        return;
+      }
+      var tap = touchGesture.kind === "pan" && !touchGesture.moved;
+      touchGesture = null;
+      chart.classList.remove("trend-dragging");
+      if (tap && event.changedTouches.length) showTrendTooltip(event.changedTouches[0]);
+      else hideTrendTooltip();
+    });
+    chart.addEventListener("touchcancel", function () {
+      touchGesture = null;
+      chart.classList.remove("trend-dragging");
+      hideTrendTooltip();
+    });
+
     chart.addEventListener("wheel", function (event) {
       if (!zoomable) return;
       var pointer = pointerPosition(event);
@@ -408,6 +501,7 @@
       updateViewport();
     }, { passive: false });
     chart.addEventListener("pointerdown", function (event) {
+      if (event.pointerType === "touch") return;
       if (!zoomable || event.button !== 0) return;
       var pointer = pointerPosition(event);
       if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
@@ -416,6 +510,7 @@
       chart.classList.add("trend-dragging");
     });
     chart.addEventListener("pointermove", function (event) {
+      if (event.pointerType === "touch") return;
       if (drag && drag.id === event.pointerId) {
         var pointer = pointerPosition(event);
         if (pointer) { offset = drag.offset + pointer.x - drag.x; updateViewport(); }
@@ -439,8 +534,8 @@
       if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
       scale = 1; offset = 0; updateViewport();
     });
-    chart.addEventListener("pointerleave", hideTrendTooltip);
-    chart.addEventListener("pointercancel", hideTrendTooltip);
+    chart.addEventListener("pointerleave", function (event) { if (event.pointerType !== "touch") hideTrendTooltip(); });
+    chart.addEventListener("pointercancel", function (event) { if (event.pointerType !== "touch") hideTrendTooltip(); });
   });
 
   document.addEventListener("click", function (event) {

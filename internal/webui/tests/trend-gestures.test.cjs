@@ -1,0 +1,171 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const script = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+
+function element(dataset = {}) {
+  const attributes = new Map();
+  const classes = new Set();
+  const listeners = new Map();
+  return {
+    dataset, attributes, listeners, style: {}, hidden: false, textContent: '',
+    classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
+    setAttribute(name, value) { attributes.set(name, String(value)); if (name === 'hidden') this.hidden = true; },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    removeAttribute(name) { attributes.delete(name); if (name === 'hidden') this.hidden = false; },
+    toggleAttribute(name, enabled) { if (enabled) this.setAttribute(name, ''); else this.removeAttribute(name); },
+    addEventListener(name, callback, options) { if (!listeners.has(name)) listeners.set(name, []); listeners.get(name).push({ callback, options }); },
+    dispatch(name, fields = {}) {
+      const event = { cancelable: true, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...fields };
+      for (const entry of listeners.get(name) ?? []) entry.callback(event);
+      return event;
+    },
+    querySelector() { return null; }, querySelectorAll() { return []; },
+    getBoundingClientRect() { return { left: 0, top: 0, width: 80, height: 24 }; },
+  };
+}
+
+function fixture(count, width, health = false) {
+  const chart = element();
+  const svg = element();
+  const plot = element();
+  const tooltip = element();
+  tooltip.hidden = true;
+  tooltip.getBoundingClientRect = () => ({ width: 230, height: 100 });
+  const tooltipDate = element(), requestValue = element(), tokenValue = element();
+  const healthValues = ['successRate', 'failureRate', 'averageTotal'].map((trendValue) => element({ trendValue }));
+  tooltip.querySelector = (selector) => ({ '[data-trend-date]': tooltipDate, '[data-trend-requests]': requestValue, '[data-trend-tokens]': tokenValue })[selector] ?? null;
+  tooltip.querySelectorAll = (selector) => selector === '[data-trend-value]' && health ? healthValues : [];
+  const points = Array.from({ length: count }, (_, i) => {
+    const x = Math.round(100 + i * 800 / Math.max(1, count - 1));
+    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', successRate: '95%', failureRate: '5%', averageTotal: '4 s' });
+    point.dots = Array.from({ length: health ? 2 : 1 }, () => {
+      const dot = element(); dot.setAttribute('cx', x); return dot;
+    });
+    point.querySelectorAll = (selector) => selector === '.trend-dot' ? point.dots : [];
+    return point;
+  });
+  const labels = points.map((point, i) => element({ x: point.dataset.x, tick: i }));
+  const selection = { svg, '[data-trend-tooltip]': tooltip, '.trend-cursor': element(), '[data-trend-plot]': plot, '[data-trend-clip]': element(), '[data-trend-clip-target]': element() };
+  chart.clientWidth = width; chart.clientHeight = 260;
+  chart.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 260 });
+  chart.querySelector = (selector) => selection[selector] ?? null;
+  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels })[selector] ?? [];
+  chart.contains = (target) => target === svg || target === chart;
+  chart.setPointerCapture = () => {};
+  chart.hasPointerCapture = () => false;
+  const matrix = { a: width / 1000, b: 0, c: 0, d: 1, e: 0, f: 0, inverse() { return { a: 1000 / width, b: 0, c: 0, d: 1, e: 0, f: 0 }; } };
+  svg.getScreenCTM = () => matrix;
+  svg.getBoundingClientRect = () => ({ width, height: 260 });
+  svg.createSVGPoint = () => ({ x: 0, y: 0, matrixTransform(m) { return { x: this.x * m.a + this.y * m.c + m.e, y: this.x * m.b + this.y * m.d + m.f }; } });
+  const document = { querySelector: () => null, querySelectorAll: (selector) => selector === '[data-usage-trend], [data-health-trend]' ? [chart] : [], addEventListener() {} };
+  vm.runInNewContext(script, { document, window: { addEventListener() {} } }, { filename: 'app.js' });
+  function touch(id, x, y = 100) { return { identifier: id, clientX: x * width / 1000, clientY: y, target: svg }; }
+  function send(name, touches, changedTouches = []) { return chart.dispatch(name, { touches, changedTouches }); }
+  function viewport() {
+    const transform = plot.getAttribute('transform');
+    if (!transform) return { scale: 1, offset: 0 };
+    const values = transform.match(/matrix\(([^)]+)\)/)[1].split(' ').map(Number);
+    return { scale: values[0], offset: values[4] };
+  }
+  function visiblePoints() { const view = viewport(); return points.filter((p) => p.dataset.x * view.scale + view.offset >= 99.999 && p.dataset.x * view.scale + view.offset <= 900.001); }
+  function pinch() {
+    send('touchstart', [touch(1, 400)]);
+    return send('touchstart', [touch(1, 400), touch(2, 600)]);
+  }
+  return { chart, tooltip, tooltipDate, healthValues, points, touch, send, viewport, visiblePoints, pinch };
+}
+
+for (const health of [false, true]) {
+  for (const width of [400, 1000]) {
+    const name = `${health ? 'health' : 'usage'} at ${width}px`;
+    test(`${name}: pinch zoom, pan, point limits and cancellation`, () => {
+      const f = fixture(60, width, health);
+      assert.equal(f.chart.listeners.get('touchmove')[0].options.passive, false);
+      assert.ok(f.pinch().defaultPrevented);
+      assert.ok(f.send('touchmove', [f.touch(1, 200), f.touch(2, 800)]).defaultPrevented);
+      assert.equal(f.viewport().scale, 3);
+      assert.ok(f.visiblePoints().length <= 36);
+      assert.ok(f.visiblePoints().every((p) => p.dots.every((dot) => !dot.hidden)));
+      f.chart.dispatch('pointermove', { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 0 });
+      f.chart.dispatch('pointercancel', { pointerType: 'touch', pointerId: 1 });
+      f.send('touchmove', [f.touch(1, 300), f.touch(2, 900)]);
+      assert.equal(f.viewport().offset, -900);
+      f.send('touchend', [f.touch(1, 300)], [f.touch(2, 900)]);
+      f.send('touchmove', [f.touch(1, 350)]);
+      assert.equal(f.viewport().offset, -850);
+      f.send('touchend', [], [f.touch(1, 350)]);
+      assert.ok(!f.chart.classList.contains('trend-dragging'));
+      assert.ok(f.tooltip.hidden);
+      f.pinch();
+      f.send('touchmove', [f.touch(1, -2000), f.touch(2, 3000)]);
+      assert.ok(f.visiblePoints().length >= 12);
+      const limit = f.viewport().scale;
+      f.send('touchmove', [f.touch(1, -3000), f.touch(2, 4000)]);
+      assert.equal(f.viewport().scale, limit);
+      f.send('touchmove', [f.touch(1, 400), f.touch(2, 600)]);
+      assert.equal(f.viewport().scale, 1);
+      assert.equal(f.visiblePoints().length, 60);
+      assert.ok(f.points.every((p) => p.dots.every((dot) => dot.hidden)));
+      f.send('touchcancel', []);
+      const before = f.viewport();
+      f.send('touchmove', [f.touch(1, 100), f.touch(2, 900)]);
+      assert.deepEqual(f.viewport(), before);
+      assert.ok(!f.chart.classList.contains('trend-dragging'));
+    });
+    test(`${name}: tap values and allow vertical page scroll`, () => {
+      const f = fixture(60, width, health);
+      assert.ok(!f.send('touchstart', [f.touch(1, 500)]).defaultPrevented);
+      f.send('touchend', [], [f.touch(1, 500)]);
+      assert.ok(!f.tooltip.hidden);
+      assert.match(f.tooltipDate.textContent, /^point-/);
+      if (health) assert.deepEqual(f.healthValues.map((v) => v.textContent), ['95%', '5%', '4 s']);
+      f.send('touchstart', [f.touch(1, 500)]);
+      assert.ok(!f.send('touchmove', [f.touch(1, 501, 150)]).defaultPrevented);
+      f.send('touchend', [], [f.touch(1, 501, 150)]);
+      assert.equal(f.viewport().scale, 1);
+      assert.ok(f.tooltip.hidden);
+    });
+    test(`${name}: mouse wheel/drag still work`, () => {
+      const f = fixture(60, width, health);
+      f.chart.dispatch('wheel', { clientX: width / 2, clientY: 100, deltaY: -Math.log(2) / 0.002, deltaMode: 0 });
+      assert.equal(f.viewport().scale, 2);
+      const offset = f.viewport().offset;
+      f.chart.dispatch('pointerdown', { pointerType: 'mouse', button: 0, pointerId: 1, clientX: width / 2, clientY: 100 });
+      f.chart.dispatch('pointermove', { pointerType: 'mouse', pointerId: 1, clientX: width / 2 + width / 20, clientY: 100 });
+      assert.equal(f.viewport().offset, offset + 50);
+      f.chart.dispatch('pointerup', { pointerType: 'mouse', pointerId: 1 });
+      assert.ok(!f.chart.classList.contains('trend-dragging'));
+    });
+    test(`${name}: ignore outside touches and rebase a continuing pinch`, () => {
+      const f = fixture(60, width, health);
+      const outside = { ...f.touch(3, 500), target: {} };
+      f.send('touchstart', [outside]);
+      assert.ok(!f.send('touchstart', [f.touch(1, 400), outside]).defaultPrevented);
+      assert.ok(!f.send('touchmove', [f.touch(1, 400), outside]).defaultPrevented);
+      assert.equal(f.viewport().scale, 1);
+      f.send('touchcancel', []);
+      f.pinch();
+      f.send('touchmove', [f.touch(1, 50), f.touch(2, 950), f.touch(3, 800)]);
+      const before = f.viewport();
+      // One finger leaves while the others have moved past the plot edges.
+      f.send('touchend', [f.touch(1, 50), f.touch(3, 800)], [f.touch(2, 950)]);
+      f.send('touchmove', [f.touch(1, 50), f.touch(3, 800)]);
+      assert.deepEqual(f.viewport(), before);
+      f.send('touchcancel', []);
+      assert.ok(!f.chart.classList.contains('trend-dragging'));
+    });
+  }
+}
+
+test('12 or fewer points stay unzoomable but support tap values', () => {
+  const f = fixture(12, 400);
+  assert.ok(!f.chart.classList.contains('trend-interactive'));
+  assert.ok(!f.pinch().defaultPrevented);
+  f.send('touchmove', [f.touch(1, 100), f.touch(2, 900)]);
+  assert.equal(f.viewport().scale, 1);
+  assert.equal(f.points.length, 12);
+});
