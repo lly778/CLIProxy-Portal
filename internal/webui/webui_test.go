@@ -156,7 +156,7 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 		{"duration-upload", "#58a0e7"},
 		{"duration-wait", "#8dbded"},
 		{"duration-response", "#357dc4"},
-		{"tokens-input", "#4b9f78"},
+		{"tokens-input", "#5ab38e"},
 		{"tokens-cache", "#98d0b6"},
 		{"tokens-output", "#28764f"},
 	} {
@@ -166,8 +166,8 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 		}
 	}
 	for _, rule := range []string{
-		".trend-tooltip .tokens i { background: #4b9f78; }",
-		".trend-legend .tokens i { background: #4b9f78; border-radius: 1px; }",
+		".trend-tooltip .tokens i { background: #5ab38e; }",
+		".trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }",
 		".trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
