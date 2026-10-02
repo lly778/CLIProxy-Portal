@@ -371,7 +371,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-cursor[hidden] { display: none; }
 .trend-x-label { position: absolute; top: 94.6%; color: var(--muted); font-size: 11px; white-space: nowrap; transform: translate(-50%, -50%); pointer-events: none; }
 .trend-axis-label { position: absolute; color: var(--muted); font-size: 11px; white-space: nowrap; pointer-events: none; }
-.trend-axis-label.tokens { left: 8.8%; transform: translate(-100%, -50%); }
+.trend-axis-label.tokens { left: 8.8%; color: #5ab38e; transform: translate(-100%, -50%); }
 .trend-axis-label.requests { left: 91.4%; color: #5c83ee; transform: translateY(-50%); }
 .trend-tooltip { position: absolute; z-index: 4; width: min(230px, calc(100% - 24px)); padding: 15px 17px; color: #344054; background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 14px 32px rgba(16,24,40,.14); pointer-events: none; }
 .trend-tooltip strong { display: block; margin-bottom: 11px; color: var(--text); font-size: 14px; }
