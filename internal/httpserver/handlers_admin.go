@@ -108,12 +108,14 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		a, err = s.Keys.GlobalUsage(r.Context(), from, to, 0)
 	}
 	summary, daily, models, requests := s.usageViews(a, from, to)
+	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, userID)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, name)
 	if name == "24h" {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
+	v.HealthTrend = s.requestHealthTrend(r.Context(), daily, from, to, userID)
 	if err != nil {
 		v.Error = "全局用量暂时不可用"
 	} else if userID == "" {

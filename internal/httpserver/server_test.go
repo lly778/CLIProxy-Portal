@@ -360,6 +360,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("manual activity refresh analytics calls = %d, want %d", eventsAfterRefresh, eventsBeforeRefresh+1)
 	}
 	usagePage := getBody(t, client, portal.URL+"/usage?range=7d", http.StatusOK)
+	if !strings.Contains(usagePage, "平均耗时") || strings.Contains(usagePage, "平均延迟") || strings.Contains(usagePage, "请求健康趋势") {
+		t.Fatal("user usage must show average total duration without admin health chart")
+	}
 	if strings.Contains(usagePage, "逐请求记录") {
 		t.Fatalf("usage page still rendered request records: %s", usagePage)
 	}
@@ -731,6 +734,11 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("administrator key visibility notice was not rendered: %s", adminUserPage)
 	}
 	adminUsagePage := getBody(t, adminClient, portal.URL+"/admin/usage?range=7d", http.StatusOK)
+	for _, label := range []string{"请求健康趋势", "平均总耗时", "成功率", "失败率", "平均耗时", "按计时请求统计"} {
+		if !strings.Contains(adminUsagePage, label) {
+			t.Fatalf("admin usage missing %s", label)
+		}
+	}
 	if !strings.Contains(adminUsagePage, "按用户") || !strings.Contains(adminUsagePage, "张三") || !strings.Contains(adminUsagePage, "2.3K 请求") || !strings.Contains(adminUsagePage, "5.1M tokens") {
 		t.Fatalf("admin global usage did not show per-user statistics: %s", adminUsagePage)
 	}

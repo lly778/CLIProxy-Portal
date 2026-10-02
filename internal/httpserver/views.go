@@ -112,10 +112,10 @@ func (s *Server) usageViews(a cpamp.AnalyticsResponse, from, to time.Time) (webu
 	if a.Summary != nil {
 		x := a.Summary
 		summary = webui.UsageSummaryView{Requests: compactNumber(x.TotalCalls), Successes: compactNumber(x.SuccessCalls), Failures: compactNumber(x.FailureCalls), InputTokens: compactNumber(x.InputTokens), OutputTokens: compactNumber(x.OutputTokens), CacheTokens: compactNumber(x.CachedTokens + x.CacheReadTokens + x.CacheCreationTokens), ReasoningTokens: compactNumber(x.ReasoningTokens), TotalTokens: compactNumber(x.TotalTokens), WindowLabel: from.In(s.Cfg.TimeZone).Format("01-02") + " 至 " + to.In(s.Cfg.TimeZone).Format("01-02")}
+		summary.AverageDuration = "—"
+		summary.Latency = "—"
 		if x.AverageLatencyMS != nil {
 			summary.Latency = fmt.Sprintf("%.0f ms", *x.AverageLatencyMS)
-		} else {
-			summary.Latency = "—"
 		}
 	}
 	daily := s.usageTimeline(a, from, to)

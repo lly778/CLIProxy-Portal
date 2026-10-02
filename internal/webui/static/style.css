@@ -390,6 +390,13 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-legend i { width: 8px; height: 8px; border-radius: 50%; }
 .trend-legend .requests i { background: #5c83ee; }
 .trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }
+.trend-line.success-rate, .trend-dot.success-rate { stroke: #82bd49; }
+.trend-line.failure-rate, .trend-dot.failure-rate { stroke: #e57472; }
+.trend-dot.success-rate, .trend-legend .success-rate i, .trend-tooltip .success-rate i { fill: #82bd49; background: #82bd49; }
+.trend-dot.failure-rate, .trend-legend .failure-rate i, .trend-tooltip .failure-rate i { fill: #e57472; background: #e57472; }
+.trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }
+.trend-axis-label.health-rate { left: 8.8%; transform: translate(-100%, -50%); }
+.trend-axis-label.duration { left: 91.4%; color: #58a0e7; transform: translateY(-50%); }
 .usage-list { display: grid; gap: 16px; }
 .model-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; }
 .model-usage-chart { min-width: 0; }

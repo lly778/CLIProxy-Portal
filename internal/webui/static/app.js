@@ -209,13 +209,16 @@
     return Promise.resolve();
   }
 
-  document.querySelectorAll("[data-usage-trend]").forEach(function (chart, chartIndex) {
+  document.querySelectorAll("[data-usage-trend], [data-health-trend]").forEach(function (chart, chartIndex) {
     var svg = chart.querySelector("svg");
     var tooltip = chart.querySelector("[data-trend-tooltip]");
     var cursor = chart.querySelector(".trend-cursor");
     var points = Array.prototype.slice.call(chart.querySelectorAll("[data-trend-point]"));
-    var dots = points.map(function (point) { return point.querySelector(".trend-dot.requests"); });
-    var bars = Array.prototype.slice.call(chart.querySelectorAll(".trend-bar.tokens"));
+    var dots = [];
+    points.forEach(function (point, index) {
+      point.querySelectorAll(".trend-dot").forEach(function (dot) { dots.push({ dot: dot, index: index }); });
+    });
+    var bars = Array.prototype.slice.call(chart.querySelectorAll(".trend-bar[data-bar-x]"));
     if (!svg || !tooltip || !cursor || !points.length) return;
     var plot = chart.querySelector("[data-trend-plot]");
     var clip = chart.querySelector("[data-trend-clip]");
@@ -252,8 +255,13 @@
         if (width <= 0 || height <= 0) { bar.setAttribute("d", ""); return; }
         // Round only the two top corners, keeping both bottom corners square
         // on the baseline. Top arcs remain screen-sized during zoom.
-        var rx = Math.min(8 / xScale, width / 4), ry = Math.min(8 / yScale, height / 4);
+        var radius = bar.dataset.barRadius === undefined ? 8 : Number(bar.dataset.barRadius);
+        var rx = Math.min(radius / xScale, width / 4), ry = Math.min(radius / yScale, height / 4);
         var right = x + width, bottom = y + height;
+        if (!radius) {
+          bar.setAttribute("d", "M" + x + "," + y + " H" + right + " V" + bottom + " H" + x + " Z");
+          return;
+        }
         bar.setAttribute("d", "M" + x + "," + bottom + " V" + (y + ry) + " A" + rx + "," + ry + " 0 0 1 " + (x + rx) + "," + y + " H" + (right - rx) + " A" + rx + "," + ry + " 0 0 1 " + right + "," + (y + ry) + " V" + bottom + " Z");
       });
     }
@@ -263,9 +271,9 @@
         return isVisibleX(x);
       });
       var showSymbols = visible.filter(Boolean).length <= 36;
-      dots.forEach(function (dot, index) {
-        if (!dot) return;
-        dot.toggleAttribute("hidden", !showSymbols || !visible[index]);
+      dots.forEach(function (entry) {
+        var dot = entry.dot;
+        dot.toggleAttribute("hidden", !showSymbols || !visible[entry.index]);
         // Cancel only horizontal stretching so marker size stays unchanged.
         dot.setAttribute("transform", "translate(" + dot.getAttribute("cx") + " 0) scale(" + (1 / scale) + " 1) translate(" + (-Number(dot.getAttribute("cx"))) + " 0)");
       });
@@ -362,8 +370,13 @@
       var x = screenX(Number(nearest.dataset.x));
       var y = Math.min(Number(nearest.dataset.y), Number(nearest.dataset.tokenY));
       tooltip.querySelector("[data-trend-date]").textContent = nearest.dataset.date;
-      tooltip.querySelector("[data-trend-requests]").textContent = nearest.dataset.requests;
-      tooltip.querySelector("[data-trend-tokens]").textContent = nearest.dataset.tokens;
+      var requestsValue = tooltip.querySelector("[data-trend-requests]");
+      var tokensValue = tooltip.querySelector("[data-trend-tokens]");
+      if (requestsValue) requestsValue.textContent = nearest.dataset.requests;
+      if (tokensValue) tokensValue.textContent = nearest.dataset.tokens;
+      tooltip.querySelectorAll("[data-trend-value]").forEach(function (value) {
+        value.textContent = nearest.dataset[value.dataset.trendValue] || "—";
+      });
       cursor.setAttribute("x1", x);
       cursor.setAttribute("x2", x);
       cursor.removeAttribute("hidden");

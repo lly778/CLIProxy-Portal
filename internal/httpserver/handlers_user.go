@@ -224,6 +224,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	from, to, rangeName := s.usageRange(r)
 	a, err := s.Keys.Usage(r.Context(), u.ID, from, to, 0)
 	summary, daily, models, requests := s.usageViews(a, from, to)
+	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, u.ID)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, rangeName)
 	if rangeName == "24h" {

@@ -132,11 +132,13 @@ type UsageSummaryView struct {
 	CacheTokens     string
 	ReasoningTokens string
 	TotalTokens     string
+	AverageDuration string
 	Latency         string
 	WindowLabel     string
 }
 
 type UsagePointView struct {
+	BucketMS     int64
 	BucketHours  int
 	LabelTick    int64
 	Date         string
@@ -146,6 +148,23 @@ type UsagePointView struct {
 	TokenPercent int
 	RequestValue int64
 	TokenValue   int64
+	SuccessValue int64
+	FailureValue int64
+}
+
+type HealthTrendPointView struct {
+	UsageTrendPointView
+	SuccessY, FailureY                              int
+	HasRequests, HasTiming                          bool
+	SuccessRate, FailureRate, AverageTotal, Samples string
+}
+
+type HealthTrendView struct {
+	Points                   []HealthTrendPointView
+	SuccessPath, FailurePath string
+	AxisTicks                []UsageTrendAxisTickView
+	ShowSymbols              bool
+	TimingError              string
 }
 
 type UsageTrendPointView struct {
@@ -298,6 +317,7 @@ type UsageView struct {
 	Summary          UsageSummaryView
 	Daily            []UsagePointView
 	Trend            UsageTrendView
+	HealthTrend      HealthTrendView
 	ByModel          []ModelUsageView
 	ByModelRequests  []ModelUsageView
 	ByModelTokens    []ModelUsageView

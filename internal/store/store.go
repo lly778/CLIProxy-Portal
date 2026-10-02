@@ -139,6 +139,14 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_timings_request ON gateway_request_timings(cpa_request_id,api_key_hash,started_at_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_timings_user ON gateway_request_timings(user_id,started_at_ms DESC)`,
+		`CREATE TABLE IF NOT EXISTS gateway_timing_samples (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			started_at_ms INTEGER NOT NULL,
+			total_ms INTEGER NOT NULL CHECK(total_ms >= 0)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_timing_samples_time ON gateway_timing_samples(started_at_ms)`,
+		`CREATE INDEX IF NOT EXISTS idx_gateway_timing_samples_user ON gateway_timing_samples(user_id,started_at_ms)`,
 		`CREATE TABLE IF NOT EXISTS gateway_capture_messages (
 			capture_id TEXT NOT NULL REFERENCES gateway_captures(id) ON DELETE CASCADE,
 			side TEXT NOT NULL CHECK(side IN ('request','response')),
@@ -222,6 +230,11 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
+	}
+	// Seed retained timings once. Subsequent starts cannot double-count samples.
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO gateway_timing_samples(id,user_id,started_at_ms,total_ms)
+		SELECT id,user_id,started_at_ms,total_ms FROM gateway_request_timings WHERE total_ms>=0`); err != nil {
+		return fmt.Errorf("seed gateway timing samples: %w", err)
 	}
 	var rememberColumn int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='remember'`).Scan(&rememberColumn); err != nil {

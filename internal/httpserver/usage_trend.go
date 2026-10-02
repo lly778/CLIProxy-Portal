@@ -82,6 +82,8 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 			bucket := at.UnixMilli()
 			value := grouped[bucket]
 			value.Calls += point.Calls
+			value.Success += point.Success
+			value.Failure += point.Failure
 			value.TotalTokens += point.TotalTokens
 			grouped[bucket] = value
 		}
@@ -113,7 +115,7 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 			labelTick = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, time.UTC).Unix() / 3600
 			labelTick /= int64(bucketHours)
 		}
-		points = append(points, webui.UsagePointView{BucketHours: bucketHours, LabelTick: labelTick, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
+		points = append(points, webui.UsagePointView{BucketMS: point.BucketMS, BucketHours: bucketHours, LabelTick: labelTick, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens, SuccessValue: point.Success, FailureValue: point.Failure})
 	}
 	return points
 }

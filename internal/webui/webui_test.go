@@ -17,6 +17,37 @@ func TestRendererParsesAllPages(t *testing.T) {
 	}
 }
 
+func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageUsage, UsageView{IsAdmin: true, Summary: UsageSummaryView{AverageDuration: "4000 ms"}, HealthTrend: HealthTrendView{Points: []HealthTrendPointView{{HasRequests: true, HasTiming: true}}}}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	start := strings.Index(html, "<h2>请求健康趋势</h2>")
+	if start < 0 {
+		t.Fatal("health trend heading missing")
+	}
+	chart := strings.Index(html, `data-health-trend`)
+	legend := strings.Index(html[start:], `class="trend-legend"`) + start
+	if start < 0 || chart < start || legend < start || legend > chart {
+		t.Fatal("health legend must be in header before chart")
+	}
+	if strings.Count(html, `class="usage-trend-meta"`) != 2 {
+		t.Fatal("trend headers must share the same layout")
+	}
+	caption := "总耗时仅统计已记录的门户请求"
+	if at := strings.Index(html, caption); at < start || at > chart || strings.Count(html, caption) != 1 {
+		t.Fatal("timing description must appear only below the heading, not in the tooltip")
+	}
+	if !strings.Contains(html, "平均耗时") || strings.Contains(html, "平均延迟") || !strings.Contains(html, "4000 ms") {
+		t.Fatal("duration metric must use total timing")
+	}
+}
+
 func TestBrandFaviconIsEmbeddedAndLinked(t *testing.T) {
 	icon, err := fs.ReadFile(Assets(), "favicon.svg")
 	if err != nil {
