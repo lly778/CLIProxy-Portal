@@ -23,24 +23,26 @@ import (
 )
 
 type Keys struct {
-	Store           *store.Store
-	CPAMP           cpamp.API
-	Now             func() time.Time
-	CacheTTL        time.Duration
-	QuotaCacheTTL   time.Duration
-	cacheMu         sync.Mutex
-	cache           map[string]analyticsCache
-	quota           quotaPoolCache
-	refreshMu       sync.Mutex
-	refresh         QuotaRefreshStatus
-	refreshedQuota  map[string][]cpamp.CodexQuotaWindow
-	quotaFetchMu    sync.Mutex
-	modelConfigMu   sync.Mutex
-	presetMu        sync.Mutex
-	reconcileMu     sync.Mutex
-	lastSeenSyncAt  time.Time
-	RefreshCooldown time.Duration
-	RefreshTimeout  time.Duration
+	Store             *store.Store
+	CPAMP             cpamp.API
+	Now               func() time.Time
+	CacheTTL          time.Duration
+	QuotaCacheTTL     time.Duration
+	cacheMu           sync.Mutex
+	cache             map[string]analyticsCache
+	quota             quotaPoolCache
+	refreshMu         sync.Mutex
+	refresh           QuotaRefreshStatus
+	refreshedQuota    map[string][]cpamp.CodexQuotaWindow
+	quotaFetchMu      sync.Mutex
+	modelConfigMu     sync.Mutex
+	presetMu          sync.Mutex
+	reconcileMu       sync.Mutex
+	reconcileStatusMu sync.RWMutex
+	reconcileStatus   ReconcileStatus
+	lastSeenSyncAt    time.Time
+	RefreshCooldown   time.Duration
+	RefreshTimeout    time.Duration
 }
 
 type analyticsCache struct {
@@ -1750,9 +1752,26 @@ func (k *Keys) Models(ctx context.Context) ([]cpamp.Model, error) {
 	return k.VisibleModels(ctx, result.Data)
 }
 
-func (k *Keys) Reconcile(ctx context.Context) error {
+// ReconcileStatus records the last completed check, including background checks.
+type ReconcileStatus struct {
+	CheckedAt time.Time
+	Retrying  bool
+}
+
+func (k *Keys) LastReconcileStatus() ReconcileStatus {
+	k.reconcileStatusMu.RLock()
+	defer k.reconcileStatusMu.RUnlock()
+	return k.reconcileStatus
+}
+
+func (k *Keys) Reconcile(ctx context.Context) (resultErr error) {
 	k.reconcileMu.Lock()
 	defer k.reconcileMu.Unlock()
+	defer func() {
+		k.reconcileStatusMu.Lock()
+		k.reconcileStatus = ReconcileStatus{CheckedAt: k.Now().UTC(), Retrying: resultErr != nil}
+		k.reconcileStatusMu.Unlock()
+	}()
 	current, err := k.CPAMP.ListAPIKeys(ctx)
 	if err != nil {
 		return err

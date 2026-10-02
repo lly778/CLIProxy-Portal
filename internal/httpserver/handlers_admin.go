@@ -30,7 +30,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		n, _ := s.Store.CountUsers(r.Context(), x.status)
 		v.Counts = append(v.Counts, webui.CountView{Label: x.label, Value: strconv.Itoa(n)})
 	}
-	v.Health = []webui.HealthCheckView{s.databaseHealthView(r.Context()), s.cpampDatabaseHealthView(r.Context()), s.captureHealthView(), s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context())}
+	v.Health = []webui.HealthCheckView{s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context()), s.keyReconcileHealthView()}
 	if usageErr != nil {
 		v.Error = "全局用量暂时不可用"
 	} else {

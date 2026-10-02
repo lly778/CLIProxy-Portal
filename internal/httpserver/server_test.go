@@ -375,6 +375,20 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminLogin := getBody(t, adminClient, portal.URL+"/login", http.StatusOK)
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
+	adminDashboard := getBody(t, adminClient, portal.URL+"/admin", http.StatusOK)
+	for _, label := range []string{"模型网关", "CPA 上游", "Key 对账"} {
+		if !strings.Contains(adminDashboard, label) {
+			t.Fatalf("admin dashboard missing component %q", label)
+		}
+	}
+	for _, label := range []string{"门户 SQLite", "CPAMP SQLite", "交互记录存储"} {
+		if strings.Contains(adminDashboard, label) {
+			t.Fatalf("admin dashboard still shows storage component %q", label)
+		}
+	}
+	if got := strings.Count(adminDashboard, `class="health-row"`); got != 3 {
+		t.Fatalf("admin dashboard rendered %d health rows, want 3", got)
+	}
 	adminRequestsPage := getBody(t, adminClient, portal.URL+"/admin/requests", http.StatusOK)
 	if !strings.Contains(adminRequestsPage, "全局日志") || strings.Contains(adminRequestsPage, "全局请求日志") || !strings.Contains(adminRequestsPage, "最近 100 条") || !strings.Contains(adminRequestsPage, "张三") || !strings.Contains(adminRequestsPage, modelRoute) {
 		t.Fatalf("admin global request page missing linked request: %s", adminRequestsPage)

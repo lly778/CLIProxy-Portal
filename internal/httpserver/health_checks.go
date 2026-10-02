@@ -22,6 +22,21 @@ type databaseSpace struct {
 	shm  int64
 }
 
+func (s *Server) keyReconcileHealthView() webui.HealthCheckView {
+	status := s.Keys.LastReconcileStatus()
+	v := webui.HealthCheckView{Component: "Key 对账", Status: "warning", StatusLabel: "未检查"}
+	if status.CheckedAt.IsZero() {
+		return v
+	}
+	v.CheckedAt = s.formatTime(status.CheckedAt)
+	if status.Retrying {
+		v.StatusLabel = "正在重试"
+	} else {
+		v.Status, v.StatusLabel = "healthy", "正常"
+	}
+	return v
+}
+
 func (s databaseSpace) total() int64 { return s.main + s.wal + s.shm }
 
 func readDatabaseSpace(path string) (databaseSpace, error) {

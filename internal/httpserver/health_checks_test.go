@@ -1,7 +1,9 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +18,43 @@ import (
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
 )
+
+type healthReconcileCPAMP struct {
+	cpamp.API
+	err error
+}
+
+func (f *healthReconcileCPAMP) ListAPIKeys(context.Context) ([]string, error) {
+	return nil, f.err
+}
+
+func TestKeyReconcileHealthView(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	fake := &healthReconcileCPAMP{}
+	s := &Server{Cfg: config.Config{TimeZone: time.UTC}, Keys: service.NewKeys(db, fake)}
+	if v := s.keyReconcileHealthView(); v.Component != "Key 对账" || v.Status != "warning" || v.StatusLabel != "未检查" {
+		t.Fatalf("unchecked reconcile view = %+v", v)
+	}
+	for _, tc := range []struct {
+		failed        bool
+		status, label string
+	}{
+		{false, "healthy", "正常"}, {true, "warning", "正在重试"}, {false, "healthy", "正常"},
+	} {
+		fake.err = nil
+		if tc.failed {
+			fake.err = errors.New("upstream unavailable")
+		}
+		_ = s.Keys.Reconcile(t.Context())
+		if v := s.keyReconcileHealthView(); v.Status != tc.status || v.StatusLabel != tc.label || v.CheckedAt == "" {
+			t.Fatalf("reconcile view = %+v, want %s/%s", v, tc.status, tc.label)
+		}
+	}
+}
 
 func TestReadDatabaseSpace(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "portal.db")
