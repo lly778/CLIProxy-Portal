@@ -367,8 +367,13 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-line { fill: none; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .trend-line.requests, .trend-dot.requests { stroke: #6595ee; }
 .trend-line.tokens, .trend-dot.tokens { stroke: #5ab39e; }
+.trend-line.requests { stroke-width: 3.5; }
+.trend-line.tokens { stroke-width: 2.5; stroke-dasharray: 7 5; }
 .trend-dot { fill: var(--surface); stroke-width: 3; vector-effect: non-scaling-stroke; }
-.trend-dot:hover { r: 6; }
+.trend-dot.requests:hover { r: 6; }
+.trend-dot.tokens { stroke-width: 2; }
+.trend-dot.tokens:hover { stroke-width: 3; }
+.usage-trend-scales .tokens::before, .trend-tooltip .tokens i { border-radius: 1px; }
 .trend-cursor { stroke: #8793a6; stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
 .trend-x-label { fill: var(--muted); font-size: 11px; }
 .trend-tooltip { position: absolute; z-index: 4; width: min(230px, calc(100% - 24px)); padding: 15px 17px; color: #344054; background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 14px 32px rgba(16,24,40,.14); pointer-events: none; }
@@ -381,9 +386,12 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-tooltip b { color: var(--text); font-size: 12px; }
 .trend-legend { display: flex; justify-content: center; gap: 20px; align-items: center; min-height: 28px; color: var(--muted); font-size: 11px; }
 .trend-legend > span { display: inline-flex; gap: 7px; align-items: center; font-weight: 650; }
-.trend-legend i { width: 8px; height: 8px; border-radius: 50%; }
-.trend-legend .requests i { background: #6595ee; }
-.trend-legend .tokens i { background: #5ab39e; }
+.trend-legend i { position: relative; width: 24px; height: 0; border-top: 3px solid currentColor; }
+.trend-legend i::after { position: absolute; top: -5px; left: 8px; width: 8px; height: 8px; border: 2px solid currentColor; background: var(--surface); content: ""; }
+.trend-legend .requests i { color: #6595ee; }
+.trend-legend .requests i::after { border-radius: 50%; }
+.trend-legend .tokens i { color: #5ab39e; border-top-style: dashed; }
+.trend-legend .tokens i::after { border-radius: 1px; }
 .trend-legend small { margin-left: 8px; font-size: 10px; }
 .usage-list { display: grid; gap: 16px; }
 .model-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; }
