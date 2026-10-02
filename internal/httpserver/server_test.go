@@ -157,6 +157,10 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			if req.Include.Summary && req.Include.Timeline && req.Include.ModelStats {
 				lastUsageAnalytics = req
 			}
+			if req.Include.Timeline {
+				response["granularity"] = req.Include.Granularity
+				response["timeline"] = []cpamp.UsageTimelinePoint{{BucketMS: time.UnixMilli(req.ToMS).Add(-time.Hour).Truncate(time.Hour).UnixMilli(), Calls: 12, TotalTokens: 1234}}
+			}
 			if req.Include.APIKeyStats {
 				lastSeenAnalyticsCalls++
 				stats := make([]map[string]any, 0, len(keys))
@@ -675,6 +679,14 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	}
 	getBody(t, adminClient, portal.URL+"/admin/admins", http.StatusNotFound)
 	adminUserPage := getBody(t, adminClient, portal.URL+"/admin/users/"+u.ID, http.StatusOK)
+	for _, marker := range []string{`data-usage-trend`, `class="trend-bar tokens"`, `class="trend-line requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`} {
+		if !strings.Contains(adminUserPage, marker) {
+			t.Fatalf("admin user detail missing shared usage chart marker %q", marker)
+		}
+	}
+	if strings.Contains(adminUserPage, `class="bar-chart`) || strings.Contains(adminUserPage, "请求峰值") {
+		t.Fatal("admin user detail still uses the old chart or peak summary")
+	}
 	if !strings.Contains(adminUserPage, "最近 100 条模型请求") || !strings.Contains(adminUserPage, modelRoute) || strings.Contains(adminUserPage, "最近操作") {
 		t.Fatalf("admin user detail did not show model request records: %s", adminUserPage)
 	}

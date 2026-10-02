@@ -80,7 +80,7 @@ func NewRenderer() (*Renderer, error) {
 			"join":              strings.Join,
 			"statusClass":       statusClass,
 			"statusLabel":       statusLabel,
-		}).ParseFS(assets, "templates/base.html", "templates/quota-pool.html", "templates/"+page+".html")
+		}).ParseFS(assets, "templates/base.html", "templates/quota-pool.html", "templates/usage-trend.html", "templates/"+page+".html")
 		if err != nil {
 			return nil, fmt.Errorf("parse template %s: %w", page, err)
 		}

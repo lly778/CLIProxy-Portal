@@ -1,0 +1,19 @@
+{{define "usage-trend-legend"}}<div class="trend-legend"><span class="requests"><i></i>请求数</span><span class="tokens"><i></i>Token</span></div>{{end}}
+{{define "usage-trend-chart"}}
+{{if .Points}}
+<div class="usage-line-chart" data-usage-trend>
+  <svg viewBox="0 0 1000 260" preserveAspectRatio="none" role="img" aria-label="Token 柱状图（左轴）与请求数平滑曲线（右轴）">
+    {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
+    <path class="trend-area requests" d="{{.RequestAreaPath}}"></path>
+    {{range .Points}}<rect class="trend-bar tokens" x="{{.BarX}}" y="{{.TokenY}}" width="{{.BarWidth}}" height="{{.BarHeight}}" rx="3"></rect>{{end}}
+    <path class="trend-line requests" d="{{.RequestPath}}"></path>
+    {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}"><circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"></circle></g>{{end}}
+    <line class="trend-cursor" x1="0" y1="28" x2="0" y2="218" hidden></line>
+  </svg>
+  {{range .AxisTicks}}<span class="trend-axis-label tokens" style="top:calc({{.Y}} * 100% / 260)">{{.Tokens}}</span><span class="trend-axis-label requests" style="top:calc({{.Y}} * 100% / 260)">{{.Requests}}</span>{{end}}
+  {{range .Points}}{{if .ShowLabel}}<span class="trend-x-label" data-trend-label style="left:calc({{.X}} * .1%)">{{.Date}}</span>{{end}}{{end}}
+  <div class="trend-tooltip" data-trend-tooltip hidden><strong data-trend-date></strong><div><span class="requests"><i></i>请求数</span><b data-trend-requests></b></div><div><span class="tokens"><i></i>总 Token</span><b data-trend-tokens></b></div></div>
+</div>
+<p class="trend-help muted small">在图表上移动鼠标可查看详细数值</p>
+{{else}}<div class="empty-state compact"><p>暂无统计数据。</p></div>{{end}}
+{{end}}

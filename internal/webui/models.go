@@ -434,6 +434,7 @@ type AdminUserDetailView struct {
 	StatusCard     StatusCardView
 	Usage          UsageSummaryView
 	Daily          []UsagePointView
+	Trend          UsageTrendView
 	ByModel        []ModelUsageView
 	Requests       []RequestView
 	CanApprove     bool

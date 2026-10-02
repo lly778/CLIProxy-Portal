@@ -308,21 +308,33 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 		MaxTokens:        "4,567",
 		GranularityLabel: "按小时",
 	}}
-	var out bytes.Buffer
-	if err := r.Execute(&out, PageUsage, view); err != nil {
-		t.Fatal(err)
-	}
-	got := out.String()
-	for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, "请求峰值 12", "Token 峰值 4,567", "按小时", "data-trend-tooltip", `data-requests="12"`} {
-		if !strings.Contains(got, want) {
-			t.Errorf("usage trend output does not contain %q", want)
-		}
-	}
-	if strings.Contains(got, "预估成本") {
-		t.Fatal("usage trend unexpectedly renders cost")
-	}
-	if strings.Contains(got, `class="trend-line tokens"`) {
-		t.Fatal("Token must render as bars, not a second curve")
+	for _, page := range []struct {
+		name string
+		view any
+	}{
+		{PageUsage, view},
+		{PageAdminUser, AdminUserDetailView{Target: UserView{ID: "test-user"}, Trend: view.Trend}},
+	} {
+		t.Run(page.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := r.Execute(&out, page.name, page.view); err != nil {
+				t.Fatal(err)
+			}
+			got := out.String()
+			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `class="trend-legend"`, "data-trend-tooltip", `data-requests="12"`, "请求数与总 Token 在同一时间范围内联动展示。"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("usage trend output does not contain %q", want)
+				}
+			}
+			for _, unwanted := range []string{"usage-trend-scales", "trend-granularity", "请求峰值", "Token 峰值", "每 6 小时", "最近 24 小时按小时", "预估成本", `class="trend-line tokens"`, `class="bar-chart`} {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("usage trend unexpectedly renders removed content %q", unwanted)
+				}
+			}
+			if page.name == PageAdminUser && !strings.Contains(got, `href="/admin/usage?user=test-user&amp;range=7d"`) {
+				t.Fatal("user detail chart lost its detailed usage link")
+			}
+		})
 	}
 }
 
