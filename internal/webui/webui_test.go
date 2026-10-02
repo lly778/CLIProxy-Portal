@@ -78,6 +78,30 @@ func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
 	}
 }
 
+func TestUserManagementTableOmitsAvatarsAndKeepsUserDetails(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUsers, AdminUsersView{Users: []UserRowView{
+		{User: UserView{ID: "u1", Name: "测试用户", Phone: "13800138000", Initials: "头像缩写", Role: "admin"}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, unwanted := range []string{`class="avatar small-avatar"`, "头像缩写"} {
+		if strings.Contains(html, unwanted) {
+			t.Fatalf("user list must not display an avatar: %s", unwanted)
+		}
+	}
+	for _, want := range []string{"测试用户", "13800138000", `class="badge role-admin"`, `href="/admin/users/u1"`, `class="user-cell"`, `class="user-name-line"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("user details or centered layout removed: %s", want)
+		}
+	}
+}
+
 func TestUserManagementTableContentsAreCentered(t *testing.T) {
 	css, err := fs.ReadFile(Assets(), "style.css")
 	if err != nil {
