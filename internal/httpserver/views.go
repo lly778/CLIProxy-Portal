@@ -422,11 +422,14 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		requestY := bottom - int(float64(point.RequestValue)/float64(requestScale)*float64(bottom-top))
 		tokenY := bottom - int(float64(point.TokenValue)/float64(tokenScale)*float64(bottom-top))
 		view := webui.UsageTrendPointView{X: x, LabelTick: ticks[i], RequestY: requestY, TokenY: tokenY, BarX: x - barWidth/2, BarWidth: barWidth, BarHeight: bottom - tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: ticks[i]%labelStep == 0}
-		view.InputTokens, view.CacheTokens, view.OutputTokens, view.ReasoningTokens = "—", "—", "—", "—"
+		view.InputTokens, view.CacheTokens, view.OutputTokens = "—", "—", "—"
 		if point.HasTokenBreakdown && point.InputTokenValue >= 0 && point.CacheTokenValue >= 0 && point.OutputTokenValue >= 0 && point.ReasoningTokenValue >= 0 && point.InputTokenValue+point.CacheTokenValue+point.OutputTokenValue+point.ReasoningTokenValue == point.TokenValue {
 			view.HasTokenBreakdown = true
-			view.InputTokens, view.CacheTokens, view.OutputTokens, view.ReasoningTokens = compactNumber(point.InputTokenValue), compactNumber(point.CacheTokenValue), compactNumber(point.OutputTokenValue), compactNumber(point.ReasoningTokenValue)
-			view.TokenSegments = stackedTrendBars(view, []string{"tokens-input", "tokens-cache", "tokens-output", "tokens-reasoning"}, []int64{point.InputTokenValue, point.CacheTokenValue, point.OutputTokenValue, point.ReasoningTokenValue})
+			// Reasoning is part of output again in the three-part display;
+			// cache remains split from input so all three sum to the total.
+			output := point.OutputTokenValue + point.ReasoningTokenValue
+			view.InputTokens, view.CacheTokens, view.OutputTokens = compactNumber(point.InputTokenValue), compactNumber(point.CacheTokenValue), compactNumber(output)
+			view.TokenSegments = stackedTrendBars(view, []string{"tokens-input", "tokens-cache", "tokens-output"}, []int64{point.InputTokenValue, point.CacheTokenValue, output})
 		}
 		trend.Points = append(trend.Points, view)
 	}

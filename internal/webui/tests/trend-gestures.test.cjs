@@ -41,8 +41,7 @@ function fixture(count, width, health = false, options = {}) {
   ] : [
     element({ barX: 496, barY: 198, barWidth: 8, barHeight: 20, barSquare: 'true' }),
     element({ barX: 496, barY: 148, barWidth: 8, barHeight: 50, barSquare: 'true' }),
-    element({ barX: 496, barY: 128, barWidth: 8, barHeight: 20, barSquare: 'true' }),
-    element({ barX: 496, barY: 118, barWidth: 8, barHeight: 10, barSquare: 'false' }),
+    element({ barX: 496, barY: 118, barWidth: 8, barHeight: 30, barSquare: 'false' }),
   ];
   if (options.thinTop) {
     const top = bars.at(-1), below = bars.at(-2);
@@ -59,12 +58,12 @@ function fixture(count, width, health = false, options = {}) {
   tooltip.getBoundingClientRect = () => ({ width: 230, height: 100 });
   const tooltipDate = element(), requestValue = element(), tokenValue = element();
   const healthValues = ['successRate', 'failureRate', 'averageTotal', 'averageUpload', 'averageWait', 'averageResponse'].map((trendValue) => element({ trendValue }));
-  const tokenValues = ['inputTokens', 'cacheTokens', 'outputTokens', 'reasoningTokens'].map((trendValue) => element({ trendValue }));
+  const tokenValues = ['inputTokens', 'cacheTokens', 'outputTokens'].map((trendValue) => element({ trendValue }));
   tooltip.querySelector = (selector) => ({ '[data-trend-date]': tooltipDate, '[data-trend-requests]': requestValue, '[data-trend-tokens]': tokenValue })[selector] ?? null;
   tooltip.querySelectorAll = (selector) => selector === '[data-trend-value]' ? (health ? healthValues : tokenValues) : [];
   const points = Array.from({ length: count }, (_, i) => {
     const x = Math.round(100 + i * 800 / Math.max(1, count - 1));
-    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', inputTokens: '200', cacheTokens: '500', outputTokens: '200', reasoningTokens: '100', successRate: '95%', failureRate: '5%', averageTotal: '4 s', averageUpload: '500 ms', averageWait: '1.5 s', averageResponse: '2 s' });
+    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', inputTokens: '200', cacheTokens: '500', outputTokens: '300', successRate: '95%', failureRate: '5%', averageTotal: '4 s', averageUpload: '500 ms', averageWait: '1.5 s', averageResponse: '2 s' });
     point.dots = Array.from({ length: health ? 2 : 1 }, () => {
       const dot = element(); dot.setAttribute('cx', x); return dot;
     });
@@ -161,7 +160,7 @@ for (const health of [false, true]) {
       assert.ok(!f.tooltip.hidden);
       assert.match(f.tooltipDate.textContent, /^point-/);
       if (health) assert.deepEqual(f.healthValues.map((v) => v.textContent), ['95%', '5%', '4 s', '500 ms', '1.5 s', '2 s']);
-      else assert.deepEqual(f.tokenValues.map((v) => v.textContent), ['200', '500', '200', '100']);
+      else assert.deepEqual(f.tokenValues.map((v) => v.textContent), ['200', '500', '300']);
       f.send('touchstart', [f.touch(1, 500)]);
       assert.ok(!f.send('touchmove', [f.touch(1, 501, 150)]).defaultPrevented);
       f.send('touchend', [], [f.touch(1, 501, 150)]);
@@ -237,18 +236,22 @@ for (const health of [false, true]) {
   });
 }
 
-test('Token greens alternate dark/light between every adjacent stack segment', () => {
+test('three Token greens are dark/light/dark with a similar lightness range to the blue timing stages', () => {
   const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
   function luminance(color) {
     const rgb = color.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16) / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
     return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
   }
   function color(part) { return css.match(new RegExp(`\\.trend-bar\\.tokens-${part},[^\\n]+fill: (#[\\da-f]{6});`))[1]; }
-  for (const [one, two] of [['input', 'cache'], ['cache', 'output'], ['output', 'reasoning']]) {
+  for (const [one, two] of [['input', 'cache'], ['cache', 'output']]) {
     const values = [luminance(color(one)), luminance(color(two))].sort((a, b) => b - a);
-    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= 2, `${one}/${two} need a substantial luminance difference`);
+    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= 1.3, `${one}/${two} need a dark/light distinction`);
   }
   assert.ok(luminance(color('input')) < luminance(color('cache')));
   assert.ok(luminance(color('cache')) > luminance(color('output')));
-  assert.ok(luminance(color('output')) < luminance(color('reasoning')));
+  assert.ok(luminance(color('cache')) < 0.6, 'cache must not return to a near-white green');
+  for (const [tokenPart, timingPart] of [['input', 'upload'], ['cache', 'wait'], ['output', 'response']]) {
+    const timingColor = css.match(new RegExp(`\\.trend-bar\\.duration-${timingPart},[^\\n]+fill: (#[\\da-f]{6});`))[1];
+    assert.ok(Math.abs(luminance(color(tokenPart)) - luminance(timingColor)) < 0.1, 'green and blue stages should have similar lightness');
+  }
 });

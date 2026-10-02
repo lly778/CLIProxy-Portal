@@ -102,7 +102,10 @@ func TestTokenStackGeometrySharesTotalHeightWidthAndTopCorners(t *testing.T) {
 		if math.Abs(bottom-float64(got.TokenY)) > 1e-9 {
 			t.Fatal("stack height differs from total")
 		}
-		if legacy.InputTokens != "—" || legacy.CacheTokens != "—" || legacy.OutputTokens != "—" || legacy.ReasoningTokens != "—" {
+		if got.OutputTokens != compactNumber(parts[2]+parts[3]) || len(got.TokenSegments) > 3 {
+			t.Fatal("three-part stack must include reasoning in output")
+		}
+		if legacy.InputTokens != "—" || legacy.CacheTokens != "—" || legacy.OutputTokens != "—" {
 			t.Fatal("unavailable parts must not show zero")
 		}
 	}

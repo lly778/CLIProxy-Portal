@@ -198,7 +198,6 @@ type UsageTrendPointView struct {
 	InputTokens       string
 	CacheTokens       string
 	OutputTokens      string
-	ReasoningTokens   string
 	TokenSegments     []TrendBarSegmentView
 }
 
