@@ -395,6 +395,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-dot.success-rate, .trend-legend .success-rate i, .trend-tooltip .success-rate i { fill: #82bd49; background: #82bd49; }
 .trend-dot.failure-rate, .trend-legend .failure-rate i, .trend-tooltip .failure-rate i { fill: #e57472; background: #e57472; }
 .trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }
+.trend-legend .duration i, .trend-tooltip .duration i { border-radius: 1px; }
 .trend-axis-label.health-rate { left: 8.8%; transform: translate(-100%, -50%); }
 .trend-axis-label.duration { left: 91.4%; color: #58a0e7; transform: translateY(-50%); }
 .usage-list { display: grid; gap: 16px; }

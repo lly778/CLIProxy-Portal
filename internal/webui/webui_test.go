@@ -27,6 +27,9 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
+	if strings.Contains(html, "data-bar-radius") {
+		t.Fatal("health bars must share the usage chart corner calculation")
+	}
 	start := strings.Index(html, "<h2>请求健康趋势</h2>")
 	if start < 0 {
 		t.Fatal("health trend heading missing")
@@ -39,7 +42,10 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	if strings.Count(html, `class="usage-trend-meta"`) != 2 {
 		t.Fatal("trend headers must share the same layout")
 	}
-	caption := "总耗时仅统计已记录的门户请求"
+	caption := "成功率、失败率与平均总耗时在同一时间范围内联动展示。"
+	if strings.Contains(html, "总耗时仅统计已记录的门户请求") {
+		t.Fatal("removed timing note must not appear in the page")
+	}
 	if at := strings.Index(html, caption); at < start || at > chart || strings.Count(html, caption) != 1 {
 		t.Fatal("timing description must appear only below the heading, not in the tooltip")
 	}

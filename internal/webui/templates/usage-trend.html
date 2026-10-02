@@ -27,7 +27,7 @@
     <defs><clipPath data-trend-clip><rect x="100" y="24" width="800" height="198"></rect></clipPath></defs>
     {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
     <g data-trend-clip-target><g data-trend-plot>
-      {{range .Points}}{{if .HasTiming}}<path class="trend-bar duration" data-bar-radius="0" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
+      {{range .Points}}{{if .HasTiming}}<path class="trend-bar duration" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
       <path class="trend-line success-rate" d="{{.SuccessPath}}"></path>
       <path class="trend-line failure-rate" d="{{.FailurePath}}"></path>
       {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-success-rate="{{.SuccessRate}}" data-failure-rate="{{.FailureRate}}" data-average-total="{{.AverageTotal}}" data-samples="{{.Samples}}">

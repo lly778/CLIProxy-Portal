@@ -11,7 +11,7 @@
   {{template "usage-trend-chart" .Trend}}
 </section>
 {{if .IsAdmin}}<section class="card usage-trend-card section-gap">
-  <div class="usage-trend-head"><div><h2>请求健康趋势</h2><p class="muted">成功率、失败率与平均总耗时在同一时间范围内联动展示；总耗时仅统计已记录的门户请求。</p></div><div class="usage-trend-meta"><span class="muted small">{{.Summary.WindowLabel}}</span>{{template "health-trend-legend"}}</div></div>
+  <div class="usage-trend-head"><div><h2>请求健康趋势</h2><p class="muted">成功率、失败率与平均总耗时在同一时间范围内联动展示。</p></div><div class="usage-trend-meta"><span class="muted small">{{.Summary.WindowLabel}}</span>{{template "health-trend-legend"}}</div></div>
   {{if .HealthTrend.TimingError}}<div class="alert warning" role="status">{{.HealthTrend.TimingError}}</div>{{end}}
   {{template "health-trend-chart" .HealthTrend}}
 </section>{{end}}

@@ -254,14 +254,12 @@
         var width = Number(bar.dataset.barWidth), height = Number(bar.dataset.barHeight);
         if (width <= 0 || height <= 0) { bar.setAttribute("d", ""); return; }
         // Round only the two top corners, keeping both bottom corners square
-        // on the baseline. Top arcs remain screen-sized during zoom.
-        var radius = bar.dataset.barRadius === undefined ? 8 : Number(bar.dataset.barRadius);
-        var rx = Math.min(radius / xScale, width / 4), ry = Math.min(radius / yScale, height / 4);
+        // on the baseline. Both charts share a flatter 4px corner. Limit the
+        // radius in screen space before converting to SVG coordinates so thin
+        // bars cannot acquire tall, stretched arcs during resize or zoom.
+        var radius = Math.min(4, width * xScale / 4, height * yScale / 4);
+        var rx = radius / xScale, ry = radius / yScale;
         var right = x + width, bottom = y + height;
-        if (!radius) {
-          bar.setAttribute("d", "M" + x + "," + y + " H" + right + " V" + bottom + " H" + x + " Z");
-          return;
-        }
         bar.setAttribute("d", "M" + x + "," + bottom + " V" + (y + ry) + " A" + rx + "," + ry + " 0 0 1 " + (x + rx) + "," + y + " H" + (right - rx) + " A" + rx + "," + ry + " 0 0 1 " + right + "," + (y + ry) + " V" + bottom + " Z");
       });
     }
