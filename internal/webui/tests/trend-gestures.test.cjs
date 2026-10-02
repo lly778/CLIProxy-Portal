@@ -245,7 +245,7 @@ test('three Token greens are dark/light/dark with a similar lightness range to t
   function color(part) { return css.match(new RegExp(`\\.trend-bar\\.tokens-${part},[^\\n]+fill: (#[\\da-f]{6});`))[1]; }
   for (const [one, two] of [['input', 'cache'], ['cache', 'output']]) {
     const values = [luminance(color(one)), luminance(color(two))].sort((a, b) => b - a);
-    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= 1.3, `${one}/${two} need a dark/light distinction`);
+    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= 1.8, `${one}/${two} need a clearer dark/light distinction`);
   }
   assert.ok(luminance(color('input')) < luminance(color('cache')));
   assert.ok(luminance(color('cache')) > luminance(color('output')));
