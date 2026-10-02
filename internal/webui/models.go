@@ -138,6 +138,7 @@ type UsageSummaryView struct {
 
 type UsagePointView struct {
 	BucketHours  int
+	LabelTick    int64
 	Date         string
 	Requests     string
 	Tokens       string
@@ -149,6 +150,7 @@ type UsagePointView struct {
 
 type UsageTrendPointView struct {
 	X         int
+	LabelTick int64
 	RequestY  int
 	TokenY    int
 	BarX      int

@@ -90,12 +90,31 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 	points := make([]webui.UsagePointView, 0, len(timeline))
 	for _, point := range timeline {
 		label := point.Label
+		var labelTick int64
 		if point.BucketMS > 0 {
-			label = time.UnixMilli(point.BucketMS).In(s.Cfg.TimeZone).Format(layout)
+			local := time.UnixMilli(point.BucketMS).In(s.Cfg.TimeZone)
+			label = local.Format(layout)
+			// Civil-time ticks anchor labels to local hours/dates without parsing
+			// yearless display strings in the browser.
+			labelTick = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, time.UTC).Unix() / 3600
+			if !hourly {
+				labelTick /= 24
+			}
 		}
-		points = append(points, webui.UsagePointView{BucketHours: bucketHours, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
+		points = append(points, webui.UsagePointView{BucketHours: bucketHours, LabelTick: labelTick, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens})
 	}
 	return points
+}
+
+// usageTrendLabelStep selects a whole-number interval for at most six labels.
+// Rounding separately selected indexes would mix adjacent time intervals.
+func usageTrendLabelStep(span int64) int64 {
+	for _, step := range []int64{1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168} {
+		if step*5 >= span {
+			return step
+		}
+	}
+	return ((span + 119) / 120) * 24
 }
 
 // smoothUsageTrendPath interpolates the measured points with a monotone cubic

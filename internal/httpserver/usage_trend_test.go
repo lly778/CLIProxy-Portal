@@ -152,25 +152,79 @@ func TestRolling24HourTimelineIncludesPreviousDayAndKeepsHourlyData(t *testing.T
 }
 
 func TestUsageTrendTimestampLabelsAreEvenlySpaced(t *testing.T) {
-	for _, count := range []int{7, 24, 25, 28, 29, 30} {
+	for _, count := range []int{1, 7, 17, 20, 24, 25, 28, 29, 30, 168} {
 		points := make([]webui.UsagePointView, count)
 		for i := range points {
 			points[i].Date = "10-02 12:00"
 		}
 		trend := usageTrend(points)
-		previous, labels := -1, 0
+		previous, labels, gap := -1, 0, 0
 		for i, point := range trend.Points {
 			if !point.ShowLabel {
 				continue
 			}
-			if previous >= 0 && i-previous < (count-1)/5 {
-				t.Fatalf("%d points: adjacent labels at %d and %d", count, previous, i)
+			if previous >= 0 {
+				if gap != 0 && i-previous != gap {
+					t.Fatalf("%d points: mixed label gaps %d and %d", count, gap, i-previous)
+				}
+				gap = i - previous
 			}
 			previous = i
 			labels++
 		}
-		if labels != 6 || !trend.Points[0].ShowLabel || !trend.Points[count-1].ShowLabel {
-			t.Fatalf("%d points: expected six labels including both boundaries", count)
+		if labels < 1 || labels > 6 {
+			t.Fatalf("%d points: expected at most six fixed-interval labels, got %d", count, labels)
+		}
+	}
+}
+
+func TestUsageTrendLabelsAlignToLocalWholeHoursAcrossMidnight(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	for _, tc := range []struct {
+		hour, count int
+		want        []string
+	}{
+		{12, 20, []string{"09-29 12:00", "09-29 16:00", "09-29 20:00", "09-30 00:00", "09-30 04:00"}},
+		{14, 17, []string{"09-29 16:00", "09-29 20:00", "09-30 00:00", "09-30 04:00"}},
+	} {
+		from := time.Date(2026, 9, 29, tc.hour, 0, 0, 0, zone)
+		a := cpamp.AnalyticsResponse{Granularity: "hour", Timeline: []cpamp.UsageTimelinePoint{{BucketMS: from.UnixMilli(), Calls: 10, TotalTokens: 1000}}}
+		points := s.usageTimeline(a, from, from.Add(time.Duration(tc.count)*time.Hour))
+		trend := usageTrend(points)
+		var labels []string
+		for _, point := range trend.Points {
+			if point.ShowLabel {
+				labels = append(labels, point.Date)
+			}
+		}
+		if strings.Join(labels, ",") != strings.Join(tc.want, ",") {
+			t.Fatalf("labels = %v, want %v", labels, tc.want)
+		}
+		if points[0].RequestValue != 10 || len(trend.Points) != tc.count {
+			t.Fatal("label selection changed underlying data")
+		}
+	}
+}
+
+func TestDailyLabelTicksKeepConstantSpacingAcrossMonthAndYear(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	for _, from := range []time.Time{time.Date(2026, 9, 20, 0, 0, 0, 0, zone), time.Date(2026, 12, 20, 0, 0, 0, 0, zone)} {
+		a := cpamp.AnalyticsResponse{Granularity: "day", Timeline: []cpamp.UsageTimelinePoint{{BucketMS: from.UnixMilli(), Calls: 1}}}
+		points := s.usageTimeline(a, from, from.AddDate(0, 0, 30))
+		var previous int64
+		for i, point := range usageTrend(points).Points {
+			if i > 0 && point.LabelTick-points[i-1].LabelTick != 1 {
+				t.Fatal("local day ticks are not consecutive")
+			}
+			if !point.ShowLabel {
+				continue
+			}
+			if previous != 0 && point.LabelTick-previous != 6 {
+				t.Fatal("daily label interval changed across calendar boundary")
+			}
+			previous = point.LabelTick
 		}
 	}
 }

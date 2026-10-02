@@ -225,7 +225,13 @@
     var leftBound = 100, rightBound = 900;
     var scale = 1, offset = 0, drag = null;
     var zoomable = points.length > 12;
-    var maxScale = Math.min(10, points.length / 6);
+    // Keep at least twelve actual points in every panned viewport. Use the
+    // widest twelve intervals so rounded SVG coordinates cannot leave only 11.
+    var minimumSpan = 0;
+    for (var i = 12; i < points.length; i++) {
+      minimumSpan = Math.max(minimumSpan, Number(points[i].dataset.x) - Number(points[i - 12].dataset.x));
+    }
+    var maxScale = zoomable ? Math.min(10, (rightBound - leftBound) / minimumSpan) : 1;
     if (zoomable) chart.classList.add("trend-interactive");
     function screenX(x) { return x * scale + offset; }
     function pointerPosition(event) {
@@ -247,21 +253,32 @@
         label.style.left = (x / 10) + "%";
         return x >= leftBound && x <= rightBound;
       });
-      var count = Math.min(visible.length, chart.clientWidth < 540 ? 3 : 6);
-      var previousRight = -Infinity;
-      for (var i = 0; i < count; i++) {
-        var index = count > 1 ? Math.round(i * (visible.length - 1) / (count - 1)) : 0;
-        var label = visible[index];
-        label.hidden = false;
-        var width = label.getBoundingClientRect().width;
-        var x = screenX(Number(label.dataset.x)) / 1000 * chart.clientWidth;
-        x = Math.max(width / 2 + 4, Math.min(x, chart.clientWidth - width / 2 - 4));
-        if (x - width / 2 < previousRight + 8) {
-          label.hidden = true;
-        } else {
+      if (!visible.length) return;
+      var maxLabels = chart.clientWidth < 540 ? 3 : 6;
+      var span = Number(visible[visible.length - 1].dataset.tick) - Number(visible[0].dataset.tick);
+      var minimumStep = Math.max(1, Math.ceil(span / (maxLabels - 1)));
+      var steps = [1, 2, 3, 4, 6, 8, 12, 24, 48, 72, 168];
+      var step = steps.find(function (value) { return value >= minimumStep; }) || Math.ceil(minimumStep / 24) * 24;
+      // Keep one anchored interval after zoom/pan. On text collisions, retry
+      // the whole set instead of dropping middle labels and creating uneven gaps.
+      for (var attempt = 0; attempt < 16; attempt++) {
+        var previousRight = -Infinity, overlaps = false;
+        visible.forEach(function (label) {
+          label.hidden = Number(label.dataset.tick) % step !== 0;
+          if (label.hidden) return;
+          var width = label.getBoundingClientRect().width;
+          var x = screenX(Number(label.dataset.x)) / 1000 * chart.clientWidth;
+          // Omit clipped edges rather than moving labels off their data point.
+          if (x - width / 2 < 4 || x + width / 2 > chart.clientWidth - 4) {
+            label.hidden = true;
+            return;
+          }
+          if (x - width / 2 < previousRight + 8) overlaps = true;
           label.style.left = x + "px";
           previousRight = x + width / 2;
-        }
+        });
+        if (!overlaps) break;
+        step = steps.find(function (value) { return value > step; }) || step * 2;
       }
     }
     resizeTrendLabels();

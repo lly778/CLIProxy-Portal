@@ -374,8 +374,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-interactive svg { cursor: grab; }
 .trend-dragging svg { cursor: grabbing; }
 .trend-axis-label { position: absolute; color: var(--muted); font-size: 11px; white-space: nowrap; pointer-events: none; }
-.trend-axis-label.tokens { left: 8.8%; color: #5ab38e; transform: translate(-100%, -50%); }
-.trend-axis-label.requests { left: 91.4%; color: #5c83ee; transform: translateY(-50%); }
+.trend-axis-label.requests { left: 8.8%; color: #5c83ee; transform: translate(-100%, -50%); }
+.trend-axis-label.tokens { left: 91.4%; color: #5ab38e; transform: translateY(-50%); }
 .trend-tooltip { position: absolute; z-index: 4; width: min(230px, calc(100% - 24px)); padding: 15px 17px; color: #344054; background: rgba(255,255,255,.97); border: 1px solid var(--line); border-radius: 11px; box-shadow: 0 14px 32px rgba(16,24,40,.14); pointer-events: none; }
 .trend-tooltip strong { display: block; margin-bottom: 11px; color: var(--text); font-size: 14px; }
 .trend-tooltip > div { display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 5px 0; }
@@ -388,8 +388,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-legend > span { display: inline-flex; gap: 7px; align-items: center; font-weight: 650; }
 .trend-legend i { width: 8px; height: 8px; border-radius: 50%; }
 .trend-legend .requests i { background: #5c83ee; }
-.trend-legend .tokens i { background: #5ab38e; }
-.trend-help { margin: 4px 0 0; text-align: center; }
+.trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }
 .usage-list { display: grid; gap: 16px; }
 .model-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; }
 .model-usage-chart { min-width: 0; }

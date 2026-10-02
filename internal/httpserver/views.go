@@ -403,23 +403,25 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		})
 	}
 	barWidth := max(1, min(36, (right-left)*3/(len(points)*5)))
-	labelCount := len(points)
-	if len(points) > 14 || strings.Contains(points[0].Date, ":") {
-		labelCount = min(labelCount, 6)
-	}
-	labels := make(map[int]bool, labelCount)
-	for i := 0; i < labelCount; i++ {
-		index := 0
-		if labelCount > 1 {
-			index = i * (len(points) - 1) / (labelCount - 1)
+	ticks := make([]int64, len(points))
+	validTicks := points[0].LabelTick != 0
+	for i, point := range points {
+		ticks[i] = point.LabelTick
+		if i > 0 && ticks[i] <= ticks[i-1] {
+			validTicks = false
 		}
-		labels[index] = true
 	}
+	if !validTicks {
+		for i := range ticks {
+			ticks[i] = int64(i) // Older upstreams may supply labels only.
+		}
+	}
+	labelStep := usageTrendLabelStep(ticks[len(ticks)-1] - ticks[0])
 	for i, point := range points {
 		x := left + (2*i+1)*(right-left)/(2*len(points))
 		requestY := bottom - int(float64(point.RequestValue)/float64(requestScale)*float64(bottom-top))
 		tokenY := bottom - int(float64(point.TokenValue)/float64(tokenScale)*float64(bottom-top))
-		view := webui.UsageTrendPointView{X: x, RequestY: requestY, TokenY: tokenY, BarX: x - barWidth/2, BarWidth: barWidth, BarHeight: bottom - tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: labels[i]}
+		view := webui.UsageTrendPointView{X: x, LabelTick: ticks[i], RequestY: requestY, TokenY: tokenY, BarX: x - barWidth/2, BarWidth: barWidth, BarHeight: bottom - tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: ticks[i]%labelStep == 0}
 		trend.Points = append(trend.Points, view)
 	}
 	trend.RequestPath = smoothUsageTrendPath(trend.Points, func(p webui.UsageTrendPointView) int { return p.RequestY })

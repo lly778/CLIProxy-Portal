@@ -322,12 +322,15 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := out.String()
-			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `<div class="trend-legend"><span class="tokens"><i></i>Token</span><span class="requests"><i></i>请求数</span></div>`, "data-trend-tooltip", `data-requests="12"`, "请求数与总 Token 在同一时间范围内联动展示。"} {
+			if !strings.Contains(got, `<div><span class="tokens"><i></i>Token 数</span><b data-trend-tokens>`) {
+				t.Fatal("chart tooltip must use the same Token label as the legend")
+			}
+			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `<div class="trend-legend"><span class="requests"><i></i>请求数</span><span class="tokens"><i></i>Token 数</span></div>`, `aria-label="请求数平滑曲线（左轴）与 Token 柱状图（右轴）"`, "data-trend-tooltip", `data-requests="12"`, "请求数与 Token 数在同一时间范围内联动展示。"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("usage trend output does not contain %q", want)
 				}
 			}
-			for _, unwanted := range []string{"usage-trend-scales", "trend-granularity", "请求峰值", "Token 峰值", "每 6 小时", "最近 24 小时按小时", "预估成本", `class="trend-line tokens"`, `class="bar-chart`} {
+			for _, unwanted := range []string{"usage-trend-scales", "trend-granularity", "请求峰值", "Token 峰值", "每 6 小时", "最近 24 小时按小时", "预估成本", "在图表上移动鼠标可查看详细数值", `class="trend-line tokens"`, `class="bar-chart`} {
 				if strings.Contains(got, unwanted) {
 					t.Errorf("usage trend unexpectedly renders removed content %q", unwanted)
 				}
