@@ -301,8 +301,8 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 			{X: 48, RequestY: 28, TokenY: 180, Date: "08-20", Requests: "12", Tokens: "1,234", ShowLabel: true},
 			{X: 952, RequestY: 123, TokenY: 28, Date: "08-21", Requests: "6", Tokens: "4,567", ShowLabel: true},
 		},
-		RequestPoints:    "48,28 952,123",
-		TokenPoints:      "48,180 952,28",
+		RequestPath:      "M48,28 L952,123",
+		TokenPath:        "M48,180 L952,28",
 		MaxRequests:      "12",
 		MaxTokens:        "4,567",
 		GranularityLabel: "按小时",
@@ -312,7 +312,7 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := out.String()
-	for _, want := range []string{`points="48,28 952,123"`, `points="48,180 952,28"`, "请求峰值 12", "Token 峰值 4,567", "按小时", "data-trend-tooltip", `data-requests="12"`} {
+	for _, want := range []string{`<path class="trend-line requests" d="M48,28 L952,123">`, `<path class="trend-line tokens" d="M48,180 L952,28">`, "请求峰值 12", "Token 峰值 4,567", "按小时", "data-trend-tooltip", `data-requests="12"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage trend output does not contain %q", want)
 		}

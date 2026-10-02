@@ -869,8 +869,8 @@ func TestUsageTrendScalesRequestsAndTokensIndependently(t *testing.T) {
 	if trend.MaxRequests != "10" || trend.MaxTokens != "400" {
 		t.Fatalf("trend maxima = %q requests, %q tokens", trend.MaxRequests, trend.MaxTokens)
 	}
-	if trend.RequestPoints == "" || trend.TokenPoints == "" {
-		t.Fatal("trend SVG points were not generated")
+	if trend.RequestPath == "" || trend.TokenPath == "" {
+		t.Fatal("trend SVG paths were not generated")
 	}
 }
 

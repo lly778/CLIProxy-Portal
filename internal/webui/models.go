@@ -158,8 +158,8 @@ type UsageTrendPointView struct {
 
 type UsageTrendView struct {
 	Points           []UsageTrendPointView
-	RequestPoints    string
-	TokenPoints      string
+	RequestPath      string
+	TokenPath        string
 	MaxRequests      string
 	MaxTokens        string
 	GranularityLabel string
