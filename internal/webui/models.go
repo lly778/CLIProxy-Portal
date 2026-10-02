@@ -138,18 +138,23 @@ type UsageSummaryView struct {
 }
 
 type UsagePointView struct {
-	BucketMS     int64
-	BucketHours  int
-	LabelTick    int64
-	Date         string
-	Requests     string
-	Tokens       string
-	Percent      int
-	TokenPercent int
-	RequestValue int64
-	TokenValue   int64
-	SuccessValue int64
-	FailureValue int64
+	BucketMS            int64
+	BucketHours         int
+	LabelTick           int64
+	Date                string
+	Requests            string
+	Tokens              string
+	Percent             int
+	TokenPercent        int
+	RequestValue        int64
+	TokenValue          int64
+	SuccessValue        int64
+	FailureValue        int64
+	HasTokenBreakdown   bool
+	InputTokenValue     int64
+	CacheTokenValue     int64
+	OutputTokenValue    int64
+	ReasoningTokenValue int64
 }
 
 type HealthTrendPointView struct {
@@ -159,10 +164,10 @@ type HealthTrendPointView struct {
 	SuccessRate, FailureRate, AverageTotal, Samples string
 	HasStages                                       bool
 	AverageUpload, AverageWait, AverageResponse     string
-	Stages                                          []HealthTrendStageView
+	Stages                                          []TrendBarSegmentView
 }
 
-type HealthTrendStageView struct {
+type TrendBarSegmentView struct {
 	Class          string
 	BarX, BarWidth int
 	Y, Height      float64
@@ -178,17 +183,23 @@ type HealthTrendView struct {
 }
 
 type UsageTrendPointView struct {
-	X         int
-	LabelTick int64
-	RequestY  int
-	TokenY    int
-	BarX      int
-	BarWidth  int
-	BarHeight int
-	Date      string
-	Requests  string
-	Tokens    string
-	ShowLabel bool
+	X                 int
+	LabelTick         int64
+	RequestY          int
+	TokenY            int
+	BarX              int
+	BarWidth          int
+	BarHeight         int
+	Date              string
+	Requests          string
+	Tokens            string
+	ShowLabel         bool
+	HasTokenBreakdown bool
+	InputTokens       string
+	CacheTokens       string
+	OutputTokens      string
+	ReasoningTokens   string
+	TokenSegments     []TrendBarSegmentView
 }
 
 type UsageTrendView struct {

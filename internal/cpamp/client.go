@@ -404,19 +404,23 @@ type UsageSummary struct {
 
 // UsageTimelinePoint is one CPAMP timeline bucket.
 type UsageTimelinePoint struct {
-	BucketMS     int64    `json:"bucket_ms"`
-	Label        string   `json:"label"`
-	Calls        int64    `json:"calls"`
-	Tokens       int64    `json:"tokens"`
-	Success      int64    `json:"success"`
-	Failure      int64    `json:"failure"`
-	InputTokens  int64    `json:"input_tokens"`
-	OutputTokens int64    `json:"output_tokens"`
-	TotalTokens  int64    `json:"total_tokens"`
-	Cost         float64  `json:"cost"`
-	AvgLatencyMS *float64 `json:"average_latency_ms"`
-	SuccessRate  float64  `json:"success_rate"`
-	FailureRate  float64  `json:"failure_rate"`
+	BucketMS            int64    `json:"bucket_ms"`
+	Label               string   `json:"label"`
+	Calls               int64    `json:"calls"`
+	Tokens              int64    `json:"tokens"`
+	Success             int64    `json:"success"`
+	Failure             int64    `json:"failure"`
+	InputTokens         int64    `json:"input_tokens"`
+	OutputTokens        int64    `json:"output_tokens"`
+	ReasoningTokens     *int64   `json:"reasoning_tokens"`
+	CachedTokens        *int64   `json:"cached_tokens"`
+	CacheReadTokens     *int64   `json:"cache_read_tokens"`
+	CacheCreationTokens *int64   `json:"cache_creation_tokens"`
+	TotalTokens         int64    `json:"total_tokens"`
+	Cost                float64  `json:"cost"`
+	AvgLatencyMS        *float64 `json:"average_latency_ms"`
+	SuccessRate         float64  `json:"success_rate"`
+	FailureRate         float64  `json:"failure_rate"`
 }
 
 // ModelUsageStat is an aggregate by model.

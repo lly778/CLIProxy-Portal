@@ -26,6 +26,71 @@ func usageTrendAxisScale(maximum int64) float64 {
 	return math.Ceil(step) * 5
 }
 
+type tokenBreakdown struct {
+	input, cache, output, reasoning int64
+	available                       bool
+}
+
+// Use non-overlapping parts, preserving the upstream total. Normally reasoning
+// is included in output; also accept explicitly additive totals from older
+// upstreams. Missing or inconsistent breakdowns remain unavailable, not zero.
+func timelineTokenBreakdown(point cpamp.UsageTimelinePoint) tokenBreakdown {
+	if point.ReasoningTokens == nil || point.InputTokens < 0 || point.OutputTokens < 0 || *point.ReasoningTokens < 0 {
+		return tokenBreakdown{}
+	}
+	input, output, reasoning := point.InputTokens, point.OutputTokens, *point.ReasoningTokens
+	if point.CachedTokens == nil && point.CacheReadTokens == nil && point.CacheCreationTokens == nil {
+		return tokenBreakdown{}
+	}
+	var cache int64
+	// CPAMP's aggregate fields already separate legacy cached tokens from
+	// fine-grained cache reads/creation. All are part of normalized input.
+	for _, value := range []*int64{point.CachedTokens, point.CacheReadTokens, point.CacheCreationTokens} {
+		if value != nil {
+			if *value < 0 {
+				return tokenBreakdown{}
+			}
+			cache += *value
+		}
+	}
+	if cache > input {
+		return tokenBreakdown{}
+	}
+	if point.TotalTokens == input+output && reasoning <= output {
+		output -= reasoning
+	} else if point.TotalTokens != input+output+reasoning {
+		return tokenBreakdown{}
+	}
+	return tokenBreakdown{input: input - cache, cache: cache, output: output, reasoning: reasoning, available: true}
+}
+
+// Both token and timing stacks share widths, contiguous boundaries, and only
+// round the uppermost nonzero segment. The total bar height never changes.
+func stackedTrendBars(point webui.UsageTrendPointView, classes []string, values []int64) []webui.TrendBarSegmentView {
+	var total int64
+	last := -1
+	for i, value := range values {
+		total += value
+		if value > 0 {
+			last = i
+		}
+	}
+	if total <= 0 {
+		return nil
+	}
+	y := float64(point.TokenY + point.BarHeight)
+	var bars []webui.TrendBarSegmentView
+	for i, value := range values {
+		if value <= 0 {
+			continue
+		}
+		height := float64(point.BarHeight) * float64(value) / float64(total)
+		y -= height
+		bars = append(bars, webui.TrendBarSegmentView{Class: classes[i], BarX: point.BarX, BarWidth: point.BarWidth, Y: y, Height: height, Square: i != last})
+	}
+	return bars
+}
+
 // usageTimeline displays hourly buckets through 72 hours, three-hour buckets
 // through seven days, then daily buckets. CPAMP supplies hourly/daily totals;
 // combine the hourly totals without changing either metric or boundary data.
@@ -64,6 +129,7 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 		return at.AddDate(0, 0, 1)
 	}
 	timeline := a.Timeline
+	breakdowns := make(map[int64]tokenBreakdown)
 	if fill {
 		start := floor(from)
 		grouped := make(map[int64]cpamp.UsageTimelinePoint)
@@ -80,6 +146,17 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 			}
 			at := floor(sourceStart)
 			bucket := at.UnixMilli()
+			parts := timelineTokenBreakdown(point)
+			combined, exists := breakdowns[bucket]
+			if !exists {
+				combined.available = true
+			}
+			combined.available = combined.available && parts.available
+			combined.input += parts.input
+			combined.cache += parts.cache
+			combined.output += parts.output
+			combined.reasoning += parts.reasoning
+			breakdowns[bucket] = combined
 			value := grouped[bucket]
 			value.Calls += point.Calls
 			value.Success += point.Success
@@ -115,7 +192,15 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 			labelTick = time.Date(local.Year(), local.Month(), local.Day(), local.Hour(), 0, 0, 0, time.UTC).Unix() / 3600
 			labelTick /= int64(bucketHours)
 		}
-		points = append(points, webui.UsagePointView{BucketMS: point.BucketMS, BucketHours: bucketHours, LabelTick: labelTick, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens, SuccessValue: point.Success, FailureValue: point.Failure})
+		parts := timelineTokenBreakdown(point)
+		if fill {
+			var exists bool
+			parts, exists = breakdowns[point.BucketMS]
+			if !exists {
+				parts.available = true
+			} // Empty filled intervals have known zero usage.
+		}
+		points = append(points, webui.UsagePointView{BucketMS: point.BucketMS, BucketHours: bucketHours, LabelTick: labelTick, Date: label, Requests: compactNumber(point.Calls), Tokens: compactNumber(point.TotalTokens), Percent: int(point.Calls * 100 / maxCalls), TokenPercent: int(point.TotalTokens * 100 / maxTokens), RequestValue: point.Calls, TokenValue: point.TotalTokens, SuccessValue: point.Success, FailureValue: point.Failure, HasTokenBreakdown: parts.available, InputTokenValue: parts.input, CacheTokenValue: parts.cache, OutputTokenValue: parts.output, ReasoningTokenValue: parts.reasoning})
 	}
 	return points
 }

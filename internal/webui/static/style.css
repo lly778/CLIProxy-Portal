@@ -406,6 +406,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-bar.duration-response, .trend-tooltip .duration-response i { fill: #8b82d6; background: #8b82d6; }
 .trend-tooltip .trend-stage-value { padding-left: 12px; }
 .trend-tooltip .trend-stage-value i { border-radius: 1px; }
+.trend-bar.tokens-input, .trend-tooltip .tokens-input i { fill: #77b095; background: #77b095; }
+.trend-bar.tokens-cache, .trend-tooltip .tokens-cache i { fill: #5db2c9; background: #5db2c9; }
+.trend-bar.tokens-output, .trend-tooltip .tokens-output i { fill: #78a1ed; background: #78a1ed; }
+.trend-bar.tokens-reasoning, .trend-tooltip .tokens-reasoning i { fill: #8b82d6; background: #8b82d6; }
 .trend-axis-label.health-rate { left: 8.8%; transform: translate(-100%, -50%); }
 .trend-axis-label.duration { left: 91.4%; color: #58a0e7; transform: translateY(-50%); }
 .usage-list { display: grid; gap: 16px; }
@@ -563,7 +567,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
 .audit-table th, .audit-table td { text-align: center; }
-.audit-table .audit-action-cell, .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
+.audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
 .audit-result-cell { width: 1%; min-width: 100px; }
 .audit-actor-cell span, .audit-actor-cell small { display: block; }
 .audit-actor-cell small { white-space: nowrap; }

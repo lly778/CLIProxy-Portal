@@ -52,6 +52,9 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	if strings.Contains(html, "总耗时仅统计已记录的门户请求") {
 		t.Fatal("removed timing note must not appear in the page")
 	}
+	if strings.Contains(html, "柱状图按接入及上传") || strings.Contains(html, "缺少分段记录的区间") {
+		t.Fatal("removed stage explanation must not appear in the page")
+	}
 	if at := strings.Index(html, caption); at < start || at > chart || strings.Count(html, caption) != 1 {
 		t.Fatal("timing description must appear only below the heading, not in the tooltip")
 	}
@@ -95,7 +98,7 @@ func TestHealthTrendRendersStageBarsAndTooltipWithoutChangingLegacyBars(t *testi
 	}
 	var out bytes.Buffer
 	view := UsageView{IsAdmin: true, HealthTrend: HealthTrendView{Points: []HealthTrendPointView{
-		{HasTiming: true, HasStages: true, AverageUpload: "200 ms", AverageWait: "1 s", AverageResponse: "2 s", Stages: []HealthTrendStageView{
+		{HasTiming: true, HasStages: true, AverageUpload: "200 ms", AverageWait: "1 s", AverageResponse: "2 s", Stages: []TrendBarSegmentView{
 			{Class: "duration-upload", Y: 200, Height: 18, Square: true},
 			{Class: "duration-wait", Y: 180, Height: 20, Square: true},
 			{Class: "duration-response", Y: 100, Height: 80},
@@ -186,7 +189,7 @@ func TestLogTablesCenterContentsWithAuditTextColumnExceptions(t *testing.T) {
 	for _, rule := range []string{
 		".request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }",
 		".audit-table th, .audit-table td { text-align: center; }",
-		".audit-table .audit-action-cell, .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }",
+		".audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing log table alignment: %s", rule)
@@ -197,6 +200,9 @@ func TestLogTablesCenterContentsWithAuditTextColumnExceptions(t *testing.T) {
 	}
 	if bytes.Contains(css, []byte(".request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }")) {
 		t.Fatal("request model columns must also be centered")
+	}
+	if bytes.Contains(css, []byte(".audit-table .audit-action-cell, .audit-table .audit-target-cell")) {
+		t.Fatal("audit action column must also be centered")
 	}
 }
 
@@ -546,6 +552,31 @@ func TestDenseUsageTrendHidesOnlySymbols(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing dense chart content %q", want)
 		}
+	}
+}
+
+func TestUsageTrendRendersFourTokenPartsAndLegacyFallback(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	point := UsageTrendPointView{HasTokenBreakdown: true, InputTokens: "35", CacheTokens: "65", OutputTokens: "25", ReasoningTokens: "15", Tokens: "140"}
+	for i, class := range []string{"tokens-input", "tokens-cache", "tokens-output", "tokens-reasoning"} {
+		point.TokenSegments = append(point.TokenSegments, TrendBarSegmentView{Class: class, BarX: 100, BarWidth: 8, Y: float64(200 - i*20), Height: 20, Square: i < 3})
+	}
+	view := UsageView{Trend: UsageTrendView{Points: []UsageTrendPointView{point, {Tokens: "140", InputTokens: "—", CacheTokens: "—", OutputTokens: "—", ReasoningTokens: "—"}}}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageUsage, view); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`class="trend-bar tokens-input"`, `class="trend-bar tokens-cache"`, `class="trend-bar tokens-output"`, `class="trend-bar tokens-reasoning"`, `data-input-tokens="35"`, `data-cache-tokens="65"`, `data-output-tokens="25"`, `data-reasoning-tokens="15"`, `data-trend-value="inputTokens"`, `data-trend-value="cacheTokens"`, `data-trend-value="outputTokens"`, `data-trend-value="reasoningTokens"`, "输入（不含缓存）", "输出（不含推理）", `data-reasoning-tokens="—"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("missing %s", want)
+		}
+	}
+	if strings.Count(html, `class="trend-bar tokens"`) != 1 || strings.Count(html, `data-bar-square="true"`) != 3 || strings.Count(html, `data-bar-square="false"`) != 1 {
+		t.Fatal("fallback or top-only rounded corners lost")
 	}
 }
 

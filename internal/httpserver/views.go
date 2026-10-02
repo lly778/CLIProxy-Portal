@@ -422,6 +422,12 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 		requestY := bottom - int(float64(point.RequestValue)/float64(requestScale)*float64(bottom-top))
 		tokenY := bottom - int(float64(point.TokenValue)/float64(tokenScale)*float64(bottom-top))
 		view := webui.UsageTrendPointView{X: x, LabelTick: ticks[i], RequestY: requestY, TokenY: tokenY, BarX: x - barWidth/2, BarWidth: barWidth, BarHeight: bottom - tokenY, Date: point.Date, Requests: point.Requests, Tokens: point.Tokens, ShowLabel: ticks[i]%labelStep == 0}
+		view.InputTokens, view.CacheTokens, view.OutputTokens, view.ReasoningTokens = "—", "—", "—", "—"
+		if point.HasTokenBreakdown && point.InputTokenValue >= 0 && point.CacheTokenValue >= 0 && point.OutputTokenValue >= 0 && point.ReasoningTokenValue >= 0 && point.InputTokenValue+point.CacheTokenValue+point.OutputTokenValue+point.ReasoningTokenValue == point.TokenValue {
+			view.HasTokenBreakdown = true
+			view.InputTokens, view.CacheTokens, view.OutputTokens, view.ReasoningTokens = compactNumber(point.InputTokenValue), compactNumber(point.CacheTokenValue), compactNumber(point.OutputTokenValue), compactNumber(point.ReasoningTokenValue)
+			view.TokenSegments = stackedTrendBars(view, []string{"tokens-input", "tokens-cache", "tokens-output", "tokens-reasoning"}, []int64{point.InputTokenValue, point.CacheTokenValue, point.OutputTokenValue, point.ReasoningTokenValue})
+		}
 		trend.Points = append(trend.Points, view)
 	}
 	trend.RequestPath = smoothUsageTrendPath(trend.Points, func(p webui.UsageTrendPointView) int { return p.RequestY })

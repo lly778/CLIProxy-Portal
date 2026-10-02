@@ -98,21 +98,7 @@ func healthTrend(points []webui.UsagePointView, totals []store.GatewayTimingTota
 				view.AverageResponse = durationLabel(float64(total.ResponseMS) / float64(total.Samples))
 				values := []int64{total.UploadMS, total.WaitMS, total.ResponseMS}
 				classes := []string{"duration-upload", "duration-wait", "duration-response"}
-				last := -1
-				for j, value := range values {
-					if value > 0 {
-						last = j
-					}
-				}
-				y := float64(bottom)
-				for j, value := range values {
-					if value <= 0 || total.TotalMS == 0 {
-						continue
-					}
-					height := float64(view.BarHeight) * float64(value) / float64(total.TotalMS)
-					y -= height
-					view.Stages = append(view.Stages, webui.HealthTrendStageView{Class: classes[j], BarX: view.BarX, BarWidth: view.BarWidth, Y: y, Height: height, Square: j != last})
-				}
+				view.Stages = stackedTrendBars(view.UsageTrendPointView, classes, values)
 			}
 		}
 		view.RequestY = min(view.SuccessY, view.FailureY)

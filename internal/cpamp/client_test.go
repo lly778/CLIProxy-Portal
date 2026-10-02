@@ -339,6 +339,29 @@ func TestAnalyticsFiltersByAPIKeyHash(t *testing.T) {
 	}
 }
 
+func TestAnalyticsDecodesTokenPartsAndDistinguishesMissingFromZero(t *testing.T) {
+	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		requireAdmin(t, r)
+		_, _ = w.Write([]byte(`{"timeline":[{"input_tokens":100,"output_tokens":40,"total_tokens":140,"reasoning_tokens":15,"cached_tokens":10,"cache_read_tokens":50,"cache_creation_tokens":5},{"reasoning_tokens":0,"cached_tokens":0},{"calls":1,"total_tokens":140}]}`))
+	})
+	response, err := client.Analytics(context.Background(), AnalyticsRequest{FromMS: 1, ToMS: 2, Include: AnalyticsInclude{Timeline: true}})
+	if err != nil || len(response.Timeline) != 3 {
+		t.Fatalf("response=%#v err=%v", response, err)
+	}
+	p := response.Timeline[0]
+	if p.ReasoningTokens == nil || *p.ReasoningTokens != 15 || p.CachedTokens == nil || *p.CachedTokens != 10 || p.CacheReadTokens == nil || *p.CacheReadTokens != 50 || p.CacheCreationTokens == nil || *p.CacheCreationTokens != 5 || p.InputTokens != 100 || p.OutputTokens != 40 || p.TotalTokens != 140 {
+		t.Fatalf("parts=%#v", p)
+	}
+	p = response.Timeline[1]
+	if p.ReasoningTokens == nil || *p.ReasoningTokens != 0 || p.CachedTokens == nil || *p.CachedTokens != 0 {
+		t.Fatal("explicit zero was lost")
+	}
+	p = response.Timeline[2]
+	if p.ReasoningTokens != nil || p.CachedTokens != nil || p.CacheReadTokens != nil || p.CacheCreationTokens != nil {
+		t.Fatal("missing parts must not become zero")
+	}
+}
+
 func TestListModelsUsesCPAAPIKey(t *testing.T) {
 	client, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != pathModelCatalog {
