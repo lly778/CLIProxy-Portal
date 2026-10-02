@@ -88,6 +88,34 @@ func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
 	}
 }
 
+func TestHealthTrendRendersStageBarsAndTooltipWithoutChangingLegacyBars(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	view := UsageView{IsAdmin: true, HealthTrend: HealthTrendView{Points: []HealthTrendPointView{
+		{HasTiming: true, HasStages: true, AverageUpload: "200 ms", AverageWait: "1 s", AverageResponse: "2 s", Stages: []HealthTrendStageView{
+			{Class: "duration-upload", Y: 200, Height: 18, Square: true},
+			{Class: "duration-wait", Y: 180, Height: 20, Square: true},
+			{Class: "duration-response", Y: 100, Height: 80},
+		}},
+		{HasTiming: true},
+	}}}
+	if err := r.Execute(&out, PageUsage, view); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`class="trend-bar duration-upload"`, `class="trend-bar duration-wait"`, `class="trend-bar duration-response"`, `data-bar-square="true"`, `data-bar-square="false"`, `data-average-upload="200 ms"`, `data-average-wait="1 s"`, `data-average-response="2 s"`, `data-trend-value="averageUpload"`, `data-trend-value="averageWait"`, `data-trend-value="averageResponse"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("stage chart missing %s", want)
+		}
+	}
+	if strings.Count(html, `class="trend-bar duration"`) != 1 {
+		t.Fatal("legacy total-only bar must remain")
+	}
+}
+
 func TestUserManagementTableKeepsAlignedAvatarsAndUserDetails(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

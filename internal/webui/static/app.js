@@ -254,6 +254,12 @@
         var x = Number(bar.dataset.barX), y = Number(bar.dataset.barY);
         var width = Number(bar.dataset.barWidth), height = Number(bar.dataset.barHeight);
         if (width <= 0 || height <= 0) { bar.setAttribute("d", ""); return; }
+        // Internal stack boundaries stay square and contiguous. Only the
+        // uppermost nonzero segment uses the shared outer corner rounding.
+        if (bar.dataset.barSquare === "true") {
+          bar.setAttribute("d", "M" + x + "," + y + " h" + width + " v" + height + " h-" + width + " Z");
+          return;
+        }
         // Round only the two top corners, keeping both bottom corners square
         // on the baseline. Both charts share a flatter 4px corner. Limit the
         // radius in screen space before converting to SVG coordinates so thin

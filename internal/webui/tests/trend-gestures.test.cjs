@@ -32,16 +32,21 @@ function fixture(count, width, health = false) {
   const chart = element();
   const svg = element();
   const plot = element();
+  const bars = health ? [
+    element({ barX: 496, barY: 208, barWidth: 8, barHeight: 10, barSquare: 'true' }),
+    element({ barX: 496, barY: 138, barWidth: 8, barHeight: 70, barSquare: 'true' }),
+    element({ barX: 496, barY: 118, barWidth: 8, barHeight: 20, barSquare: 'false' }),
+  ] : [];
   const tooltip = element();
   tooltip.hidden = true;
   tooltip.getBoundingClientRect = () => ({ width: 230, height: 100 });
   const tooltipDate = element(), requestValue = element(), tokenValue = element();
-  const healthValues = ['successRate', 'failureRate', 'averageTotal'].map((trendValue) => element({ trendValue }));
+  const healthValues = ['successRate', 'failureRate', 'averageTotal', 'averageUpload', 'averageWait', 'averageResponse'].map((trendValue) => element({ trendValue }));
   tooltip.querySelector = (selector) => ({ '[data-trend-date]': tooltipDate, '[data-trend-requests]': requestValue, '[data-trend-tokens]': tokenValue })[selector] ?? null;
   tooltip.querySelectorAll = (selector) => selector === '[data-trend-value]' && health ? healthValues : [];
   const points = Array.from({ length: count }, (_, i) => {
     const x = Math.round(100 + i * 800 / Math.max(1, count - 1));
-    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', successRate: '95%', failureRate: '5%', averageTotal: '4 s' });
+    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', successRate: '95%', failureRate: '5%', averageTotal: '4 s', averageUpload: '500 ms', averageWait: '1.5 s', averageResponse: '2 s' });
     point.dots = Array.from({ length: health ? 2 : 1 }, () => {
       const dot = element(); dot.setAttribute('cx', x); return dot;
     });
@@ -53,7 +58,7 @@ function fixture(count, width, health = false) {
   chart.clientWidth = width; chart.clientHeight = 260;
   chart.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 260 });
   chart.querySelector = (selector) => selection[selector] ?? null;
-  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels })[selector] ?? [];
+  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels, '.trend-bar[data-bar-x]': bars })[selector] ?? [];
   chart.contains = (target) => target === svg || target === chart;
   chart.setPointerCapture = () => {};
   chart.hasPointerCapture = () => false;
@@ -76,7 +81,7 @@ function fixture(count, width, health = false) {
     send('touchstart', [touch(1, 400)]);
     return send('touchstart', [touch(1, 400), touch(2, 600)]);
   }
-  return { chart, tooltip, tooltipDate, healthValues, points, touch, send, viewport, visiblePoints, pinch };
+  return { chart, tooltip, tooltipDate, healthValues, points, bars, touch, send, viewport, visiblePoints, pinch };
 }
 
 for (const health of [false, true]) {
@@ -88,6 +93,12 @@ for (const health of [false, true]) {
       assert.ok(f.pinch().defaultPrevented);
       assert.ok(f.send('touchmove', [f.touch(1, 200), f.touch(2, 800)]).defaultPrevented);
       assert.equal(f.viewport().scale, 3);
+      if (health) {
+        assert.ok(f.bars.slice(0, 2).every((bar) => !bar.getAttribute('d').includes(' A')));
+        assert.ok(f.bars[2].getAttribute('d').includes(' A'));
+        assert.equal(f.bars[0].getAttribute('d'), 'M496,208 h8 v10 h-8 Z');
+        assert.equal(f.bars[1].getAttribute('d'), 'M496,138 h8 v70 h-8 Z');
+      }
       assert.ok(f.visiblePoints().length <= 36);
       assert.ok(f.visiblePoints().every((p) => p.dots.every((dot) => !dot.hidden)));
       f.chart.dispatch('pointermove', { pointerType: 'touch', pointerId: 1, clientX: 0, clientY: 0 });
@@ -122,7 +133,7 @@ for (const health of [false, true]) {
       f.send('touchend', [], [f.touch(1, 500)]);
       assert.ok(!f.tooltip.hidden);
       assert.match(f.tooltipDate.textContent, /^point-/);
-      if (health) assert.deepEqual(f.healthValues.map((v) => v.textContent), ['95%', '5%', '4 s']);
+      if (health) assert.deepEqual(f.healthValues.map((v) => v.textContent), ['95%', '5%', '4 s', '500 ms', '1.5 s', '2 s']);
       f.send('touchstart', [f.touch(1, 500)]);
       assert.ok(!f.send('touchmove', [f.touch(1, 501, 150)]).defaultPrevented);
       f.send('touchend', [], [f.touch(1, 501, 150)]);

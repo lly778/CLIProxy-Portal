@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,5 +122,45 @@ func TestHealthTrendSymbolThresholdAndDurationLabels(t *testing.T) {
 		if got := durationLabel(value); got != want {
 			t.Fatalf("duration %v = %s, want %s", value, got, want)
 		}
+	}
+}
+
+func TestHealthTrendStacksSameCohortAveragesAndPreservesLegacyTotal(t *testing.T) {
+	points := []webui.UsagePointView{{BucketMS: 1}, {BucketMS: 2}, {BucketMS: 3}, {BucketMS: 4}, {BucketMS: 5}}
+	totals := []store.GatewayTimingTotal{
+		{BucketMS: 1, Samples: 4, StageSamples: 4, TotalMS: 20000, UploadMS: 2000, WaitMS: 6000, ResponseMS: 12000},
+		{BucketMS: 2, Samples: 4, StageSamples: 3, TotalMS: 20000, UploadMS: 2000, WaitMS: 6000, ResponseMS: 7000},
+		{BucketMS: 3, Samples: 1, StageSamples: 1, TotalMS: 1000, UploadMS: 1000},
+		{BucketMS: 4, Samples: 1, StageSamples: 1},
+	}
+	trend := healthTrend(points, totals)
+	first := trend.Points[0]
+	if !first.HasStages || first.AverageTotal != "5 s" || first.AverageUpload != "500 ms" || first.AverageWait != "1.5 s" || first.AverageResponse != "3 s" || len(first.Stages) != 3 {
+		t.Fatalf("stage averages = %+v", first)
+	}
+	bottom, height := float64(218), float64(0)
+	for i, stage := range first.Stages {
+		if math.Abs(stage.Y+stage.Height-bottom) > 1e-8 || stage.Square != (i < 2) {
+			t.Fatalf("stack gap/corner = %+v", first.Stages)
+		}
+		bottom = stage.Y
+		height += stage.Height
+	}
+	if math.Abs(height-float64(first.BarHeight)) > 1e-8 || math.Abs(bottom-float64(first.TokenY)) > 1e-8 {
+		t.Fatal("stack height differs from original mean")
+	}
+	legacy := trend.Points[1]
+	if legacy.HasStages || !legacy.HasTiming || legacy.AverageTotal != first.AverageTotal || legacy.BarHeight != first.BarHeight || legacy.AverageUpload != "—" || len(legacy.Stages) != 0 {
+		t.Fatalf("partial stages changed total/denominator = %+v", legacy)
+	}
+	zeroResponse := trend.Points[2]
+	if len(zeroResponse.Stages) != 1 || zeroResponse.Stages[0].Square || zeroResponse.AverageResponse != "0 ms" {
+		t.Fatalf("top nonzero segment = %+v", zeroResponse)
+	}
+	if !trend.Points[3].HasStages || len(trend.Points[3].Stages) != 0 || trend.Points[3].AverageTotal != "0 ms" {
+		t.Fatal("zero is not missing")
+	}
+	if trend.Points[4].HasTiming || trend.Points[4].AverageWait != "—" {
+		t.Fatal("missing stages must not be zero")
 	}
 }

@@ -143,7 +143,9 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,
 			started_at_ms INTEGER NOT NULL,
-			total_ms INTEGER NOT NULL CHECK(total_ms >= 0)
+			total_ms INTEGER NOT NULL CHECK(total_ms >= 0),
+			request_read_ms INTEGER,
+			response_started_ms INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_timing_samples_time ON gateway_timing_samples(started_at_ms)`,
 		`CREATE INDEX IF NOT EXISTS idx_gateway_timing_samples_user ON gateway_timing_samples(user_id,started_at_ms)`,
@@ -231,10 +233,31 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
+	for _, column := range []string{"request_read_ms", "response_started_ms"} {
+		var present int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gateway_timing_samples') WHERE name=?`, column).Scan(&present); err != nil {
+			return err
+		}
+		if present == 0 {
+			if _, err := s.db.ExecContext(ctx, `ALTER TABLE gateway_timing_samples ADD COLUMN `+column+` INTEGER`); err != nil {
+				return fmt.Errorf("migrate timing stage %s: %w", column, err)
+			}
+		}
+	}
 	// Seed retained timings once. Subsequent starts cannot double-count samples.
-	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO gateway_timing_samples(id,user_id,started_at_ms,total_ms)
-		SELECT id,user_id,started_at_ms,total_ms FROM gateway_request_timings WHERE total_ms>=0`); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO gateway_timing_samples(id,user_id,started_at_ms,total_ms,request_read_ms,response_started_ms)
+		SELECT id,user_id,started_at_ms,total_ms,request_read_ms,response_started_ms FROM gateway_request_timings WHERE total_ms>=0`); err != nil {
 		return fmt.Errorf("seed gateway timing samples: %w", err)
+	}
+	// Only retained detail can recover old stage boundaries; pruned history stays
+	// NULL rather than inventing a breakdown or discarding its total duration.
+	if _, err := s.db.ExecContext(ctx, `UPDATE gateway_timing_samples AS sample
+		SET request_read_ms=(SELECT request_read_ms FROM gateway_request_timings WHERE id=sample.id),
+		response_started_ms=(SELECT response_started_ms FROM gateway_request_timings WHERE id=sample.id)
+		WHERE (sample.request_read_ms IS NULL OR sample.response_started_ms IS NULL)
+		AND sample.id IN (SELECT id FROM gateway_request_timings
+		WHERE request_read_ms>=0 AND response_started_ms>=request_read_ms AND total_ms>=response_started_ms)`); err != nil {
+		return fmt.Errorf("backfill gateway timing stages: %w", err)
 	}
 	var rememberColumn int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='remember'`).Scan(&rememberColumn); err != nil {

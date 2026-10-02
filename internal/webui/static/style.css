@@ -401,6 +401,11 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-dot.failure-rate, .trend-legend .failure-rate i, .trend-tooltip .failure-rate i { fill: #e57472; background: #e57472; }
 .trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }
 .trend-legend .duration i, .trend-tooltip .duration i { border-radius: 1px; }
+.trend-bar.duration-upload, .trend-tooltip .duration-upload i { fill: #78a1ed; background: #78a1ed; }
+.trend-bar.duration-wait, .trend-tooltip .duration-wait i { fill: #5db2c9; background: #5db2c9; }
+.trend-bar.duration-response, .trend-tooltip .duration-response i { fill: #8b82d6; background: #8b82d6; }
+.trend-tooltip .trend-stage-value { padding-left: 12px; }
+.trend-tooltip .trend-stage-value i { border-radius: 1px; }
 .trend-axis-label.health-rate { left: 8.8%; transform: translate(-100%, -50%); }
 .trend-axis-label.duration { left: 91.4%; color: #58a0e7; transform: translateY(-50%); }
 .usage-list { display: grid; gap: 16px; }

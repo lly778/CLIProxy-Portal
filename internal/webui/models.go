@@ -157,6 +157,16 @@ type HealthTrendPointView struct {
 	SuccessY, FailureY                              int
 	HasRequests, HasTiming                          bool
 	SuccessRate, FailureRate, AverageTotal, Samples string
+	HasStages                                       bool
+	AverageUpload, AverageWait, AverageResponse     string
+	Stages                                          []HealthTrendStageView
+}
+
+type HealthTrendStageView struct {
+	Class          string
+	BarX, BarWidth int
+	Y, Height      float64
+	Square         bool
 }
 
 type HealthTrendView struct {

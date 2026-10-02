@@ -27,10 +27,10 @@
     <defs><clipPath data-trend-clip><rect x="100" y="24" width="800" height="198"></rect></clipPath></defs>
     {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
     <g data-trend-clip-target><g data-trend-plot>
-      {{range .Points}}{{if .HasTiming}}<path class="trend-bar duration" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
+      {{range .Points}}{{if .HasTiming}}{{if .HasStages}}{{range .Stages}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}{{else}}<path class="trend-bar duration" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}{{end}}
       <path class="trend-line success-rate" d="{{.SuccessPath}}"></path>
       <path class="trend-line failure-rate" d="{{.FailurePath}}"></path>
-      {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-success-rate="{{.SuccessRate}}" data-failure-rate="{{.FailureRate}}" data-average-total="{{.AverageTotal}}" data-samples="{{.Samples}}">
+      {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-success-rate="{{.SuccessRate}}" data-failure-rate="{{.FailureRate}}" data-average-total="{{.AverageTotal}}" data-average-upload="{{.AverageUpload}}" data-average-wait="{{.AverageWait}}" data-average-response="{{.AverageResponse}}" data-samples="{{.Samples}}">
         {{if .HasRequests}}<circle class="trend-dot success-rate" cx="{{.X}}" cy="{{.SuccessY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle><circle class="trend-dot failure-rate" cx="{{.X}}" cy="{{.FailureY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle>{{end}}
       </g>{{end}}
     </g></g>
@@ -43,6 +43,9 @@
     <div><span class="success-rate"><i></i>成功率</span><b data-trend-value="successRate"></b></div>
     <div><span class="failure-rate"><i></i>失败率</span><b data-trend-value="failureRate"></b></div>
     <div><span class="duration"><i></i>平均耗时</span><b data-trend-value="averageTotal"></b></div>
+    <div class="trend-stage-value"><span class="duration-upload"><i></i>接入及上传</span><b data-trend-value="averageUpload"></b></div>
+    <div class="trend-stage-value"><span class="duration-wait"><i></i>等待回复</span><b data-trend-value="averageWait"></b></div>
+    <div class="trend-stage-value"><span class="duration-response"><i></i>生成及发送</span><b data-trend-value="averageResponse"></b></div>
   </div>
 </div>
 {{else}}<div class="empty-state compact"><p>暂无统计数据。</p></div>{{end}}

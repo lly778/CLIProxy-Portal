@@ -70,7 +70,7 @@ func healthTrend(points []webui.UsagePointView, totals []store.GatewayTimingTota
 		segment = nil
 	}
 	for i, point := range points {
-		view := webui.HealthTrendPointView{UsageTrendPointView: base.Points[i], SuccessRate: "—", FailureRate: "—", AverageTotal: "—", Samples: "0", SuccessY: bottom, FailureY: bottom}
+		view := webui.HealthTrendPointView{UsageTrendPointView: base.Points[i], SuccessRate: "—", FailureRate: "—", AverageTotal: "—", Samples: "0", SuccessY: bottom, FailureY: bottom, AverageUpload: "—", AverageWait: "—", AverageResponse: "—"}
 		view.BarWidth = min(view.BarWidth, 16)
 		view.BarX = view.X - view.BarWidth/2
 		view.TokenY, view.BarHeight = bottom, 0
@@ -90,6 +90,32 @@ func healthTrend(points []webui.UsagePointView, totals []store.GatewayTimingTota
 			view.AverageTotal, view.Samples = durationLabel(average), number(total.Samples)
 			view.TokenY = bottom - int(math.Round(average/scale*(bottom-top)))
 			view.BarHeight = bottom - view.TokenY
+			// A mixed legacy/new bucket must not use a smaller denominator for
+			// its segments than for the total. Keep the original total bar until
+			// every timed sample has a valid three-stage breakdown.
+			if total.StageSamples == total.Samples && total.UploadMS+total.WaitMS+total.ResponseMS == total.TotalMS {
+				view.HasStages = true
+				view.AverageUpload = durationLabel(float64(total.UploadMS) / float64(total.Samples))
+				view.AverageWait = durationLabel(float64(total.WaitMS) / float64(total.Samples))
+				view.AverageResponse = durationLabel(float64(total.ResponseMS) / float64(total.Samples))
+				values := []int64{total.UploadMS, total.WaitMS, total.ResponseMS}
+				classes := []string{"duration-upload", "duration-wait", "duration-response"}
+				last := -1
+				for j, value := range values {
+					if value > 0 {
+						last = j
+					}
+				}
+				y := float64(bottom)
+				for j, value := range values {
+					if value <= 0 || total.TotalMS == 0 {
+						continue
+					}
+					height := float64(view.BarHeight) * float64(value) / float64(total.TotalMS)
+					y -= height
+					view.Stages = append(view.Stages, webui.HealthTrendStageView{Class: classes[j], BarX: view.BarX, BarWidth: view.BarWidth, Y: y, Height: height, Square: j != last})
+				}
+			}
 		}
 		view.RequestY = min(view.SuccessY, view.FailureY)
 		trend.Points = append(trend.Points, view)
