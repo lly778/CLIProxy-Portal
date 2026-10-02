@@ -147,7 +147,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .table-card { overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 table { width: 100%; border-collapse: collapse; min-width: 650px; }
 .user-management-card table { min-width: 900px; }
-.user-management-card th { text-align: center; }
+.user-management-card th, .user-management-card td { text-align: center; }
 th, td { padding: 12px 15px; text-align: left; vertical-align: middle; border-bottom: 1px solid #edf0f4; white-space: nowrap; }
 th { color: var(--muted); background: #fbfcfe; font-size: 11px; font-weight: 700; letter-spacing: .03em; }
 tr:last-child td { border-bottom: 0; }
@@ -157,6 +157,7 @@ td small, td .muted { display: block; margin-top: 2px; }
 .user-cell > div { display: grid; gap: 1px; }
 .user-name-line { display: flex; gap: 7px; align-items: center; }
 .user-row-actions { display: flex; gap: 4px; align-items: center; justify-content: flex-end; }
+.user-management-card .user-cell, .user-management-card .user-name-line, .user-management-card .user-row-actions { justify-content: center; }
 .avatar { display: inline-grid; flex: 0 0 auto; width: 42px; height: 42px; place-items: center; color: var(--primary); background: #e6edff; border-radius: 50%; font-weight: 750; }
 .small-avatar { width: 28px; height: 28px; font-size: 11px; }
 .large-avatar { width: 60px; height: 60px; font-size: 20px; }
@@ -552,7 +553,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .rule-display p { margin: 0; color: var(--muted); white-space: pre-wrap; }
 .policy-preview h3 { margin-top: 13px; }
 .audit-table table { min-width: 900px; }
-.audit-table th { text-align: center; }
+.audit-table th, .audit-table td { text-align: center; }
+.audit-table .audit-action-cell, .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
 .audit-result-cell { width: 1%; min-width: 100px; }
 .audit-actor-cell span, .audit-actor-cell small { display: block; }
 .audit-actor-cell small { white-space: nowrap; }
@@ -572,7 +574,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .request-log-table .request-time-cell, .request-log-table td:nth-child(2) { line-height: 1.45; overflow-wrap: anywhere; text-overflow: clip; white-space: normal; }
 .request-log-table td:nth-child(2) .badge { max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 .request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }
-.request-log-table td:nth-child(1), .request-log-table td:nth-child(2), .request-log-table td:nth-child(3), .request-detail-table td:nth-child(1), .request-detail-table td:nth-child(2) { text-align: left; }
+.request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }
 .request-model-cell { min-width: 0; white-space: normal; }
 .request-model-text { display: -webkit-box; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .request-detail-table .request-model-cell { width: 20%; }

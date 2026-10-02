@@ -665,9 +665,40 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	}
 	value, err := k.CPAMP.Analytics(ctx, req)
 	if err == nil {
+		value = usageStatusFromTimeline(value)
 		k.putCache(cacheKey, value)
 	}
 	return value, err
+}
+
+// usageStatusFromTimeline avoids CPAMP's filtered daily-rollup status counts.
+// Only use a complete, consistently classified timeline from the same query;
+// never derive all-time totals from a capped recent-events page.
+func usageStatusFromTimeline(value cpamp.AnalyticsResponse) cpamp.AnalyticsResponse {
+	if value.Summary == nil || len(value.Timeline) == 0 {
+		return value
+	}
+	var calls, successes, failures int64
+	for _, point := range value.Timeline {
+		if point.Calls < 0 || point.Success < 0 || point.Failure < 0 || point.Success+point.Failure != point.Calls {
+			return value
+		}
+		calls += point.Calls
+		successes += point.Success
+		failures += point.Failure
+	}
+	if calls != value.Summary.TotalCalls {
+		return value
+	}
+	// Copy the summary so correction cannot mutate another cached response.
+	summary := *value.Summary
+	summary.SuccessCalls, summary.FailureCalls = successes, failures
+	summary.SuccessRate = 0
+	if calls > 0 {
+		summary.SuccessRate = float64(successes) / float64(calls)
+	}
+	value.Summary = &summary
+	return value
 }
 
 func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {

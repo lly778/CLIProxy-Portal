@@ -46,6 +46,9 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	if strings.Contains(html, "平均总耗时") {
 		t.Fatal("duration labels must consistently use 平均耗时")
 	}
+	if strings.Contains(html, "计时请求数") || strings.Contains(html, `data-trend-value="samples"`) {
+		t.Fatal("health tooltip must not display the timing request count")
+	}
 	if strings.Contains(html, "总耗时仅统计已记录的门户请求") {
 		t.Fatal("removed timing note must not appear in the page")
 	}
@@ -54,6 +57,59 @@ func TestHealthTrendLegendSharesUsageHeaderPosition(t *testing.T) {
 	}
 	if !strings.Contains(html, "平均耗时") || strings.Contains(html, "平均延迟") || !strings.Contains(html, "4000 ms") {
 		t.Fatal("duration metric must use total timing")
+	}
+}
+
+func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageUsage, UsageView{IsAdmin: true, ShowUserStats: true}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	if !strings.Contains(html, "<h2>按用户</h2>") {
+		t.Fatal("user usage section must remain visible")
+	}
+	if strings.Contains(html, "同一用户的历次 API Key 用量合并统计") {
+		t.Fatal("removed key aggregation caption must not appear")
+	}
+}
+
+func TestUserManagementTableContentsAreCentered(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		".user-management-card th, .user-management-card td { text-align: center; }",
+		".user-management-card .user-cell, .user-management-card .user-name-line, .user-management-card .user-row-actions { justify-content: center; }",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing scoped user table centering: %s", rule)
+		}
+	}
+}
+
+func TestLogTablesCenterContentsWithTextColumnExceptions(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		".request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }",
+		".request-log-table td.request-model-cell, .request-detail-table td.request-model-cell { text-align: left; }",
+		".audit-table th, .audit-table td { text-align: center; }",
+		".audit-table .audit-action-cell, .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing log table alignment: %s", rule)
+		}
+	}
+	if bytes.Contains(css, []byte(".request-log-table td:nth-child(1), .request-log-table td:nth-child(2)")) {
+		t.Fatal("request time and user columns must no longer be left-aligned")
 	}
 }
 
