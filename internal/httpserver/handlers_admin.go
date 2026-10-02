@@ -117,6 +117,7 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
 	v.HealthTrend = s.requestHealthTrend(r.Context(), daily, from, to, userID)
+	v.ModelStatsNote = a.ModelStatsNote
 	if err != nil {
 		v.Error = "全局用量暂时不可用"
 	} else if userID == "" {

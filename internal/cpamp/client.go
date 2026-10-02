@@ -372,6 +372,10 @@ type EventsPage struct {
 // AnalyticsResponse is the stable subset consumed by the portal. CPAMP's
 // response can contain additional aggregates that are intentionally ignored.
 type AnalyticsResponse struct {
+	// ModelStatsNote is a portal-only warning when complete actual-model
+	// aggregates cannot be derived. Never fall back to requested-model totals.
+	ModelStatsNote string                     `json:"-"`
+	Coverage       *AnalyticsCoverage         `json:"coverage,omitempty"`
 	GeneratedAtMS  int64                      `json:"generated_at_ms"`
 	Granularity    string                     `json:"granularity"`
 	Summary        *UsageSummary              `json:"summary,omitempty"`
@@ -382,6 +386,10 @@ type AnalyticsResponse struct {
 	APIKeyTimeline []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
 	RecentFailures []RecentFailure            `json:"recent_failures,omitempty"`
 	Events         *EventsResponse            `json:"events,omitempty"`
+}
+
+type AnalyticsCoverage struct {
+	RawDeletedEventCount int64 `json:"raw_deleted_event_count"`
 }
 
 // UsageSummary contains request and token totals.
@@ -504,6 +512,7 @@ type EventRow struct {
 	Model               string `json:"model"`
 	RequestedModel      string `json:"requested_model,omitempty"`
 	ResolvedModel       string `json:"resolved_model,omitempty"`
+	ResponseModel       string `json:"response_model,omitempty"`
 	Endpoint            string `json:"endpoint"`
 	Method              string `json:"method"`
 	Path                string `json:"path"`

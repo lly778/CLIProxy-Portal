@@ -231,7 +231,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	if rangeName == "24h" {
 		summary.WindowLabel = "最近 24 小时"
 	}
-	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "我的使用量", "usage"), FormAction: "/usage", From: formFrom, To: formTo, Range: rangeName, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
+	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "我的使用量", "usage"), FormAction: "/usage", From: formFrom, To: formTo, Range: rangeName, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests, ModelStatsNote: a.ModelStatsNote}
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}

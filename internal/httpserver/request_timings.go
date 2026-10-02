@@ -18,7 +18,7 @@ func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) 
 	if event.LatencyMS != nil {
 		model = fmt.Sprintf("%d ms", *event.LatencyMS)
 	}
-	lines = append(lines, "", "各阶段耗时（完整记录时，三段相加为服务器耗时）")
+	lines = append(lines, "", "各阶段耗时（完整记录时，三段相加为总耗时）")
 	stage := func(label string, from, to *int64) {
 		value := "—"
 		if from != nil && to != nil && *to >= *from {

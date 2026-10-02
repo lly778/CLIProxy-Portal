@@ -103,7 +103,7 @@ func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
 		title, caption string
 	}{
 		{"按用户", "展示所选时间范围内各用户的请求数与 Token 数，分别按用量排序。"},
-		{"按模型", "展示所选时间范围内各模型的请求数与 Token 数，分别按用量排序。"},
+		{"按模型", "按实际使用的模型汇总请求数与 Token 数，分别按用量排序。"},
 	} {
 		if !strings.Contains(html, "<h2>"+heading.title+`</h2><p class="muted small">`+heading.caption+"</p>") {
 			t.Fatalf("ranking explanation must appear below %s", heading.title)

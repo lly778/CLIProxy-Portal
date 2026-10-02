@@ -661,11 +661,10 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 		return cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}}, nil
 	}
 	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, Granularity: granularity}}
-	if events > 0 {
-		req.Include.EventsPage = &cpamp.EventsPage{Limit: events}
-	}
+	req.Include.EventsPage = &cpamp.EventsPage{Limit: actualModelPageSize}
 	value, err := k.CPAMP.Analytics(ctx, req)
 	if err == nil {
+		value = k.actualModelUsage(ctx, req, value, events)
 		value = usageStatusFromTimeline(value)
 		k.putCache(cacheKey, value)
 	}
@@ -711,11 +710,10 @@ func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) 
 		return value, nil
 	}
 	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, APIKeyStats: true, Granularity: granularity}}
-	if events > 0 {
-		req.Include.EventsPage = &cpamp.EventsPage{Limit: events}
-	}
+	req.Include.EventsPage = &cpamp.EventsPage{Limit: actualModelPageSize}
 	value, err := k.CPAMP.Analytics(ctx, req)
 	if err == nil {
+		value = k.actualModelUsage(ctx, req, value, events)
 		// Preserve the request-status summary used by CPAMP's timeline and
 		// request logs. Per-key aggregates are only for usage rankings; their
 		// success/failure counts may disagree even when total calls match.

@@ -341,6 +341,7 @@ type UsageView struct {
 	ByModel          []ModelUsageView
 	ByModelRequests  []ModelUsageView
 	ByModelTokens    []ModelUsageView
+	ModelStatsNote   string
 	ShowUserStats    bool
 	ByUserRequests   []UserUsageView
 	ByUserTokens     []UserUsageView
