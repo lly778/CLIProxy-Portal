@@ -73,12 +73,22 @@ func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
 	if !strings.Contains(html, "<h2>按用户</h2>") {
 		t.Fatal("user usage section must remain visible")
 	}
+	for _, heading := range []struct {
+		title, caption string
+	}{
+		{"按用户", "展示所选时间范围内各用户的请求数与 Token 数，分别按用量排序。"},
+		{"按模型", "展示所选时间范围内各模型的请求数与 Token 数，分别按用量排序。"},
+	} {
+		if !strings.Contains(html, "<h2>"+heading.title+`</h2><p class="muted small">`+heading.caption+"</p>") {
+			t.Fatalf("ranking explanation must appear below %s", heading.title)
+		}
+	}
 	if strings.Contains(html, "同一用户的历次 API Key 用量合并统计") {
 		t.Fatal("removed key aggregation caption must not appear")
 	}
 }
 
-func TestUserManagementTableOmitsAvatarsAndKeepsUserDetails(t *testing.T) {
+func TestUserManagementTableKeepsAlignedAvatarsAndUserDetails(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
 		t.Fatal(err)
@@ -90,12 +100,7 @@ func TestUserManagementTableOmitsAvatarsAndKeepsUserDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, unwanted := range []string{`class="avatar small-avatar"`, "头像缩写"} {
-		if strings.Contains(html, unwanted) {
-			t.Fatalf("user list must not display an avatar: %s", unwanted)
-		}
-	}
-	for _, want := range []string{"测试用户", "13800138000", `class="badge role-admin"`, `href="/admin/users/u1"`, `class="user-cell"`, `class="user-name-line"`} {
+	for _, want := range []string{`class="avatar small-avatar" aria-hidden="true"`, "头像缩写", "测试用户", "13800138000", `class="badge role-admin"`, `href="/admin/users/u1"`, `class="user-cell"`, `class="user-name-line"`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("user details or centered layout removed: %s", want)
 		}
@@ -110,6 +115,10 @@ func TestUserManagementTableContentsAreCentered(t *testing.T) {
 	for _, rule := range []string{
 		".user-management-card th, .user-management-card td { text-align: center; }",
 		".user-management-card .user-cell, .user-management-card .user-name-line, .user-management-card .user-row-actions { justify-content: center; }",
+		".user-management-card .user-cell { position: relative; padding: 0 37px; }",
+		".user-management-card .user-cell > .avatar { position: absolute; left: 0; top: 50%; transform: translateY(-50%); }",
+		".user-management-card .user-name-line { position: relative; justify-self: center; }",
+		".user-management-card .user-name-line .role-admin { position: absolute; left: 100%; top: 50%; margin-left: 7px; transform: translateY(-50%); }",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing scoped user table centering: %s", rule)
