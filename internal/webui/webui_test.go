@@ -325,7 +325,7 @@ func TestUsageTrendRendersBothSeries(t *testing.T) {
 			if !strings.Contains(got, `<div><span class="tokens"><i></i>Token 数</span><b data-trend-tokens>`) {
 				t.Fatal("chart tooltip must use the same Token label as the legend")
 			}
-			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<rect class="trend-bar tokens" x="272" y="180" width="36" height="38" rx="3">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `<div class="trend-legend"><span class="requests"><i></i>请求数</span><span class="tokens"><i></i>Token 数</span></div>`, `aria-label="请求数平滑曲线（左轴）与 Token 柱状图（右轴）"`, "data-trend-tooltip", `data-requests="12"`, "请求数与 Token 数在同一时间范围内联动展示。"} {
+			for _, want := range []string{`<path class="trend-line requests" d="M290,28 L710,123">`, `<path class="trend-bar tokens" data-bar-x="272" data-bar-y="180" data-bar-width="36" data-bar-height="38" d="M272,180 h36 v38 h-36 Z">`, `class="trend-area requests"`, `class="trend-axis-label tokens"`, `class="trend-axis-label requests"`, `<div class="trend-legend"><span class="requests"><i></i>请求数</span><span class="tokens"><i></i>Token 数</span></div>`, `aria-label="请求数平滑曲线（左轴）与 Token 柱状图（右轴）"`, "data-trend-tooltip", `data-requests="12"`, "请求数与 Token 数在同一时间范围内联动展示。"} {
 				if !strings.Contains(got, want) {
 					t.Errorf("usage trend output does not contain %q", want)
 				}

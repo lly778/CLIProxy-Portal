@@ -247,10 +247,14 @@
       var yScale = Math.hypot(matrix.c, matrix.d);
       if (!xScale || !yScale) return;
       bars.forEach(function (bar) {
-        // Small, screen-sized corners with a flat top, even on a zoomed bar.
-        // Thin/short bars use smaller corners instead of becoming capsules.
-        bar.setAttribute("rx", Math.min(3 / xScale, Number(bar.getAttribute("width")) / 4));
-        bar.setAttribute("ry", Math.min(3 / yScale, Number(bar.getAttribute("height")) / 4));
+        var x = Number(bar.dataset.barX), y = Number(bar.dataset.barY);
+        var width = Number(bar.dataset.barWidth), height = Number(bar.dataset.barHeight);
+        if (width <= 0 || height <= 0) { bar.setAttribute("d", ""); return; }
+        // Round only the two top corners, keeping both bottom corners square
+        // on the baseline. Top arcs remain screen-sized during zoom.
+        var rx = Math.min(8 / xScale, width / 4), ry = Math.min(8 / yScale, height / 4);
+        var right = x + width, bottom = y + height;
+        bar.setAttribute("d", "M" + x + "," + bottom + " V" + (y + ry) + " A" + rx + "," + ry + " 0 0 1 " + (x + rx) + "," + y + " H" + (right - rx) + " A" + rx + "," + ry + " 0 0 1 " + right + "," + (y + ry) + " V" + bottom + " Z");
       });
     }
     function updateTrendSymbols() {
