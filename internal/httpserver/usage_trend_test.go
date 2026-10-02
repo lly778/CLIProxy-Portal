@@ -12,7 +12,7 @@ import (
 	"cliproxy-portal/internal/webui"
 )
 
-func TestWeeklyTimelineKeepsHourlyPointsAndPreservesTotals(t *testing.T) {
+func TestWeeklyTimelineGroupsThreeHourlyPointsAndPreservesTotals(t *testing.T) {
 	zone := time.FixedZone("CST", 8*60*60)
 	s := &Server{Cfg: config.Config{TimeZone: zone}}
 	from := time.Date(2026, 9, 25, 0, 0, 0, 0, zone)
@@ -21,11 +21,11 @@ func TestWeeklyTimelineKeepsHourlyPointsAndPreservesTotals(t *testing.T) {
 		a.Timeline = append(a.Timeline, cpamp.UsageTimelinePoint{BucketMS: from.Add(time.Duration(i) * time.Hour).UnixMilli(), Calls: 1, TotalTokens: 1000})
 	}
 	points := s.usageTimeline(a, from, from.Add(7*24*time.Hour))
-	if len(points) != 168 || usageTrend(points).GranularityLabel != "按小时" || usageTrend(points).ShowSymbols {
+	if len(points) != 56 || usageTrend(points).GranularityLabel != "每 3 小时" || usageTrend(points).ShowSymbols {
 		t.Fatalf("weekly timeline has %d points with wrong granularity", len(points))
 	}
 	for i, point := range points {
-		if point.Date != from.Add(time.Duration(i)*time.Hour).Format("01-02 15:00") || point.RequestValue != 1 || point.TokenValue != 1000 {
+		if point.Date != from.Add(time.Duration(i)*3*time.Hour).Format("01-02 15:00") || point.RequestValue != 3 || point.TokenValue != 3000 || point.BucketHours != 3 {
 			t.Fatalf("weekly interval %d = %#v", i, point)
 		}
 	}
@@ -60,10 +60,87 @@ func TestCustomTwoDayTimelineKeeps48HourlyIntervalsWithoutChangingTotals(t *test
 	}
 }
 
+func TestUsageTimelineGranularityAt72HourAndSevenDayBoundaries(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 9, 25, 0, 0, 0, 0, zone)
+	for _, tc := range []struct {
+		name               string
+		span               time.Duration
+		bucketHours, count int
+	}{
+		{"24 hours", 24 * time.Hour, 1, 24},
+		{"exactly 72 hours", 72 * time.Hour, 1, 72},
+		{"just over 72 hours", 72*time.Hour + time.Second, 3, 25},
+		{"73 hours", 73 * time.Hour, 3, 25},
+		{"four days", 96 * time.Hour, 3, 32},
+		{"exactly seven days", 168 * time.Hour, 3, 56},
+		{"just over seven days", 168*time.Hour + time.Second, 24, 8},
+		{"eight days", 192 * time.Hour, 24, 8},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			to := from.Add(tc.span)
+			a := cpamp.AnalyticsResponse{Granularity: "hour", Summary: &cpamp.UsageSummary{}}
+			for at := from; at.Before(to); at = at.Add(time.Hour) {
+				calls := int64(len(a.Timeline)%5 + 1)
+				a.Timeline = append(a.Timeline, cpamp.UsageTimelinePoint{BucketMS: at.UnixMilli(), Calls: calls, TotalTokens: calls * 12345})
+				a.Summary.TotalCalls += calls
+				a.Summary.TotalTokens += calls * 12345
+			}
+			points := s.usageTimeline(a, from, to)
+			if len(points) != tc.count {
+				t.Fatalf("got %d points, want %d", len(points), tc.count)
+			}
+			var calls, tokens int64
+			for i, p := range points {
+				if p.BucketHours != tc.bucketHours {
+					t.Fatalf("got %d-hour buckets, want %d", p.BucketHours, tc.bucketHours)
+				}
+				if i > 0 && p.LabelTick-points[i-1].LabelTick != 1 {
+					t.Fatal("label ticks must follow grouped intervals")
+				}
+				calls += p.RequestValue
+				tokens += p.TokenValue
+			}
+			if calls != a.Summary.TotalCalls || tokens != a.Summary.TotalTokens {
+				t.Fatal("grouping changed request or Token totals")
+			}
+		})
+	}
+}
+
+func TestThreeHourTimelineLabelsRemainClockAlignedAndUniform(t *testing.T) {
+	zone := time.FixedZone("CST", 8*60*60)
+	s := &Server{Cfg: config.Config{TimeZone: zone}}
+	from := time.Date(2026, 9, 25, 14, 15, 0, 0, zone)
+	to := from.Add(96 * time.Hour)
+	a := cpamp.AnalyticsResponse{Granularity: "hour", Timeline: []cpamp.UsageTimelinePoint{{BucketMS: from.Truncate(time.Hour).UnixMilli(), Calls: 10, TotalTokens: 1000}}}
+	points := s.usageTimeline(a, from, to)
+	if len(points) != 33 || points[0].Date != "09-25 12:00" || points[32].Date != "09-29 12:00" {
+		t.Fatalf("three-hour boundaries = %#v", points)
+	}
+	var previousTick, gap int64
+	for _, p := range usageTrend(points).Points {
+		if !p.ShowLabel {
+			continue
+		}
+		if previousTick != 0 {
+			if gap != 0 && p.LabelTick-previousTick != gap {
+				t.Fatal("three-hour labels have mixed intervals")
+			}
+			gap = p.LabelTick - previousTick
+		}
+		previousTick = p.LabelTick
+	}
+	if gap == 0 {
+		t.Fatal("expected multiple grouped labels")
+	}
+}
+
 func TestWeeklyTimelineIncludesEmptyAndPartialBoundaryIntervals(t *testing.T) {
 	zone := time.FixedZone("CST", 8*60*60)
 	s := &Server{Cfg: config.Config{TimeZone: zone}}
-	from := time.Date(2026, 9, 25, 3, 15, 0, 0, zone)
+	from := time.Date(2026, 9, 25, 4, 15, 0, 0, zone)
 	to := from.Add(7 * 24 * time.Hour)
 	a := cpamp.AnalyticsResponse{Granularity: "hour", Timeline: []cpamp.UsageTimelinePoint{
 		{BucketMS: from.Truncate(time.Hour).UnixMilli(), Calls: 2, TotalTokens: 200},
@@ -72,7 +149,7 @@ func TestWeeklyTimelineIncludesEmptyAndPartialBoundaryIntervals(t *testing.T) {
 		{BucketMS: to.Truncate(time.Hour).Add(time.Hour).UnixMilli(), Calls: 99, TotalTokens: 9900},
 	}}
 	points := s.usageTimeline(a, from, to)
-	if len(points) != 169 || points[0].RequestValue != 2 || points[len(points)-1].RequestValue != 5 {
+	if len(points) != 57 || points[0].RequestValue != 2 || points[len(points)-1].RequestValue != 5 {
 		t.Fatalf("partial boundary interval data lost: %#v", points)
 	}
 	for _, point := range points[1 : len(points)-1] {

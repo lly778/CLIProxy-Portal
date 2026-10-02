@@ -429,7 +429,9 @@ func usageTrend(points []webui.UsagePointView) webui.UsageTrendView {
 	trend.MaxRequests = compactNumber(maxRequests)
 	trend.MaxTokens = compactNumber(maxTokens)
 	trend.GranularityLabel = "按天"
-	if strings.Contains(points[0].Date, ":") {
+	if points[0].BucketHours == 3 {
+		trend.GranularityLabel = "每 3 小时"
+	} else if strings.Contains(points[0].Date, ":") {
 		trend.GranularityLabel = "按小时"
 	}
 	return trend
