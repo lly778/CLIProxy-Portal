@@ -35,16 +35,22 @@ func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequest
 	if err != nil {
 		return err
 	}
-	// Keep compact trend samples independently of the 100 detailed rows. They
+	// Keep compact trend samples independently of the bounded detail rows. They
 	// contain neither conversation content nor API keys/request identifiers.
 	if _, err = tx.ExecContext(ctx, `INSERT INTO gateway_timing_samples(id,user_id,started_at_ms,total_ms,request_read_ms,response_started_ms)
 		VALUES(?,?,?,?,?,?)`, row.ID, row.UserID, row.StartedAt.UnixMilli(), row.TotalMS, row.RequestReadMS, row.ResponseStartedMS); err != nil {
 		return err
 	}
-	// Keep the same per-user request window as dialogue records, independently
-	// of whether a dialogue could be extracted or encrypted successfully.
+	// Match dialogue retention: unidentified requests (e.g. an upstream 429
+	// without X-CPA-TRACE-ID) must not evict the 100 linkable request details.
+	// Both classes are bounded independently, regardless of success or failure.
 	if _, err = tx.ExecContext(ctx, `DELETE FROM gateway_request_timings WHERE id IN
-		(SELECT id FROM gateway_request_timings WHERE user_id=? ORDER BY started_at_ms DESC,id DESC LIMIT -1 OFFSET 100)`, row.UserID); err != nil {
+		(SELECT id FROM (
+			SELECT id,ROW_NUMBER() OVER (
+				PARTITION BY CASE WHEN TRIM(cpa_request_id)='' THEN 0 ELSE 1 END
+				ORDER BY started_at_ms DESC,id DESC
+			) AS retention_rank FROM gateway_request_timings WHERE user_id=?
+		) WHERE retention_rank>100)`, row.UserID); err != nil {
 		return err
 	}
 	return tx.Commit()

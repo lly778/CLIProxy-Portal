@@ -165,12 +165,19 @@ func (s *Store) DeleteGatewayCapturesExceptFormat(ctx context.Context, contentTy
 	return s.deleteGatewayCaptures(ctx, `SELECT id FROM gateway_captures WHERE request_content_type<>?`, contentType)
 }
 
-// DeleteExcessGatewayCaptures keeps the newest limit rows for one user.
+// DeleteExcessGatewayCaptures keeps the newest limit rows in each per-user
+// class: requests with a CPA request ID and requests without one. Unidentified
+// errors must not evict captures belonging to the visible CPAMP request log.
 func (s *Store) DeleteExcessGatewayCaptures(ctx context.Context, userID string, limit int) (GatewayCaptureDeletion, error) {
 	if limit < 0 {
 		limit = 0
 	}
-	return s.deleteGatewayCaptures(ctx, `SELECT id FROM gateway_captures WHERE user_id=? ORDER BY created_at_ms DESC, id DESC LIMIT -1 OFFSET ?`, userID, limit)
+	return s.deleteGatewayCaptures(ctx, `SELECT id FROM (
+		SELECT id,ROW_NUMBER() OVER (
+			PARTITION BY CASE WHEN TRIM(cpa_request_id)='' THEN 0 ELSE 1 END
+			ORDER BY created_at_ms DESC,id DESC
+		) AS retention_rank FROM gateway_captures WHERE user_id=?
+	) WHERE retention_rank>?`, userID, limit)
 }
 
 func (s *Store) deleteGatewayCaptures(ctx context.Context, query string, args ...any) (GatewayCaptureDeletion, error) {
