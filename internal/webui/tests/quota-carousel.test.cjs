@@ -59,6 +59,18 @@ function setup(names = ['Codex', 'Antigravity', 'Gemini'], preferred, layouts = 
     selected: () => window.QuotaCarousel.selected(root), disconnected: () => disconnected,
     asyncScroll() { asyncScroll = true; },
     emulateSnap() { emulateSnap = true; },
+    animationClock() {
+      let time = 0, nextID = 0;
+      const frames = new Map();
+      window.performance = { now: () => time };
+      window.requestAnimationFrame = callback => { const id = ++nextID; frames.set(id, callback); return id; };
+      window.cancelAnimationFrame = id => frames.delete(id);
+      return {
+        time(value) { time = value; },
+        tick(value) { time = value; const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(time)); },
+        pending: () => frames.size,
+      };
+    },
     finishScroll() { viewport.scrollLeft = pending; viewport.emit('scroll'); },
     scroll(left) { viewport.scrollLeft = left; viewport.emit('scroll'); },
     pointer(name, x, y = 0, extra = {}) { return viewport.emit(name, { clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', button: 0, ...extra }); },
@@ -124,6 +136,67 @@ test('cancel, wheel interruption, repeated dragging and destroy clear settling s
   assert.equal(f.classes.has('is-settling'), false); assert.equal(f.classes.has('is-dragging'), false);
 });
 
+test('release animation carries drag velocity immediately and lands monotonically without native ease-in', () => {
+  for (const [start, dx, target] of [[0, -200, 600], [1, 200, 0], [0, -390, 600], [1, 390, 0], [0, -30, 0], [1, 30, 600]]) {
+    const f = setup(undefined, ['Codex', 'Antigravity'][start]);
+    const clock = f.animationClock(); f.emulateSnap();
+    f.pointer('pointerdown', 500);
+    clock.time(32); f.pointer('pointermove', 500 + dx / 2);
+    clock.time(64); f.pointer('pointermove', 500 + dx);
+    const released = f.viewport.scrollLeft, calls = f.scrollCalls.length;
+    f.pointer('pointerup', 500 + dx);
+    assert.equal(f.viewport.scrollLeft, released);
+    assert.equal(f.scrollCalls.length, calls, 'release must not start native smooth scrolling');
+    clock.tick(65);
+    if (Math.abs(dx) >= 72) {
+      const speed = Math.abs(dx) / 64;
+      assert.ok(Math.abs(f.viewport.scrollLeft - released) >= speed * .97, 'first frame must carry the release velocity');
+      assert.ok(Math.abs(f.viewport.scrollLeft - released) <= speed * 1.03);
+    }
+    let previous = f.viewport.scrollLeft;
+    for (let t = 80; t <= 464; t += 16) {
+      clock.tick(t);
+      const position = f.viewport.scrollLeft;
+      assert.ok(position >= Math.min(released, target) && position <= Math.max(released, target), 'no overshoot or jump to origin');
+      assert.ok(Math.abs(target - position) <= Math.abs(target - previous), 'release motion must stay monotonic');
+      previous = position;
+    }
+    assert.equal(f.viewport.scrollLeft, target);
+    assert.equal(clock.pending(), 0);
+    assert.equal(f.classes.has('is-settling'), false);
+  }
+});
+
+test('release frames stop on new input, resize, cancellation and destroy; reduced motion stays instant', () => {
+  const interrupts = [
+    f => f.viewport.emit('wheel'),
+    f => f.window.emit('resize'),
+    f => f.next.emit('click'),
+    f => f.pointer('pointerdown', 300, 0, { pointerType: 'touch' }),
+    f => f.pointer('pointerdown', 300),
+    f => f.window.QuotaCarousel.destroy(f.root),
+  ];
+  for (const interrupt of interrupts) {
+    const f = setup(), clock = f.animationClock();
+    f.pointer('pointerdown', 500); clock.time(64); f.pointer('pointermove', 300); f.pointer('pointerup', 300);
+    clock.tick(80);
+    assert.equal(clock.pending(), 1);
+    interrupt(f);
+    assert.equal(clock.pending(), 0);
+    const interrupted = f.viewport.scrollLeft;
+    clock.tick(500);
+    assert.equal(f.viewport.scrollLeft, interrupted, 'old frame must not overwrite new input');
+  }
+  const f = setup(), clock = f.animationClock();
+  f.pointer('pointerdown', 500); clock.time(64); f.pointer('pointermove', 300); f.pointer('pointercancel', 300);
+  assert.equal(clock.pending(), 0); assert.equal(f.viewport.scrollLeft, 0);
+  f.window.QuotaCarousel.destroy(f.root);
+  f.window.matchMedia = () => ({ matches: true });
+  f.window.QuotaCarousel.init(f.root);
+  f.pointer('pointerdown', 500); clock.time(128); f.pointer('pointermove', 300); f.pointer('pointerup', 300);
+  assert.equal(clock.pending(), 0); assert.equal(f.viewport.scrollLeft, 600); assert.equal(f.classes.has('is-settling'), false);
+});
+
 test('boundary arrows hide and reappear after clicks, native scroll, keyboard and resize', () => {
   const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
   assert.match(css, /\.quota-carousel-arrow\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
@@ -184,6 +257,21 @@ test('keyboard and resize preserve the selected provider and single-channel cont
   f.viewport.clientWidth = 350; f.window.emit('resize'); assert.equal(f.viewport.scrollLeft, 700);
   f.viewport.emit('keydown', { key: 'Home' }); assert.equal(f.selected(), 'Codex');
   assert.equal(setup(['Codex']).controls.hidden, true);
+});
+
+test('text selection does not start a carousel drag or suppress its native click', () => {
+  const f = setup();
+  const textTarget = { closest: selector => selector.includes('[data-quota-text]') ? {} : null };
+  f.pointer('pointerdown', 300, 0, { target: textTarget });
+  const move = f.pointer('pointermove', 100, 0, { target: textTarget });
+  f.pointer('pointerup', 100, 0, { target: textTarget });
+  assert.equal(move.prevented, undefined);
+  assert.equal(f.classes.has('is-dragging'), false);
+  assert.equal(f.viewport.scrollLeft, 0);
+  assert.equal(f.selected(), 'Codex');
+  assert.equal(f.viewport.emit('click', { target: textTarget }).prevented, undefined);
+  f.pointer('pointerdown', 300); f.pointer('pointermove', 100); f.pointer('pointerup', 100);
+  assert.equal(f.selected(), 'Antigravity', 'blank space must still drag');
 });
 
 test('refresh reinitialization restores the selected provider, cleans listeners and tolerates removed providers', () => {

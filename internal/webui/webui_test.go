@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-1`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-3`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -859,8 +859,52 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 	if strings.Contains(got, "quota-refresh-status") {
 		t.Fatal("quota pool should not render refresh status text")
 	}
-	if !strings.Contains(got, `<p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。</p>`) || strings.Contains(got, "不同套餐和不同周期不会混合计算") || strings.Contains(got, "长周期额度耗尽的账号仍计入") {
+	if !strings.Contains(got, `<p class="quota-pool-note"><span data-quota-text>这是所有用户共享的上游账号池状态，不是个人限额。</span></p>`) || strings.Contains(got, "不同套餐和不同周期不会混合计算") || strings.Contains(got, "长周期额度耗尽的账号仍计入") {
 		t.Fatal("quota pool note should contain only the shared pool explanation")
+	}
+}
+
+func TestTextCursorPolicyPreservesSelectionAndInteractiveControls(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		`:where(a[href], button, summary, [role="button"], label) { cursor: pointer; }`,
+		`.quota-carousel-viewport:not(.is-dragging) [data-quota-text] { cursor: text; user-select: text; }`,
+		`.quota-carousel-viewport.is-dragging [data-quota-text] { cursor: grabbing; user-select: none; }`,
+		`.trend-axis-label, .trend-x-label { cursor: text; user-select: text; }`,
+		`.trend-interactive { touch-action: pan-y; user-select: none; cursor: grab; }`,
+		`.trend-dragging, .trend-dragging svg { cursor: grabbing; }`,
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing text cursor policy: %s", rule)
+		}
+	}
+	if bytes.Contains(css, []byte("cursor: crosshair")) {
+		t.Fatal("chart pointer capture must not switch to a crosshair cursor")
+	}
+	if bytes.Contains(css, []byte(":where(h1,")) {
+		t.Fatal("text cursor must not cover entire headings, paragraphs or table cells")
+	}
+	if !bytes.Contains(css, []byte(".quota-pool-value > strong, .quota-pool-value > span { display: block; }")) {
+		t.Fatal("quota layout must not stretch the nested inline text hit areas")
+	}
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, DashboardView{Quota: QuotaPoolView{Show: true, Provider: "Codex", Available: true, Groups: []QuotaGroupView{{Label: "PLUS · 5 小时额度", RemainingPercent: 50, Accounts: "2 个可用", ResetAt: "2026-10-05 01:03", ObservedAt: "2026-10-05 00:22"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{`<h2><span data-quota-text>上游额度池</span></h2>`, `<span><span data-quota-text>PLUS · 5 小时额度</span></span>`, `<dt><span data-quota-text>账号状态</span></dt>`, `<dd><span data-quota-text>2 个可用</span></dd>`, `<dd><span data-quota-text>2026-10-05 01:03</span></dd>`, `<dd><span data-quota-text>2026-10-05 00:22</span></dd>`} {
+		if !strings.Contains(out.String(), text) {
+			t.Fatalf("quota text must support native selection: %s", text)
+		}
+	}
+	if strings.Count(out.String(), "data-quota-text") != strings.Count(out.String(), "<span data-quota-text>") {
+		t.Fatal("only tight inline text spans may block carousel dragging")
 	}
 }
 
@@ -883,7 +927,7 @@ func TestQuotaPoolsRenderOneChannelCarouselWithPreloadedProviders(t *testing.T) 
 			t.Fatal(err)
 		}
 		html := out.String()
-		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261004-5`} {
+		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261005-1`} {
 			if !strings.Contains(html, want) {
 				t.Fatalf("%s missing carousel markup: %s", page, want)
 			}
@@ -955,12 +999,12 @@ func TestAllQuotaChannelsUseOnePercentageLayoutAndEstimateTooltip(t *testing.T) 
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`<div class="quota-pool-value"><span>PLUS · 5 小时额度</span><strong title="额度剩余（按账号等权估算）">22%</strong></div>`, `<div class="quota-pool-value"><span>Gemini · 5 小时额度</span><strong title="额度剩余（按账号等权估算）">96%</strong></div>`} {
+	for _, want := range []string{`<div class="quota-pool-value"><span><span data-quota-text>PLUS · 5 小时额度</span></span><strong title="额度剩余（按账号等权估算）"><span data-quota-text>22%</span></strong></div>`, `<div class="quota-pool-value"><span><span data-quota-text>Gemini · 5 小时额度</span></span><strong title="额度剩余（按账号等权估算）"><span data-quota-text>96%</span></strong></div>`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("channel must share the title/percentage markup: %s", want)
 		}
 	}
-	if strings.Count(html, `title="额度剩余（按账号等权估算）"`) != 2 || strings.Count(html, `<p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。</p>`) != 2 {
+	if strings.Count(html, `title="额度剩余（按账号等权估算）"`) != 2 || strings.Count(html, `<p class="quota-pool-note"><span data-quota-text>这是所有用户共享的上游账号池状态，不是个人限额。</span></p>`) != 2 {
 		t.Fatal("estimate must remain available in percentage tooltips without adding visible explanation rows")
 	}
 }
@@ -1040,10 +1084,13 @@ func TestQuotaRefreshCompletedTextPrecedesButton(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := out.String()
-			result := strings.Index(got, `class="muted small quota-refresh-result" role="status">已刷新</span>`)
+			result := strings.Index(got, `class="muted small quota-refresh-result" role="status">`)
 			button := strings.Index(got, `class="button secondary quota-refresh-button"`)
 			if completed && (result < 0 || button < result) || !completed && result >= 0 {
 				t.Fatalf("page %s completed=%v should show success only before the refresh button", page, completed)
+			}
+			if completed && !strings.Contains(got[result:button], "已刷新") {
+				t.Fatal("refresh status must keep its success message")
 			}
 		}
 	}

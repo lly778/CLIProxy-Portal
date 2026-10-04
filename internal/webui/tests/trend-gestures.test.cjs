@@ -104,6 +104,22 @@ function fixture(count, width, health = false, options = {}) {
   return { chart, tooltip, tooltipDate, healthValues, requestValue, tokenValue, points, bars, stackOutline, stackClip, stackTarget, resize, touch, send, viewport, visiblePoints, pinch };
 }
 
+test('chart axis text remains selectable without panning or resetting chart zoom', () => {
+  for (const health of [false, true]) {
+    const f = fixture(60, 400, health);
+    f.chart.dispatch('wheel', { clientX: 200, clientY: 100, deltaY: -Math.log(2) / 0.002, deltaMode: 0 });
+    const before = f.viewport();
+    const text = { closest: selector => selector.includes('.trend-axis-label') ? {} : null };
+    const fields = { target: text, pointerType: 'mouse', button: 0, pointerId: 1, clientX: 200, clientY: 100 };
+    f.chart.dispatch('pointerdown', fields);
+    assert.equal(f.chart.classList.contains('trend-dragging'), false);
+    f.chart.dispatch('pointermove', { ...fields, clientX: 250 });
+    f.chart.dispatch('pointerup', fields);
+    f.chart.dispatch('dblclick', fields);
+    assert.deepEqual(f.viewport(), before);
+  }
+});
+
 for (const health of [false, true]) {
   for (const width of [400, 1000]) {
     const name = `${health ? 'health' : 'usage'} at ${width}px`;

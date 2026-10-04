@@ -559,6 +559,7 @@
     }, { passive: false });
     chart.addEventListener("pointerdown", function (event) {
       if (event.pointerType === "touch") return;
+      if (event.target && event.target.closest && event.target.closest(".trend-axis-label, .trend-x-label")) return;
       if (!zoomable || event.button !== 0) return;
       var pointer = pointerPosition(event);
       if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
@@ -586,6 +587,7 @@
     chart.addEventListener("pointercancel", finishDrag);
     chart.addEventListener("lostpointercapture", finishDrag);
     chart.addEventListener("dblclick", function (event) {
+      if (event.target && event.target.closest && event.target.closest(".trend-axis-label, .trend-x-label")) return;
       if (!zoomable) return;
       var pointer = pointerPosition(event);
       if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
