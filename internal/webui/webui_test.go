@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-8`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-9`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -560,6 +560,48 @@ func TestRequestDurationDisplaysOnlyTotalAndEscapesStageTooltip(t *testing.T) {
 		got := out.String()
 		if !strings.Contains(got, "<th>耗时</th>") || strings.Contains(got, "总耗时") || !strings.Contains(got, "服务器耗时：473000 ms") || !strings.Contains(got, ">473000 ms</span>") || strings.Contains(got, ">8000 ms<") || !strings.Contains(got, "模型调用耗时：8000 ms") || !strings.Contains(got, "&lt;safe&gt; &#34;detail&#34;") {
 			t.Fatalf("total-only display or escaped tooltip missing on %s: %s", test.page, got)
+		}
+	}
+}
+
+func TestAuditTableUsesRequestLogScrollingWithoutClippingCells(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := AuditView{At: "2026-10-05 12:34", ActorName: "测试管理员", ActorPhone: "13800138000", Action: "停用模型并删除关联别名", Target: "claude-opus-4-6-thinking", Result: "success", IP: "172.18.0.123", RequestID: "request-1234567890", Details: strings.Repeat("Antigravity：模型配置更新，保留完整操作详情。", 10)}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminSystem, AdminSystemView{Entries: []AuditView{entry}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, value := range []string{entry.At, entry.ActorName, entry.ActorPhone, entry.Action, entry.Target, entry.Result, entry.IP, entry.RequestID, entry.Details} {
+		if !strings.Contains(out.String(), value) {
+			t.Fatalf("audit table must render complete values: %s", value)
+		}
+	}
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	for _, rule := range []string{
+		`.audit-table { overflow-x: auto; }`,
+		`.audit-table table { min-width: 1100px; table-layout: fixed; }`,
+		`.request-log-table table { min-width: 1100px; table-layout: fixed; }`,
+		`.audit-table table { min-width: 1120px; table-layout: auto; }`,
+		`.request-log-table table { min-width: 1120px; table-layout: auto; }`,
+		`.audit-table th { width: auto !important; }`,
+		`.audit-table .audit-target-cell, .audit-table .audit-detail-cell { min-width: 220px; }`,
+		`.audit-table td { overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }`,
+		`.audit-action-text, .audit-target-text, .audit-detail-text { display: block; overflow-wrap: anywhere; white-space: normal; }`,
+	} {
+		if !strings.Contains(css, rule) {
+			t.Fatalf("audit table must use request-log scrolling and complete text: %s", rule)
+		}
+	}
+	for _, line := range strings.Split(css, "\n") {
+		if strings.Contains(line, ".audit-") && (strings.Contains(line, "overflow-x: hidden") || strings.Contains(line, "text-overflow: ellipsis") || strings.Contains(line, "-webkit-line-clamp:") || strings.Contains(line, "overflow: hidden")) {
+			t.Fatalf("audit table must not hide text or its scrollbar: %s", line)
 		}
 	}
 }
@@ -1266,6 +1308,47 @@ func TestAdminUserMetricsKeepTwoColumnsAndCompleteLongValues(t *testing.T) {
 	}
 	if bytes.Contains(css, []byte(`.admin-user-metrics .metric-card strong { overflow-wrap: normal; white-space: nowrap; }`)) {
 		t.Fatal("user metrics must not force long values outside their cards")
+	}
+}
+
+func TestOAuthPresetNarrowHeaderIsCompactAndPreservesSaveForm(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	view := AdminUpstreamsView{LayoutView: LayoutView{CSRFToken: "preset-csrf"}, Channel: "antigravity"}
+	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+		t.Fatal(err)
+	}
+	_, form, found := strings.Cut(out.String(), `action="/admin/upstreams/presets/save"`)
+	form, _, _ = strings.Cut(form, `</form>`)
+	if !found {
+		t.Fatal("preset save route must be preserved")
+	}
+	for _, want := range []string{`name="csrf_token" value="preset-csrf"`, `name="channel" value="antigravity"`, `name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required`, `type="submit">保存当前配置</button>`} {
+		if !strings.Contains(form, want) {
+			t.Fatalf("preset save form lost existing behavior: %s", want)
+		}
+	}
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	_, narrow, found := strings.Cut(css, "@media (max-width: 760px) {")
+	narrow, _, _ = strings.Cut(narrow, "\n}")
+	if !found {
+		t.Fatal("missing narrow-page breakpoint")
+	}
+	for _, rule := range []string{
+		`.upstream-card > .oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }`,
+		`.oauth-preset-tools { width: 100%; flex-wrap: wrap; justify-content: flex-start; }`,
+		`.oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr) auto; }`,
+	} {
+		if !strings.Contains(narrow, rule) || strings.Count(css, rule) != 1 {
+			t.Fatalf("compact preset layout must be narrow-only: %s", rule)
+		}
 	}
 }
 
