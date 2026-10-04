@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-5`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-8`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -1092,15 +1092,18 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 			t.Fatalf("missing available-width card layout policy: %s", rule)
 		}
 	}
-	if bytes.Contains(css, []byte("@media (min-width: 761px) and (max-width: 1080px)")) {
-		t.Fatal("third summary and health cards must also span both columns on phones")
+	for _, block := range strings.Split(string(css), "@media (min-width: 761px) and (max-width: 1080px) {")[1:] {
+		medium, _, _ := strings.Cut(block, "\n}")
+		if strings.Contains(medium, ".dashboard-summary-grid > .summary-card:last-child") || strings.Contains(medium, "#health .system-health-grid > .system-health-card:last-child") {
+			t.Fatal("third summary and health cards must also span both columns on phones")
+		}
 	}
 	if bytes.Contains(css, []byte("grid-template-columns: minmax(0, 1fr) minmax(145px, 180px)")) {
 		t.Fatal("reasoning selects must not squeeze model IDs into a vertical column")
 	}
 }
 
-func TestAdminUserHeroPreservesActionsAndGroupsIdentity(t *testing.T) {
+func TestAdminUserHeroPreservesOriginalMarkupAndActions(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
 		t.Fatal(err)
@@ -1112,11 +1115,11 @@ func TestAdminUserHeroPreservesActionsAndGroupsIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 		hero, rest, found := strings.Cut(out.String(), `<div class="grid grid-2 section-gap admin-user-overview">`)
-		if !found || rest == "" || !strings.Contains(hero, `class="detail-hero-identity"`) || !strings.Contains(hero, `class="detail-hero-meta muted small"`) {
-			t.Fatal("avatar, status and account dates must stay grouped together")
+		if !found || rest == "" || !strings.Contains(hero, `<section class="card detail-hero"><div class="avatar large-avatar">测试</div><div class="detail-hero-main">`) || !strings.Contains(hero, `注册于 注册时间 · 最近登录 登录时间`) {
+			t.Fatal("original status card markup and dates must be preserved")
 		}
-		if got := strings.Contains(hero, `class="stack-actions detail-hero-actions"`); got != (state != "readonly") {
-			t.Fatalf("state %s renders an incorrect or empty action panel", state)
+		if strings.Contains(hero, "detail-hero-layout") || strings.Contains(hero, "detail-hero-actions") {
+			t.Fatal("wide status card must not use the redesigned action panel")
 		}
 		for _, action := range []string{"approve", "reject", "suspend", "unsuspend"} {
 			want := state == "pending" && (action == "approve" || action == "reject") || state == "approved" && action == "suspend" || state == "suspended" && action == "unsuspend"
@@ -1130,10 +1133,10 @@ func TestAdminUserHeroPreservesActionsAndGroupsIdentity(t *testing.T) {
 				if !strings.Contains(form, `name="csrf_token" value="fixture-csrf"`) {
 					t.Fatal("redesigned action must preserve CSRF protection")
 				}
-				if action == "reject" && !strings.Contains(form, `name="reason" placeholder="填写拒绝原因" required`) {
+				if action == "reject" && !strings.Contains(form, `name="reason" placeholder="拒绝原因" required`) {
 					t.Fatal("rejection reason must remain required")
 				}
-				if action == "suspend" && (!strings.Contains(form, `data-confirm="停用会立即撤销 Key，确定继续吗？"`) || !strings.Contains(form, `name="reason" placeholder="可选，填写停用原因"`) || strings.Contains(form, "required")) {
+				if action == "suspend" && (!strings.Contains(form, `data-confirm="停用会立即撤销 Key，确定继续吗？"`) || !strings.Contains(form, `name="reason" placeholder="停用原因"`) || strings.Contains(form, "required")) {
 					t.Fatal("suspension confirmation and optional reason must be preserved")
 				}
 			}
@@ -1143,10 +1146,126 @@ func TestAdminUserHeroPreservesActionsAndGroupsIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range []string{`.admin-action-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }`, `@container account-hero (max-width: 620px)`, `.detail-hero-main { flex: 1; min-width: 0; }`, `.detail-hero-layout.has-account-actions { grid-template-columns: minmax(0, 1fr) 240px; }`} {
+	for _, rule := range []string{`.detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }`, `.detail-hero-main { flex: 1; min-width: 200px; }`, `.detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }`} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing responsive user-detail layout: %s", rule)
 		}
+	}
+}
+
+func TestAdminAccountActionTilesOnlyChangeNarrowLayouts(t *testing.T) {
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	start := strings.Index(css, "@media (max-width: 760px) {")
+	if start < 0 {
+		t.Fatal("missing narrow-page breakpoint")
+	}
+	open := start + strings.Index(css[start:], "{")
+	end, depth := open, 0
+	for i := open; i < len(css); i++ {
+		switch css[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		}
+		if depth == 0 {
+			end = i + 1
+			break
+		}
+	}
+	if end <= open || depth != 0 {
+		t.Fatal("unclosed narrow-page breakpoint")
+	}
+	narrow, other := css[start:end], css[:start]+css[end:]
+	for _, rule := range []string{
+		`.admin-action-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }`,
+		`.admin-action-list > .admin-action-item { display: flex; min-width: 0; flex-direction: column; align-items: stretch; overflow-wrap: anywhere; }`,
+		`.admin-action-list > .admin-action-item.role-management { padding-block: 16px; }`,
+		`.admin-action-list > .admin-action-item > form { min-width: 0; margin-top: auto; }`,
+		`.admin-action-list .admin-action-form { grid-template-columns: minmax(0, 1fr); }`,
+		`.admin-action-list > .admin-action-item > form > .button { width: 100%; grid-column: 1 / -1; }`,
+		`.detail-hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; }`,
+		`.detail-hero-main { min-width: 0; overflow-wrap: anywhere; }`,
+		`.detail-hero > .stack-actions { grid-column: 1 / -1; min-width: 0; padding-top: 16px; border-top: 1px solid var(--line); justify-items: stretch; }`,
+		`.detail-hero .stack-actions input, .detail-hero .stack-actions .button { min-width: 0; width: 100%; }`,
+	} {
+		if !strings.Contains(narrow, rule) || strings.Contains(other, rule) {
+			t.Fatalf("account action tile override must be narrow-only: %s", rule)
+		}
+	}
+	for _, rule := range []string{
+		`.admin-action-list { display: grid; gap: 12px; }`,
+		`.account-actions-card .button { width: 116px; }`,
+		`.admin-action-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }`,
+		`.admin-action-form.change-phone-form { grid-template-columns: minmax(0, 1fr) auto; }`,
+		`.admin-action-form.delete-form { grid-template-columns: minmax(0, 1fr) auto; }`,
+	} {
+		if !strings.Contains(other, rule) {
+			t.Fatalf("missing original medium/wide account action style: %s", rule)
+		}
+	}
+}
+
+func TestAdminAccountButtonsFillWrappedMediumRowsOnly(t *testing.T) {
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	rule := `.admin-action-list > .admin-action-item > form > .button { width: 100%; justify-self: stretch; }`
+	medium := "@media (min-width: 761px) and (max-width: 1080px) {\n  " + rule + "\n"
+	if !strings.Contains(css, medium) || strings.Count(css, rule) != 1 {
+		t.Fatal("full-width wrapped buttons must be confined to the medium breakpoint")
+	}
+	if !strings.Contains(css, `.account-actions-card .button { width: 116px; }`) {
+		t.Fatal("wide-page inline buttons must keep their original compact width")
+	}
+	_, block, _ := strings.Cut(css, "@media (min-width: 761px) and (max-width: 1080px) {")
+	block, _, _ = strings.Cut(block, "\n}")
+	for _, rule := range []string{
+		`.detail-hero > .detail-hero-main { min-width: 0; }`,
+		`.detail-hero > .stack-actions { flex: 0 1 200px; min-width: 0; justify-items: stretch; }`,
+		`.detail-hero .suspend-action input[type="text"], .detail-hero .stack-actions .button { min-width: 0; width: 100%; }`,
+	} {
+		if !strings.Contains(block, rule) || strings.Count(css, rule) != 1 {
+			t.Fatalf("status card controls must be constrained only at medium widths: %s", rule)
+		}
+	}
+}
+
+func TestAdminUserMetricsKeepTwoColumnsAndCompleteLongValues(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	view := AdminUserDetailView{Usage: UsageSummaryView{Requests: "2.5K", Successes: "2.5K", Failures: "15", TotalTokens: "378.2M", Latency: "19767 ms"}}
+	if err := r.Execute(&out, PageAdminUser, view); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`class="metric-grid admin-user-metrics"`, `<strong>19767 ms</strong>`, `<strong>2.5K / <em>15</em></strong>`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing complete user metric: %s", want)
+		}
+	}
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		`.metric-grid.admin-user-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }`,
+		`.admin-user-metrics .metric-card strong { overflow-wrap: anywhere; white-space: normal; }`,
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing overflow-safe user metric style: %s", rule)
+		}
+	}
+	if bytes.Contains(css, []byte(`.admin-user-metrics .metric-card strong { overflow-wrap: normal; white-space: nowrap; }`)) {
+		t.Fatal("user metrics must not force long values outside their cards")
 	}
 }
 
