@@ -891,6 +891,27 @@ func TestAllQuotaChannelsUseOnePercentageLayoutAndEstimateTooltip(t *testing.T) 
 	}
 }
 
+func TestQuotaPoolHeaderOmitsDuplicateAccountTotal(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := DashboardView{Quota: QuotaPoolView{Show: true, Available: true, Provider: "Codex", Accounts: "共 2 个已启用账号", AvailabilityLabel: "可用 2 / 2", RefreshLabel: "刷新额度", Groups: []QuotaGroupView{{Label: "PLUS · 周额度", Accounts: "2 个可用 · 2 个已同步"}}}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, view); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	if strings.Contains(html, "共 2 个已启用账号") {
+		t.Fatal("quota header should not repeat the availability denominator")
+	}
+	for _, want := range []string{"可用 2 / 2", "刷新额度", "2 个可用 · 2 个已同步"} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("existing availability, refresh or period detail missing: %s", want)
+		}
+	}
+}
+
 func TestRecentAuditUsesResponsiveCardWithoutTruncatingTargets(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
