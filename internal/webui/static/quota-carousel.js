@@ -116,6 +116,7 @@
       // Re-enabling native snapping here would first jump to the nearest card.
       // Keep it off until our animation reaches its target from the release point.
       if (finished.moving) viewport.classList.add("is-settling");
+      viewport.classList.remove("is-drag-pending");
       viewport.classList.remove("is-dragging");
       if (viewport.hasPointerCapture(finished.id)) viewport.releasePointerCapture(finished.id);
       if (!finished.moving) { viewport.classList.remove("is-settling"); return; }
@@ -166,6 +167,11 @@
       }
       // Text uses native selection; only blank card space starts carousel dragging.
       if (slides.length < 2 || event.button !== 0 || event.target.closest("button, a, input, select, textarea, label, [data-quota-text]")) return;
+      // Lock the gesture at its blank-space origin, before the drag threshold.
+      // Otherwise the browser can start selection as the pointer crosses text.
+      event.preventDefault();
+      if (viewport.focus) viewport.focus({ preventScroll: true });
+      viewport.classList.add("is-drag-pending");
       cancelAnimation();
       scrollingTo = null;
       if (viewport.classList.contains("is-settling")) {
@@ -191,7 +197,9 @@
     listen(viewport, "pointerup", function () { stopDrag(false); });
     listen(viewport, "pointercancel", function () { stopDrag(true); });
     listen(viewport, "lostpointercapture", function () { stopDrag(true); });
-    listen(viewport, "pointerleave", function () { if (drag && !drag.moving) drag = null; });
+    listen(viewport, "pointerleave", function () { if (drag && !drag.moving) stopDrag(true); });
+    listen(viewport, "selectstart", function (event) { if (drag) event.preventDefault(); });
+    listen(window, "blur", function () { stopDrag(true); });
     listen(viewport, "click", function (event) {
       if (!suppressClick) return;
       suppressClick = false;
@@ -213,6 +221,7 @@
         cancelAnimation();
         if (observer) observer.disconnect();
         removers.forEach(function (remove) { remove(); });
+        viewport.classList.remove("is-drag-pending");
         viewport.classList.remove("is-dragging");
         viewport.classList.remove("is-settling");
         delete root.quotaCarousel;

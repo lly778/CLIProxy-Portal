@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-3`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-4`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -871,7 +871,9 @@ func TestTextCursorPolicyPreservesSelectionAndInteractiveControls(t *testing.T) 
 	}
 	for _, rule := range []string{
 		`:where(a[href], button, summary, [role="button"], label) { cursor: pointer; }`,
-		`.quota-carousel-viewport:not(.is-dragging) [data-quota-text] { cursor: text; user-select: text; }`,
+		`.quota-carousel-viewport:not(.is-drag-pending):not(.is-dragging) [data-quota-text] { cursor: text; user-select: text; }`,
+		`.quota-carousel-viewport:is(.is-drag-pending, .is-dragging), .quota-carousel-viewport:is(.is-drag-pending, .is-dragging) * { -webkit-user-select: none; user-select: none; }`,
+		`.quota-carousel-viewport.is-drag-pending [data-quota-text] { cursor: grab; }`,
 		`.quota-carousel-viewport.is-dragging [data-quota-text] { cursor: grabbing; user-select: none; }`,
 		`.trend-axis-label, .trend-x-label { cursor: text; user-select: text; }`,
 		`.trend-interactive { touch-action: pan-y; user-select: none; cursor: grab; }`,
@@ -927,7 +929,7 @@ func TestQuotaPoolsRenderOneChannelCarouselWithPreloadedProviders(t *testing.T) 
 			t.Fatal(err)
 		}
 		html := out.String()
-		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261005-1`} {
+		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261005-2`} {
 			if !strings.Contains(html, want) {
 				t.Fatalf("%s missing carousel markup: %s", page, want)
 			}
@@ -1065,6 +1067,36 @@ func TestDashboardSummaryUsesScopedResponsiveLayoutAndPreservesActions(t *testin
 	}
 	if strings.Count(html, `class="card summary-card"`) != 3 {
 		t.Fatal("summary must retain all three cards")
+	}
+}
+
+func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		`.dashboard-summary-grid, #storage .system-health-grid, #health .system-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }`,
+		`.oauth-model-list, .oauth-alias-list, .reasoning-cap-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }`,
+		`.key-actions { display: grid; width: 100%; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }`,
+		`.dashboard-summary-grid > .summary-card:last-child,`,
+		`#health .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }`,
+		`.dashboard-summary-grid > .summary-card, .system-health-grid > .system-health-card { min-width: 0; padding: 16px; overflow-wrap: anywhere; }`,
+		`.dashboard-summary-grid .key-mask { padding: 5px 6px; font-size: 13px; letter-spacing: .04em; }`,
+		`.oauth-model-row .upstream-main { grid-column: 1 / -1; }`,
+		`.oauth-model-row form { grid-column: 2; grid-row: 2; justify-self: end; }`,
+		`.reasoning-cap-row { grid-template-columns: minmax(0, 1fr); padding: 12px; }`,
+		`.reasoning-cap-row { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start;`,
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing available-width card layout policy: %s", rule)
+		}
+	}
+	if bytes.Contains(css, []byte("@media (min-width: 761px) and (max-width: 1080px)")) {
+		t.Fatal("third summary and health cards must also span both columns on phones")
+	}
+	if bytes.Contains(css, []byte("grid-template-columns: minmax(0, 1fr) minmax(145px, 180px)")) {
+		t.Fatal("reasoning selects must not squeeze model IDs into a vertical column")
 	}
 }
 

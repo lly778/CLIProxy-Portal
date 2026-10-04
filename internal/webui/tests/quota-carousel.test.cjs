@@ -262,7 +262,8 @@ test('keyboard and resize preserve the selected provider and single-channel cont
 test('text selection does not start a carousel drag or suppress its native click', () => {
   const f = setup();
   const textTarget = { closest: selector => selector.includes('[data-quota-text]') ? {} : null };
-  f.pointer('pointerdown', 300, 0, { target: textTarget });
+  assert.equal(f.pointer('pointerdown', 300, 0, { target: textTarget }).prevented, undefined);
+  assert.equal(f.viewport.emit('selectstart', { target: textTarget }).prevented, undefined);
   const move = f.pointer('pointermove', 100, 0, { target: textTarget });
   f.pointer('pointerup', 100, 0, { target: textTarget });
   assert.equal(move.prevented, undefined);
@@ -272,6 +273,51 @@ test('text selection does not start a carousel drag or suppress its native click
   assert.equal(f.viewport.emit('click', { target: textTarget }).prevented, undefined);
   f.pointer('pointerdown', 300); f.pointer('pointermove', 100); f.pointer('pointerup', 100);
   assert.equal(f.selected(), 'Antigravity', 'blank space must still drag');
+});
+
+test('blank-space presses block selection before the threshold and while crossing text', () => {
+  const f = setup();
+  const textTarget = { closest: selector => selector.includes('[data-quota-text]') ? {} : null };
+  assert.equal(f.pointer('pointerdown', 300).prevented, true);
+  assert.equal(f.viewport.focused, true, 'keyboard navigation must retain focus');
+  assert.equal(f.classes.has('is-drag-pending'), true);
+  f.pointer('pointermove', 296, 0, { target: textTarget });
+  assert.equal(f.classes.has('is-dragging'), false, 'keep the original movement threshold');
+  assert.equal(f.viewport.emit('selectstart', { target: textTarget }).prevented, true);
+  f.pointer('pointermove', 100, 0, { target: textTarget });
+  assert.equal(f.classes.has('is-dragging'), true);
+  assert.equal(f.viewport.emit('selectstart', { target: textTarget }).prevented, true);
+  f.pointer('pointerup', 100);
+  assert.equal(f.classes.has('is-drag-pending'), false);
+  assert.equal(f.classes.has('is-dragging'), false);
+  assert.equal(f.viewport.emit('selectstart', { target: textTarget }).prevented, undefined);
+  assert.equal(f.selected(), 'Antigravity');
+});
+
+test('pending selection locks are cleared on click, leave, cancel, blur, resize and destroy', () => {
+  for (const finish of [
+    f => f.pointer('pointerup', 300),
+    f => f.viewport.emit('pointerleave'),
+    f => f.pointer('pointercancel', 300),
+    f => f.window.emit('blur'),
+    f => f.window.emit('resize'),
+    f => f.window.QuotaCarousel.destroy(f.root),
+  ]) {
+    const f = setup();
+    f.pointer('pointerdown', 300);
+    finish(f);
+    assert.equal(f.classes.has('is-drag-pending'), false);
+    assert.equal(f.classes.has('is-dragging'), false);
+    assert.equal(f.viewport.emit('selectstart').prevented, undefined);
+    assert.equal(f.viewport.emit('click').prevented, undefined);
+  }
+  for (const finish of [f => f.window.emit('blur'), f => f.pointer('pointercancel', 100)]) {
+    const f = setup(); f.pointer('pointerdown', 300); f.pointer('pointermove', 100); finish(f);
+    assert.equal(f.classes.has('is-drag-pending'), false);
+    assert.equal(f.classes.has('is-dragging'), false);
+    assert.equal(f.viewport.emit('selectstart').prevented, undefined);
+    assert.equal(f.selected(), 'Codex');
+  }
 });
 
 test('refresh reinitialization restores the selected provider, cleans listeners and tolerates removed providers', () => {

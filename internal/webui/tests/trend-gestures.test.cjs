@@ -111,12 +111,28 @@ test('chart axis text remains selectable without panning or resetting chart zoom
     const before = f.viewport();
     const text = { closest: selector => selector.includes('.trend-axis-label') ? {} : null };
     const fields = { target: text, pointerType: 'mouse', button: 0, pointerId: 1, clientX: 200, clientY: 100 };
-    f.chart.dispatch('pointerdown', fields);
+    assert.equal(f.chart.dispatch('pointerdown', fields).defaultPrevented, false);
+    assert.equal(f.chart.dispatch('selectstart', { target: text }).defaultPrevented, false);
     assert.equal(f.chart.classList.contains('trend-dragging'), false);
     f.chart.dispatch('pointermove', { ...fields, clientX: 250 });
     f.chart.dispatch('pointerup', fields);
     f.chart.dispatch('dblclick', fields);
     assert.deepEqual(f.viewport(), before);
+  }
+});
+
+test('chart dragging cannot start text selection when crossing axis labels', () => {
+  for (const health of [false, true]) {
+    const f = fixture(60, 400, health);
+    const text = { closest: selector => selector.includes('.trend-axis-label') ? {} : null };
+    const fields = { pointerType: 'mouse', button: 0, pointerId: 1, clientX: 200, clientY: 100 };
+    assert.equal(f.chart.dispatch('pointerdown', fields).defaultPrevented, true);
+    assert.equal(f.chart.classList.contains('trend-dragging'), true);
+    f.chart.dispatch('pointermove', { ...fields, target: text, clientX: 250 });
+    assert.equal(f.chart.dispatch('selectstart', { target: text }).defaultPrevented, true);
+    f.chart.dispatch('pointerup', fields);
+    assert.equal(f.chart.classList.contains('trend-dragging'), false);
+    assert.equal(f.chart.dispatch('selectstart', { target: text }).defaultPrevented, false);
   }
 });
 

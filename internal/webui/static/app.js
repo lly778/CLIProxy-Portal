@@ -564,6 +564,7 @@
       var pointer = pointerPosition(event);
       if (!pointer || pointer.x < leftBound || pointer.x > rightBound || pointer.y < 24 || pointer.y > 222) return;
       drag = { id: event.pointerId, x: pointer.x, offset: offset };
+      event.preventDefault();
       chart.setPointerCapture(event.pointerId);
       chart.classList.add("trend-dragging");
     });
@@ -586,6 +587,7 @@
     chart.addEventListener("pointerup", finishDrag);
     chart.addEventListener("pointercancel", finishDrag);
     chart.addEventListener("lostpointercapture", finishDrag);
+    chart.addEventListener("selectstart", function (event) { if (drag) event.preventDefault(); });
     chart.addEventListener("dblclick", function (event) {
       if (event.target && event.target.closest && event.target.closest(".trend-axis-label, .trend-x-label")) return;
       if (!zoomable) return;
