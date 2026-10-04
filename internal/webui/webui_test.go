@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-4`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-5`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -1097,6 +1097,56 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 	}
 	if bytes.Contains(css, []byte("grid-template-columns: minmax(0, 1fr) minmax(145px, 180px)")) {
 		t.Fatal("reasoning selects must not squeeze model IDs into a vertical column")
+	}
+}
+
+func TestAdminUserHeroPreservesActionsAndGroupsIdentity(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"approved", "pending", "suspended", "readonly"} {
+		view := AdminUserDetailView{LayoutView: LayoutView{CSRFToken: "fixture-csrf"}, Target: UserView{ID: "test-user", Initials: "测试", JoinedAt: "注册时间", LastLoginAt: "登录时间"}, CanSuspend: state == "approved", CanApprove: state == "pending", CanReject: state == "pending", CanUnsuspend: state == "suspended"}
+		var out bytes.Buffer
+		if err := r.Execute(&out, PageAdminUser, view); err != nil {
+			t.Fatal(err)
+		}
+		hero, rest, found := strings.Cut(out.String(), `<div class="grid grid-2 section-gap admin-user-overview">`)
+		if !found || rest == "" || !strings.Contains(hero, `class="detail-hero-identity"`) || !strings.Contains(hero, `class="detail-hero-meta muted small"`) {
+			t.Fatal("avatar, status and account dates must stay grouped together")
+		}
+		if got := strings.Contains(hero, `class="stack-actions detail-hero-actions"`); got != (state != "readonly") {
+			t.Fatalf("state %s renders an incorrect or empty action panel", state)
+		}
+		for _, action := range []string{"approve", "reject", "suspend", "unsuspend"} {
+			want := state == "pending" && (action == "approve" || action == "reject") || state == "approved" && action == "suspend" || state == "suspended" && action == "unsuspend"
+			start := `method="post" action="/admin/users/test-user/` + action + `"`
+			if strings.Contains(hero, start) != want {
+				t.Fatalf("state %s changes authorization for %s", state, action)
+			}
+			if want {
+				_, form, _ := strings.Cut(hero, start)
+				form, _, _ = strings.Cut(form, `</form>`)
+				if !strings.Contains(form, `name="csrf_token" value="fixture-csrf"`) {
+					t.Fatal("redesigned action must preserve CSRF protection")
+				}
+				if action == "reject" && !strings.Contains(form, `name="reason" placeholder="填写拒绝原因" required`) {
+					t.Fatal("rejection reason must remain required")
+				}
+				if action == "suspend" && (!strings.Contains(form, `data-confirm="停用会立即撤销 Key，确定继续吗？"`) || !strings.Contains(form, `name="reason" placeholder="可选，填写停用原因"`) || strings.Contains(form, "required")) {
+					t.Fatal("suspension confirmation and optional reason must be preserved")
+				}
+			}
+		}
+	}
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{`.admin-action-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }`, `@container account-hero (max-width: 620px)`, `.detail-hero-main { flex: 1; min-width: 0; }`, `.detail-hero-layout.has-account-actions { grid-template-columns: minmax(0, 1fr) 240px; }`} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing responsive user-detail layout: %s", rule)
+		}
 	}
 }
 

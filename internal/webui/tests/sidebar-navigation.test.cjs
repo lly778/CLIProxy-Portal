@@ -42,7 +42,7 @@ test('narrow navigation arrows reflect scroll boundaries and preserve saved posi
   const restored = setup({ saved: '240' }); restored.flush(); assert.equal(restored.nav.scrollLeft, 240);
 });
 
-test('wheel supports both axes and delta units without trapping edge scroll or browser zoom', () => {
+test('wheel supports both axes and delta units, contains edge scrolling and preserves browser zoom', () => {
   const s = setup(); s.flush();
   assert.equal(s.wheel({ deltaY: 60 }).prevented, true); assert.equal(s.nav.scrollLeft, 60);
   s.wheel({ deltaX: 20, deltaY: 2 }); assert.equal(s.nav.scrollLeft, 80);
@@ -50,15 +50,42 @@ test('wheel supports both axes and delta units without trapping edge scroll or b
   s.wheel({ deltaY: 1, deltaMode: 2 }); assert.equal(s.nav.scrollLeft, 644);
   assert.equal(s.wheel({ deltaY: 80, ctrlKey: true }).prevented, false); assert.equal(s.nav.scrollLeft, 644);
   s.nav.scrollLeft = s.nav.scrollWidth - s.nav.clientWidth;
-  assert.equal(s.wheel({ deltaY: 80 }).prevented, false);
-  s.nav.scrollLeft = 0; assert.equal(s.wheel({ deltaY: -80 }).prevented, false);
+  const rightEdge = s.nav.scrollLeft;
+  assert.equal(s.wheel({ deltaY: 80 }).prevented, true);
+  assert.equal(s.nav.scrollLeft, rightEdge);
+  s.nav.scrollLeft = 0; assert.equal(s.wheel({ deltaY: -80 }).prevented, true);
+  assert.equal(s.nav.scrollLeft, 0);
 });
 
-test('wide and non-overflowing navigation hide controls and keep page wheel scrolling', () => {
+test('wide sidebar keeps native scrolling; narrow navigation contains wheel input even without overflow', () => {
   const s = setup({ narrow: false });
   assert.equal(s.previous.hidden, true); assert.equal(s.next.hidden, true);
   assert.equal(s.wheel({ deltaY: 80 }).prevented, false);
   s.media.matches = true; s.window.handlers.resize(); assert.equal(s.next.hidden, false);
   s.nav.scrollWidth = 500; s.nav.clientWidth = 600; s.update();
-  assert.equal(s.next.hidden, true); assert.equal(s.wheel({ deltaY: 80 }).prevented, false);
+  assert.equal(s.next.hidden, true); assert.equal(s.wheel({ deltaY: 80 }).prevented, true);
+  assert.equal(s.wheel({ deltaY: -80 }).prevented, true);
+  assert.equal(s.wheel({ deltaY: 80, ctrlKey: true }).prevented, false);
+});
+
+test('boundary and subpixel wheel events never leak to page scrolling inside narrow navigation', () => {
+  const s = setup(); s.flush();
+  const max = s.nav.scrollWidth - s.nav.clientWidth;
+  for (const [edge, direction] of [[0, -1], [max, 1]]) {
+    for (const values of [
+      { deltaY: direction * 80 },
+      { deltaX: direction * 80 },
+      { deltaY: direction, deltaMode: 1 },
+      { deltaX: direction, deltaMode: 2 },
+      { deltaY: direction * .25 },
+      { deltaX: direction * 80, deltaY: direction * 4 },
+    ]) {
+      s.nav.scrollLeft = edge;
+      assert.equal(s.wheel(values).prevented, true);
+      assert.equal(s.nav.scrollLeft, edge);
+    }
+  }
+  s.nav.scrollLeft = 100;
+  assert.equal(s.wheel({ deltaY: .25 }).prevented, true);
+  assert.equal(s.nav.scrollLeft, 100);
 });

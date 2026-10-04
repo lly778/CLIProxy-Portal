@@ -260,7 +260,7 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-key-empty .admin-key-icon { margin-bottom: 15px; background: linear-gradient(135deg, #91a1ba, #6f7f98); box-shadow: 0 6px 14px rgba(70,84,105,.14); }
 .admin-key-empty strong { margin-bottom: 6px; color: var(--text); font-size: 15px; }
 .admin-key-empty p { max-width: 360px; margin: 0; font-size: 12px; line-height: 1.7; }
-.admin-action-list { display: grid; gap: 12px; }
+.admin-action-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
 .admin-action-item { display: grid; gap: 15px; padding: 16px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .admin-action-item.danger { background: #fffafa; border-color: #efd3d7; }
 .admin-action-row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
@@ -280,6 +280,11 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-action-form.change-phone-form .button { grid-column: auto; }
 .admin-action-form.delete-form { grid-template-columns: minmax(0, 1fr) auto; }
 .admin-action-form.delete-form .button { grid-column: auto; }
+.admin-action-list > .admin-action-item { display: flex; min-width: 0; flex-direction: column; align-items: stretch; overflow-wrap: anywhere; }
+.admin-action-list > .admin-action-item.role-management { padding-block: 16px; }
+.admin-action-list > .admin-action-item > form { min-width: 0; margin-top: auto; }
+.admin-action-list .admin-action-form { grid-template-columns: minmax(0, 1fr); }
+.admin-action-list > .admin-action-item > form > .button { width: 100%; grid-column: 1 / -1; }
 .inline-form { display: inline-flex; }
 .grow-form { display: flex; flex: 1; gap: 7px; align-items: center; }
 .grow-form input { flex: 1; min-width: 100px; }
@@ -670,13 +675,27 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .log-tooltip, .request-duration[title] { cursor: help; }
 .pagination { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 13px 2px; }
 .page-number { display: inline-block; min-width: 100px; margin: 0 9px; color: var(--muted); text-align: center; font-size: 12px; }
-.detail-hero { display: flex; gap: 17px; align-items: flex-start; justify-content: space-between; }
-.detail-hero-main { flex: 1; min-width: 200px; }
+.detail-hero { container: account-hero / inline-size; }
+.detail-hero-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 20px; }
+.detail-hero-layout.has-account-actions { grid-template-columns: minmax(0, 1fr) 240px; }
+.detail-hero-identity { display: flex; gap: 16px; min-width: 0; align-items: flex-start; }
+.detail-hero-main { flex: 1; min-width: 0; }
 .detail-hero-main p { margin: 8px 0; color: var(--muted); }
+.detail-hero-meta { display: flex; flex-wrap: wrap; gap: 5px 18px; }
+.detail-hero-actions { min-width: 0; padding-left: 20px; border-left: 1px solid var(--line); justify-items: stretch; }
+.detail-hero-actions .card-label { margin: 0; }
+.detail-hero-action-form { display: grid; min-width: 0; gap: 8px; }
+.detail-hero-action-form label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.detail-hero-action-form input, .detail-hero-action-form .button { min-width: 0; width: 100%; }
+@container account-hero (max-width: 620px) {
+  .detail-hero-layout.has-account-actions { grid-template-columns: minmax(0, 1fr); }
+  .detail-hero-actions { padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+}
+@container account-hero (max-width: 360px) {
+  .detail-hero-identity { gap: 12px; }
+  .detail-hero-identity .large-avatar { width: 44px; height: 44px; font-size: 16px; }
+}
 @media (min-width: 761px) {
-  .detail-hero .suspend-actions { align-self: center; }
-  .detail-hero .suspend-action { flex-wrap: nowrap; }
-  .detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }
   .audit-table { overflow-x: hidden; }
   .audit-table table { min-width: 0; table-layout: fixed; }
   .audit-table th, .audit-table td { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -822,8 +841,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .trend-legend small { flex-basis: 100%; margin-left: 0; text-align: center; }
   .form-card { display: block; }
   .profile-fields { margin-top: 20px; }
-  .detail-hero { display: grid; grid-template-columns: auto 1fr; }
-  .detail-hero .button-row { grid-column: 1 / -1; }
   .callout { align-items: flex-start; flex-direction: column; }
   .secret-value { align-items: stretch; flex-direction: column; }
   .secret-value .button { width: 100%; }

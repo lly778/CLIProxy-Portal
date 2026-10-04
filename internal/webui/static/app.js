@@ -26,13 +26,16 @@
     if (navPrevious) navPrevious.addEventListener("click", function () { scrollNav(-1); });
     if (navNext) navNext.addEventListener("click", function () { scrollNav(1); });
     if (navControls) navControls.addEventListener("wheel", function (event) {
-      if (!mobileNavMedia.matches || event.ctrlKey || mobileNav.scrollWidth <= mobileNav.clientWidth + 1) return;
+      if (!mobileNavMedia.matches || event.ctrlKey) return;
+      // Wheel input belongs to the horizontal navigation while hovered, even
+      // at either boundary or when every tab fits. Do not scroll the page.
+      event.preventDefault();
+      if (mobileNav.scrollWidth <= mobileNav.clientWidth + 1) return;
       var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
       if (event.deltaMode === 1) delta *= 16;
       else if (event.deltaMode === 2) delta *= mobileNav.clientWidth;
       var target = Math.max(0, Math.min(mobileNav.scrollWidth - mobileNav.clientWidth, mobileNav.scrollLeft + delta));
       if (Math.abs(target - mobileNav.scrollLeft) < 1) return;
-      event.preventDefault();
       mobileNav.scrollLeft = target;
     }, { passive: false });
 
