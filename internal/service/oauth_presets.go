@@ -10,11 +10,12 @@ import (
 	"cliproxy-portal/internal/cpamp"
 )
 
-const OAuthPresetVersion = 1
+const OAuthPresetVersion = 2
 
-// OAuthPresetSnapshot is the portable, credential-free part of Codex routing
+// OAuthPresetSnapshot is the portable, credential-free part of channel-scoped OAuth routing
 // managed by the portal. It deliberately excludes OAuth credentials.
 type OAuthPresetSnapshot struct {
+	Channel       string                  `json:"channel"`
 	Version       int                     `json:"version"`
 	Models        []OAuthPresetModel      `json:"models"`
 	Aliases       []cpamp.OAuthModelAlias `json:"aliases,omitempty"`
@@ -27,23 +28,42 @@ type OAuthPresetModel struct {
 	WildcardRule string `json:"wildcard_rule,omitempty"`
 }
 
+// OAuthPresetChannel accepts only the current, explicitly channel-scoped format.
+// Legacy data is upgraded once by the store migration, not interpreted here.
+func OAuthPresetChannel(snapshot OAuthPresetSnapshot) (string, error) {
+	if snapshot.Version != OAuthPresetVersion {
+		return "", errors.New("预设版本不受支持，请重新保存")
+	}
+	if strings.TrimSpace(snapshot.Channel) == "" {
+		return "", errors.New("预设缺少 OAuth 渠道，请重新保存")
+	}
+	return NormalizeOAuthChannel(snapshot.Channel)
+}
+
 // OAuthPresetSnapshot reads a consistent-enough configuration snapshot. Every
 // subsequent apply is validated again against the current CPA model catalog.
-func (k *Keys) OAuthPresetSnapshot(ctx context.Context) (OAuthPresetSnapshot, error) {
-	models, _, err := k.OAuthModelSettings(ctx)
+func (k *Keys) OAuthPresetSnapshot(ctx context.Context, channels ...string) (OAuthPresetSnapshot, error) {
+	channel, err := selectedOAuthChannel(channels)
 	if err != nil {
 		return OAuthPresetSnapshot{}, err
 	}
-	aliases, _, err := k.OAuthModelAliases(ctx)
+	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return OAuthPresetSnapshot{}, err
 	}
-	caps, _, err := k.OAuthReasoningCaps(ctx)
+	aliases, _, err := k.OAuthModelAliases(ctx, channel)
 	if err != nil {
 		return OAuthPresetSnapshot{}, err
+	}
+	caps := map[string]string{}
+	if channel == "codex" || channel == "antigravity" {
+		caps, _, err = k.OAuthReasoningCaps(ctx, channel)
+		if err != nil {
+			return OAuthPresetSnapshot{}, err
+		}
 	}
 	known := make(map[string]OAuthModelSetting, len(models))
-	snapshot := OAuthPresetSnapshot{Version: OAuthPresetVersion, ReasoningCaps: make(map[string]string)}
+	snapshot := OAuthPresetSnapshot{Channel: channel, Version: OAuthPresetVersion, ReasoningCaps: make(map[string]string)}
 	for _, model := range models {
 		key := strings.ToLower(strings.TrimSpace(model.ID))
 		known[key] = model
@@ -80,6 +100,11 @@ func canonicalizeOAuthPreset(snapshot *OAuthPresetSnapshot) {
 // portal-managed routing configuration. It intentionally ignores ordering and
 // harmless casing differences in model and alias names.
 func OAuthPresetSnapshotsEqual(left, right OAuthPresetSnapshot) bool {
+	leftChannel, leftErr := OAuthPresetChannel(left)
+	rightChannel, rightErr := OAuthPresetChannel(right)
+	if leftErr != nil || rightErr != nil || leftChannel != rightChannel {
+		return false
+	}
 	canonicalizeOAuthPreset(&left)
 	canonicalizeOAuthPreset(&right)
 	if left.Version != right.Version || len(left.Models) != len(right.Models) || len(left.Aliases) != len(right.Aliases) {
@@ -131,7 +156,11 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 
-	current, err := k.OAuthPresetSnapshot(ctx)
+	channel, err := OAuthPresetChannel(requested)
+	if err != nil {
+		return err
+	}
+	current, err := k.OAuthPresetSnapshot(ctx, channel)
 	if err != nil {
 		return fmt.Errorf("读取当前调用配置失败：%w", err)
 	}
@@ -148,10 +177,11 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 }
 
 func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapshot) error {
-	if snapshot.Version != OAuthPresetVersion {
-		return errors.New("预设版本不受支持")
+	channel, err := OAuthPresetChannel(snapshot)
+	if err != nil {
+		return err
 	}
-	models, _, err := k.OAuthModelSettings(ctx)
+	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -189,10 +219,13 @@ func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnap
 	if err := validateOAuthAliasNames(settings, snapshot.Aliases); err != nil {
 		return fmt.Errorf("预设中的模型别名无效：%w", err)
 	}
+	if channel != "codex" && channel != "antigravity" && len(snapshot.ReasoningCaps) > 0 {
+		return errors.New("该渠道暂不支持思考强度上限")
+	}
 	for id, cap := range snapshot.ReasoningCaps {
 		key := strings.ToLower(strings.TrimSpace(id))
 		live, exists := current[key]
-		if !exists || !target[key].Enabled || len(live.ThinkingLevels) == 0 || strings.EqualFold(cap, "ultra") || reasoningEffortIndex(strings.ToLower(cap)) < 0 || !containsReasoningLevel(live.ThinkingLevels, cap) {
+		if !exists || !target[key].Enabled || len(OAuthReasoningLevels(channel, live)) == 0 || strings.EqualFold(cap, "ultra") || reasoningEffortIndex(strings.ToLower(cap)) < 0 || !containsReasoningLevel(OAuthReasoningLevels(channel, live), cap) {
 			return fmt.Errorf("预设中的模型 %s 不支持思考强度 %s", id, cap)
 		}
 	}
@@ -200,13 +233,17 @@ func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnap
 }
 
 func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapshot) error {
-	models, _, err := k.OAuthModelSettings(ctx)
+	channel, err := OAuthPresetChannel(snapshot)
+	if err != nil {
+		return err
+	}
+	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
 	// Clear every known model mapping first so target model IDs cannot collide
 	// with aliases belonging to a model that will be disabled or enabled.
-	_, aliasRevision, err := k.OAuthModelAliases(ctx)
+	_, aliasRevision, err := k.OAuthModelAliases(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -216,7 +253,7 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 			clearInputs = append(clearInputs, OAuthModelAliasInput{Model: model.ID, KeepOriginal: true})
 		}
 	}
-	if err := k.SetOAuthModelAliases(ctx, clearInputs, aliasRevision); err != nil {
+	if err := k.SetOAuthModelAliases(ctx, clearInputs, aliasRevision, channel); err != nil {
 		return err
 	}
 
@@ -226,24 +263,24 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 	}
 	for _, model := range models {
 		if model.Enabled && !target[strings.ToLower(model.ID)].Enabled {
-			if err := k.SetOAuthModelEnabled(ctx, model.ID, false); err != nil {
+			if err := k.SetOAuthModelEnabled(ctx, model.ID, false, channel); err != nil {
 				return err
 			}
 		}
 	}
-	models, _, err = k.OAuthModelSettings(ctx)
+	models, _, err = k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
 	for _, model := range models {
 		if !model.Enabled && target[strings.ToLower(model.ID)].Enabled {
-			if err := k.SetOAuthModelEnabled(ctx, model.ID, true); err != nil {
+			if err := k.SetOAuthModelEnabled(ctx, model.ID, true, channel); err != nil {
 				return err
 			}
 		}
 	}
 
-	models, _, err = k.OAuthModelSettings(ctx)
+	models, _, err = k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -269,23 +306,26 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 		}
 		inputs = append(inputs, OAuthModelAliasInput{Model: model.ID, Aliases: strings.Join(aliases, ","), KeepOriginal: keepOriginal})
 	}
-	_, aliasRevision, err = k.OAuthModelAliases(ctx)
+	_, aliasRevision, err = k.OAuthModelAliases(ctx, channel)
 	if err != nil {
 		return err
 	}
-	if err := k.SetOAuthModelAliases(ctx, inputs, aliasRevision); err != nil {
+	if err := k.SetOAuthModelAliases(ctx, inputs, aliasRevision, channel); err != nil {
 		return err
 	}
 
-	_, reasoningRevision, err := k.OAuthReasoningCaps(ctx)
+	if channel != "codex" && channel != "antigravity" {
+		return nil
+	}
+	_, reasoningRevision, err := k.OAuthReasoningCaps(ctx, channel)
 	if err != nil {
 		return err
 	}
 	reasoningInputs := make([]ReasoningCapInput, 0, len(models))
 	for _, model := range models {
-		if model.Enabled && len(model.ThinkingLevels) > 0 {
+		if model.Enabled && len(OAuthReasoningLevels(channel, model)) > 0 {
 			reasoningInputs = append(reasoningInputs, ReasoningCapInput{Model: model.ID, Cap: snapshot.ReasoningCaps[strings.ToLower(model.ID)]})
 		}
 	}
-	return k.SetOAuthReasoningCaps(ctx, reasoningInputs, reasoningRevision)
+	return k.SetOAuthReasoningCaps(ctx, reasoningInputs, reasoningRevision, channel)
 }

@@ -18,7 +18,7 @@ const reasoningCapMarker = "cliproxy-portal:reasoning-cap:v1"
 
 var reasoningEffortOrder = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"}
 
-// ReasoningCapInput sets the highest permitted effort for one enabled Codex
+// ReasoningCapInput sets the highest permitted effort for one enabled OAuth
 // model. An empty Cap removes the portal-managed limit for that model.
 type ReasoningCapInput struct {
 	Model string
@@ -36,7 +36,16 @@ func reasoningEffortIndex(level string) int {
 
 // OAuthReasoningCaps reads only portal-owned limits. The full CPA YAML, which
 // may contain credentials, never leaves the service layer.
-func (k *Keys) OAuthReasoningCaps(ctx context.Context) (map[string]string, string, error) {
+func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[string]string, string, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := validateReasoningChannel(channel); err != nil {
+		return nil, "", err
+	}
+	k.modelConfigMu.Lock()
+	defer k.modelConfigMu.Unlock()
 	client, ok := k.CPAMP.(interface {
 		GetConfigYAML(context.Context) ([]byte, error)
 	})
@@ -51,7 +60,7 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context) (map[string]string, strin
 	if err != nil {
 		return nil, "", err
 	}
-	caps, err := managedReasoningCaps(rules)
+	caps, err := managedReasoningCapsForChannel(channel, rules)
 	if err != nil {
 		return nil, "", err
 	}
@@ -61,7 +70,14 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context) (map[string]string, strin
 // SetOAuthReasoningCaps preserves every non-portal CPA rule and all other YAML
 // fields. Portal-managed rules are appended last within override-raw, so they
 // win over ordinary overrides without replacing lower requested efforts.
-func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string) error {
+func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return err
+	}
+	if err := validateReasoningChannel(channel); err != nil {
+		return err
+	}
 	k.modelConfigMu.Lock()
 	defer k.modelConfigMu.Unlock()
 	client, ok := k.CPAMP.(interface {
@@ -71,13 +87,13 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	if !ok {
 		return errors.New("CPAMP 客户端不支持 CPA 配置管理")
 	}
-	models, _, err := k.OAuthModelSettings(ctx)
+	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
 	editable := make(map[string]OAuthModelSetting)
 	for _, model := range models {
-		if model.Enabled && len(model.ThinkingLevels) > 0 {
+		if model.Enabled && len(OAuthReasoningLevels(channel, model)) > 0 {
 			editable[strings.ToLower(model.ID)] = model
 		}
 	}
@@ -85,7 +101,6 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 		return errors.New("模型列表已变化，请刷新页面后重试")
 	}
 	selected := make(map[string]string, len(inputs))
-	canonical := make(map[string]string, len(inputs))
 	for _, input := range inputs {
 		modelID := strings.ToLower(strings.TrimSpace(input.Model))
 		model, exists := editable[modelID]
@@ -96,11 +111,10 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 			return errors.New("模型列表包含未知或重复项，请刷新页面后重试")
 		}
 		cap := strings.ToLower(strings.TrimSpace(input.Cap))
-		if cap != "" && (cap == "ultra" || reasoningEffortIndex(cap) < 0 || !containsReasoningLevel(model.ThinkingLevels, cap)) {
+		if cap != "" && (cap == "ultra" || reasoningEffortIndex(cap) < 0 || !containsReasoningLevel(OAuthReasoningLevels(channel, model), cap)) {
 			return fmt.Errorf("模型 %s 不支持所选思考强度", model.ID)
 		}
 		selected[modelID] = cap
-		canonical[modelID] = model.ID
 	}
 	data, err := client.GetConfigYAML(ctx)
 	if err != nil {
@@ -113,11 +127,11 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	if err != nil {
 		return err
 	}
-	current, err := managedReasoningCaps(rules)
+	current, err := managedReasoningCapsForChannel(channel, rules)
 	if err != nil {
 		return err
 	}
-	_, managedIndexes, err := parseManagedReasoningGroups(rules)
+	_, managedIndexes, err := parseManagedReasoningGroupsForChannel(channel, rules)
 	if err != nil {
 		return err
 	}
@@ -128,14 +142,25 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 			break
 		}
 		if cap != "" {
-			count := 0
-			for _, managedModel := range managedIndexes {
+			actual := []*yaml.Node{}
+			for index, rule := range rules.Content {
+				managedModel := managedIndexes[index]
 				if managedModel == modelID {
-					count++
+					actual = append(actual, rule)
 				}
 			}
-			if count > len(buildReasoningCapRules(canonical[modelID], cap)) {
+			expected := buildOAuthReasoningCapRules(channel, editable[modelID], cap)
+			if len(actual) != len(expected) {
 				changed = true
+				break
+			}
+			for i, want := range expected {
+				if !sameReasoningRule(actual[i], want) {
+					changed = true
+					break
+				}
+			}
+			if changed {
 				break
 			}
 		}
@@ -168,7 +193,7 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		rules.Content = append(rules.Content, buildReasoningCapRules(canonical[id], selected[id])...)
+		rules.Content = append(rules.Content, buildOAuthReasoningCapRules(channel, editable[id], selected[id])...)
 	}
 	var output bytes.Buffer
 	encoder := yaml.NewEncoder(&output)
@@ -197,7 +222,7 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 	if err != nil {
 		return err
 	}
-	confirmedCaps, err := managedReasoningCaps(confirmedRules)
+	confirmedCaps, err := managedReasoningCapsForChannel(channel, confirmedRules)
 	if err != nil {
 		return err
 	}
@@ -211,7 +236,14 @@ func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapI
 
 // removeOAuthReasoningCap removes only this model's portal-managed override
 // group. The caller holds modelConfigMu while changing model status/aliases.
-func (k *Keys) removeOAuthReasoningCap(ctx context.Context, modelID string) error {
+func (k *Keys) removeOAuthReasoningCap(ctx context.Context, modelID string, channels ...string) error {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return err
+	}
+	if err := validateReasoningChannel(channel); err != nil {
+		return err
+	}
 	client, ok := k.CPAMP.(interface {
 		GetConfigYAML(context.Context) ([]byte, error)
 		PutConfigYAML(context.Context, []byte) error
@@ -227,7 +259,7 @@ func (k *Keys) removeOAuthReasoningCap(ctx context.Context, modelID string) erro
 	if err != nil {
 		return err
 	}
-	_, managed, err := parseManagedReasoningGroups(rules)
+	_, managed, err := parseManagedReasoningGroupsForChannel(channel, rules)
 	if err != nil {
 		return err
 	}
@@ -271,7 +303,7 @@ func (k *Keys) removeOAuthReasoningCap(ctx context.Context, modelID string) erro
 		_, confirmedRules, parseErr := parseReasoningConfig(confirmed)
 		if parseErr == nil {
 			var caps map[string]string
-			caps, parseErr = managedReasoningCaps(confirmedRules)
+			caps, parseErr = managedReasoningCapsForChannel(channel, confirmedRules)
 			if parseErr == nil && caps[strings.ToLower(modelID)] == "" {
 				return nil
 			}

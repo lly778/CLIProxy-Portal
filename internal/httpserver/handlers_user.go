@@ -40,9 +40,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
 	v.ShowClaimHint = !v.Key.CanRevoke
-	if quota, _ := s.Keys.UpstreamQuota(r.Context()); quota.TotalAccounts > 0 {
-		v.Quota = s.quotaPoolView(quota, v.CSRFToken, "/dashboard")
-	}
+	v.Quota = s.quotaPoolsView(s.Keys.UpstreamQuotas(r.Context()), v.CSRFToken, "/dashboard")
 	if err != nil {
 		v.Notice = "用量数据暂时不可用"
 	}
@@ -235,9 +233,7 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
-	if quota, _ := s.Keys.UpstreamQuota(r.Context()); quota.TotalAccounts > 0 {
-		v.Quota = s.quotaPoolView(quota, v.CSRFToken, "/usage")
-	}
+	v.Quota = s.quotaPoolsView(s.Keys.UpstreamQuotas(r.Context()), v.CSRFToken, "/usage")
 	if err != nil {
 		v.Error = "用量服务暂时不可用"
 	}
@@ -253,10 +249,22 @@ func (s *Server) quotaRefresh(w http.ResponseWriter, r *http.Request) {
 	if next != "/usage" && next != "/dashboard" && !(next == "/admin/upstreams" && currentUser(r).IsAdmin()) {
 		next = "/dashboard"
 	}
-	status, err := s.Keys.StartQuotaRefresh()
+	var channels []string
+	if next == "/admin/upstreams" {
+		channel, ok := s.upstreamChannel(w, r)
+		if !ok {
+			return
+		}
+		channels = []string{channel}
+	}
+	status, err := s.Keys.StartQuotaRefresh(channels...)
 	message := status.Message
 	if err != nil {
 		message = err.Error()
+	}
+	if len(channels) > 0 {
+		http.Redirect(w, r, upstreamRedirectURL(channels[0], "quota_msg", message), http.StatusSeeOther)
+		return
 	}
 	http.Redirect(w, r, next+"?quota_msg="+urlQuery(message), http.StatusSeeOther)
 }

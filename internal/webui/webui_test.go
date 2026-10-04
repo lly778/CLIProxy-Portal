@@ -17,6 +17,125 @@ func TestRendererParsesAllPages(t *testing.T) {
 	}
 }
 
+func TestUpstreamChannelsHavePreloadedContentsAndNoScriptFallback(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"codex", "antigravity", "gemini"} {
+		var out bytes.Buffer
+		view := AdminUpstreamsView{
+			LayoutView: LayoutView{ActiveNav: "admin-upstreams", CSRFToken: "test-token"},
+			Channel:    channel, ChannelLabel: channel,
+			Channels: []OAuthChannelView{{Value: channel, Label: channel, Selected: true}},
+			Accounts: []UpstreamAccountView{{ID: "account"}},
+		}
+		if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			`data-upstream-channel-page data-channel="` + channel + `"`,
+			`/static/upstream-channels.js?v=20261004-6`,
+			`data-upstream-channel-panel data-channel="` + channel + `"`,
+			`method="get" action="/admin/upstreams"`,
+			`name="channel" value="` + channel + `"`,
+			`name="csrf_token" value="test-token"`,
+			`type="submit">切换渠道</button>`,
+		} {
+			if !strings.Contains(out.String(), want) {
+				t.Fatalf("%s page missing %q", channel, want)
+			}
+		}
+	}
+}
+
+func TestUpstreamChannelPanelsHaveUniqueFormsAndSelectedVisibility(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := AdminUpstreamsView{Channel: "antigravity"}
+	for _, channel := range []string{"codex", "antigravity", "gemini"} {
+		v.ChannelPanels = append(v.ChannelPanels, AdminUpstreamsView{
+			Channel: channel, AliasReady: true, ReasoningReady: true, SupportsReasoning: true,
+			AliasModels:     []OAuthModelView{{ID: channel + "-model"}},
+			ReasoningModels: []ReasoningCapModelView{{ID: channel + "-model"}},
+		})
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUpstreams, v); err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"codex", "antigravity", "gemini"} {
+		panel := `data-upstream-channel-panel data-channel="` + channel + `" `
+		if channel != v.Channel {
+			panel += "hidden"
+		}
+		if !strings.Contains(out.String(), panel+">") {
+			t.Fatalf("wrong panel visibility: %s", channel)
+		}
+		for _, id := range []string{"oauth-alias-form-", "reasoning-cap-form-"} {
+			if channel == "gemini" && id == "reasoning-cap-form-" {
+				continue
+			}
+			if strings.Count(out.String(), `id="`+id+channel+`"`) != 1 || !strings.Contains(out.String(), `form="`+id+channel+`"`) {
+				t.Fatalf("missing unique form/button association: %s%s", id, channel)
+			}
+		}
+	}
+}
+
+func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := AdminUpstreamsView{
+		Channel: "codex", ChannelLabel: "Codex",
+		Accounts: []UpstreamAccountView{{Account: "test@example.com", StatusLabel: "已启用", Quotas: []UpstreamAccountQuotaView{
+			{Label: "5H", Plan: "PLUS", RemainingPercent: 0, StatusClass: "danger", ResetAt: "2026-10-04 21:11"},
+			{Label: "7D", Plan: "PLUS", RemainingPercent: 68, StatusClass: "success", ResetAt: "2026-10-07 17:33"},
+		}}},
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-8`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("missing compact quota row markup: %s", want)
+		}
+	}
+	if strings.Index(html, `class="upstream-account-quotas"`) > strings.Index(html, `class="upstream-actions"`) {
+		t.Fatal("quotas must precede actions in the account row")
+	}
+}
+
+func TestAntigravityQuotaGroupsRenderTwoShortPeriodRows(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := AdminUpstreamsView{Channel: "antigravity", Accounts: []UpstreamAccountView{{QuotaGroups: []UpstreamAccountQuotaGroupView{
+		{Label: "Claude / GPT", Quotas: []UpstreamAccountQuotaView{{Label: "5H", RemainingPercent: 99}, {Label: "7D", RemainingPercent: 89}}},
+		{Label: "Gemini", Quotas: []UpstreamAccountQuotaView{{Label: "5H", RemainingPercent: 73}, {Label: "7D", RemainingPercent: 65}}},
+	}}}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	if strings.Count(html, `class="upstream-quota-group"`) != 2 || strings.Count(html, `class="badge neutral">5H</span>`) != 2 || strings.Count(html, `class="badge neutral">7D</span>`) != 2 || !strings.Contains(html, `class="upstream-row upstream-row-grouped"`) {
+		t.Fatal("expected two groups with two abbreviated periods each")
+	}
+	for _, name := range []string{"Claude / GPT", "Gemini"} {
+		if strings.Count(html, `class="upstream-quota-group-label">`+name+`</strong>`) != 1 {
+			t.Fatal("model group title must appear once")
+		}
+	}
+}
+
 func TestTokenSummaryLabelsMatchTrendLegend(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {

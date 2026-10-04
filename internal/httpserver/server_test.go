@@ -495,7 +495,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
 		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)
 	}
-	if !strings.Contains(upstreamsPage, ">5H<") || !strings.Contains(upstreamsPage, ">7D<") || !strings.Contains(upstreamsPage, ">80%<") || !strings.Contains(upstreamsPage, ">60%<") || strings.Contains(upstreamsPage, "切换说明") {
+	if !strings.Contains(upstreamsPage, `class="badge neutral">5H</span>`) || !strings.Contains(upstreamsPage, `class="badge neutral">7D</span>`) || !strings.Contains(upstreamsPage, `<small class="muted">PLUS</small>`) || !strings.Contains(upstreamsPage, ">80%<") || !strings.Contains(upstreamsPage, ">60%<") || strings.Contains(upstreamsPage, "切换说明") {
 		t.Fatalf("admin upstream account quotas were not rendered: %s", upstreamsPage)
 	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)

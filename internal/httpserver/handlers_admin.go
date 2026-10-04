@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -598,10 +599,53 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
-	u := currentUser(r)
-	v := webui.AdminUpstreamsView{LayoutView: s.layout(u, currentToken(r), "上游管理", "admin-upstreams")}
-	currentPreset, currentPresetErr := s.Keys.OAuthPresetSnapshot(r.Context())
-	presets, presetErr := s.Store.ListOAuthPresets(r.Context())
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
+	// All channel panels travel in the initial HTML. Switching never reads CPA.
+	// Bound the combined reads so an unavailable provider cannot stall the page.
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	layout := s.layout(currentUser(r), currentToken(r), "上游管理", "admin-upstreams")
+	v := s.adminUpstreamChannelView(r, channel, layout, true)
+	if r.Header.Get("X-Upstream-Channel-Only") == "true" {
+		_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+		return
+	}
+	channels, channelErr := s.Keys.OAuthChannels(r.Context())
+	if channelErr != nil {
+		v.Error = "渠道列表暂时不可用"
+		channels = []string{channel}
+	}
+	// Credentials can change between channel validation and discovery. Keep the
+	// already-loaded selected panel available even when its last account vanished.
+	selectedFound := false
+	for _, value := range channels {
+		selectedFound = selectedFound || value == channel
+	}
+	if !selectedFound {
+		channels = append(channels, channel)
+	}
+	for _, value := range channels {
+		v.Channels = append(v.Channels, webui.OAuthChannelView{Value: value, Label: service.OAuthChannelLabel(value), Selected: value == channel})
+		if value == channel {
+			panel := v
+			panel.Channels = nil
+			panel.ChannelPanels = nil
+			v.ChannelPanels = append(v.ChannelPanels, panel)
+		} else {
+			v.ChannelPanels = append(v.ChannelPanels, s.adminUpstreamChannelView(r, value, layout, false))
+		}
+	}
+	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {
+	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity"}
+	currentPreset, currentPresetErr := s.Keys.OAuthPresetSnapshot(r.Context(), channel)
+	presets, presetErr := s.Store.ListOAuthPresets(r.Context(), channel)
 	if presetErr != nil {
 		v.PresetError = "调用预设暂时不可用"
 		s.Logger.Error("list OAuth presets", "error", presetErr)
@@ -610,7 +654,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			var snapshot service.OAuthPresetSnapshot
 			summary := "预设内容无法解析"
 			row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt)}
-			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil {
+			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil && snapshot.Version == service.OAuthPresetVersion && snapshot.Channel == channel {
 				row.Applied = currentPresetErr == nil && service.OAuthPresetSnapshotsEqual(currentPreset, snapshot)
 				enabled := 0
 				canonical := make(map[string]string, len(snapshot.Models))
@@ -650,16 +694,19 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 					row.ReasoningCaps = append(row.ReasoningCaps, name+" · "+reasoningEffortLabel(snapshot.ReasoningCaps[model]))
 				}
 				summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", enabled, len(snapshot.Models), len(snapshot.Aliases), len(snapshot.ReasoningCaps))
+				if !v.SupportsReasoning {
+					summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名", enabled, len(snapshot.Models), len(snapshot.Aliases))
+				}
 			}
 			row.Summary = summary
 			v.Presets = append(v.Presets, row)
 		}
 	}
-	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context())
+	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}
-	if accountsErr == nil {
+	if accountsErr == nil && v.SupportsQuota {
 		var quotaErr error
-		quotas, quotaErr = s.Keys.UpstreamAccountQuotas(r.Context())
+		quotas, quotaErr = s.Keys.UpstreamAccountQuotas(r.Context(), channel)
 		if quotaErr != nil {
 			v.QuotaError = "单账号额度暂时不可用"
 			s.Logger.Error("list upstream account quotas", "error", quotaErr)
@@ -681,17 +728,18 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 				v.Disabled++
 			} else {
 				row.QuotaStatus = "额度等待同步"
+				if !v.SupportsQuota {
+					row.QuotaStatus = "该渠道暂未接入额度查询"
+				}
 				v.Enabled++
 			}
 			if quota, ok := quotas[account.ID]; ok {
 				row.QuotaStatus = ""
 				for _, window := range quota.Windows {
-					label := "7D"
-					switch window.Period {
-					case "five_hour":
-						label = "5H"
-					case "monthly":
-						label = "月"
+					label := upstreamAccountQuotaLabel(channel, window.Label, window.Period)
+					plan := ""
+					if channel == "codex" && !strings.EqualFold(strings.TrimSpace(window.PlanType), "unknown") {
+						plan = strings.ToUpper(strings.TrimSpace(window.PlanType))
 					}
 					statusClass := "success"
 					if window.RemainingPercent < 20 {
@@ -699,15 +747,23 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 					} else if window.RemainingPercent < 50 {
 						statusClass = "warning"
 					}
-					row.Quotas = append(row.Quotas, webui.UpstreamAccountQuotaView{Label: label, Plan: window.PlanType, RemainingPercent: window.RemainingPercent, StatusClass: statusClass, ResetAt: s.formatTime(window.ResetAt)})
+					row.Quotas = append(row.Quotas, webui.UpstreamAccountQuotaView{Label: label, Plan: plan, RemainingPercent: window.RemainingPercent, StatusClass: statusClass, ResetAt: s.formatTime(window.ResetAt)})
+				}
+				if channel == "antigravity" {
+					row.QuotaGroups = groupAccountQuotaViews(row.Quotas)
 				}
 			}
 			v.Accounts = append(v.Accounts, row)
 		}
 	}
-	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context())
-	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context())
-	reasoningCaps, reasoningRevision, reasoningErr := s.Keys.OAuthReasoningCaps(r.Context())
+	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context(), channel)
+	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context(), channel)
+	var reasoningCaps map[string]string
+	var reasoningRevision string
+	var reasoningErr error
+	if v.SupportsReasoning {
+		reasoningCaps, reasoningRevision, reasoningErr = s.Keys.OAuthReasoningCaps(r.Context(), channel)
+	}
 	aliasByModel := make(map[string][]string, len(aliases))
 	keepOriginalByModel := make(map[string]bool, len(aliases))
 	if aliasErr != nil {
@@ -726,7 +782,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		v.ReasoningError = "思考强度配置暂时不可用"
 		s.Logger.Error("list OAuth reasoning caps", "error", reasoningErr)
 	} else {
-		v.ReasoningReady = true
+		v.ReasoningReady = v.SupportsReasoning
 		v.ReasoningRevision = reasoningRevision
 	}
 	if modelErr != nil {
@@ -740,15 +796,22 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			v.Models = append(v.Models, row)
 			if model.Enabled {
 				v.AliasModels = append(v.AliasModels, row)
-				if len(model.ThinkingLevels) > 0 {
+				levels := service.OAuthReasoningLevels(channel, model)
+				if v.SupportsReasoning && len(levels) > 0 {
 					cap := reasoningCaps[strings.ToLower(model.ID)]
 					capRow := webui.ReasoningCapModelView{ID: model.ID}
 					capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: "", Label: "不限制", Selected: cap == ""})
 					found := cap == ""
 					for _, level := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
-						for _, supported := range model.ThinkingLevels {
+						for _, supported := range levels {
 							if strings.EqualFold(supported, level) {
-								capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: level, Label: level, Selected: cap == level})
+								label := level
+								if len(model.ThinkingLevels) == 0 {
+									if budget, ok := service.OAuthReasoningBudget(channel, model, level); ok {
+										label = fmt.Sprintf("%s（%d tokens）", level, budget)
+									}
+								}
+								capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: level, Label: label, Selected: cap == level})
 								found = found || cap == level
 								break
 							}
@@ -762,19 +825,19 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
+	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); showMessages && msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("error")); msg != "" {
+	if msg := strings.TrimSpace(r.URL.Query().Get("error")); showMessages && msg != "" {
 		v.ModelError = msg
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("alias_error")); msg != "" {
+	if msg := strings.TrimSpace(r.URL.Query().Get("alias_error")); showMessages && msg != "" {
 		v.AliasError = msg
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("reasoning_error")); msg != "" {
+	if msg := strings.TrimSpace(r.URL.Query().Get("reasoning_error")); showMessages && msg != "" {
 		v.ReasoningError = msg
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); msg != "" {
+	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); showMessages && msg != "" {
 		v.PresetError = msg
 	}
 	refresh := s.Keys.QuotaRefreshStatus()
@@ -788,7 +851,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		v.RefreshCompleted = !refresh.LastFinishedAt.IsZero() && refresh.Succeeded > 0 && refresh.Failed == 0
 		v.RefreshDisabled = true
 	}
-	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+	return v
 }
 
 func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
@@ -796,15 +859,19 @@ func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
 		return
 	}
-	name := strings.TrimSpace(r.FormValue("name"))
-	if length := len([]rune(name)); length == 0 || length > 40 {
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("预设名称须为 1 至 40 个字符"), http.StatusSeeOther)
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
 		return
 	}
-	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context())
+	name := strings.TrimSpace(r.FormValue("name"))
+	if length := len([]rune(name)); length == 0 || length > 40 {
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "预设名称须为 1 至 40 个字符"), http.StatusSeeOther)
+		return
+	}
+	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context(), channel)
 	if err != nil {
 		s.Logger.Error("capture OAuth preset", "error", err)
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("读取当前调用配置失败："+err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "读取当前调用配置失败："+err.Error()), http.StatusSeeOther)
 		return
 	}
 	payload, err := json.Marshal(snapshot)
@@ -818,17 +885,17 @@ func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Name: name, Payload: string(payload), UpdatedBy: u.Name})
+	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Channel: channel, Name: name, Payload: string(payload), UpdatedBy: u.Name})
 	if err != nil {
 		message := "保存调用预设失败"
 		if strings.Contains(err.Error(), "limit") {
 			message = fmt.Sprintf("最多保存 %d 个调用预设", store.MaxOAuthPresets)
 		}
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape(message), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", message), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, u, "oauth_preset.save", saved.Name, "OAuth 模型、模型别名映射及思考强度上限")
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已保存"), http.StatusSeeOther)
+	s.audit(r, u, "oauth_preset.save", saved.Name, service.OAuthChannelLabel(channel)+"；OAuth 模型、模型别名映射"+reasoningPresetAuditSuffix(channel))
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
@@ -836,23 +903,32 @@ func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
 		return
 	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
 	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
-	if err != nil {
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设不存在"), http.StatusSeeOther)
+	if err != nil || preset.Channel != channel {
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在或不属于当前渠道"), http.StatusSeeOther)
 		return
 	}
 	var snapshot service.OAuthPresetSnapshot
 	if err := json.Unmarshal([]byte(preset.Payload), &snapshot); err != nil {
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设内容无效"), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设内容无效"), http.StatusSeeOther)
+		return
+	}
+	snapshotChannel, channelErr := service.OAuthPresetChannel(snapshot)
+	if channelErr != nil || snapshotChannel != channel {
+		s.errorPage(w, r, http.StatusBadRequest, "预设渠道不匹配", nil)
 		return
 	}
 	if err := s.Keys.ApplyOAuthPreset(r.Context(), snapshot); err != nil {
 		s.Logger.Error("apply OAuth preset", "preset", preset.Name, "error", err)
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_preset.apply", preset.Name, "OAuth 模型、模型别名映射及思考强度上限")
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已应用"), http.StatusSeeOther)
+	s.audit(r, currentUser(r), "oauth_preset.apply", preset.Name, service.OAuthChannelLabel(channel)+"；OAuth 模型、模型别名映射"+reasoningPresetAuditSuffix(channel))
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已应用"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthPresetDelete(w http.ResponseWriter, r *http.Request) {
@@ -860,22 +936,30 @@ func (s *Server) adminOAuthPresetDelete(w http.ResponseWriter, r *http.Request) 
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
 		return
 	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
 	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
-	if err != nil {
-		http.Redirect(w, r, "/admin/upstreams?preset_error="+url.QueryEscape("调用预设不存在"), http.StatusSeeOther)
+	if err != nil || preset.Channel != channel {
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在或不属于当前渠道"), http.StatusSeeOther)
 		return
 	}
 	if err := s.Store.DeleteOAuthPreset(r.Context(), preset.ID); err != nil {
 		s.errorPage(w, r, http.StatusInternalServerError, "删除调用预设失败", err)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, "已删除预设，不影响当前调用配置")
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("调用预设已删除"), http.StatusSeeOther)
+	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, service.OAuthChannelLabel(channel)+"；已删除预设，不影响当前调用配置")
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已删除"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) {
 	if !s.verifyCSRF(r) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -891,23 +975,31 @@ func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) 
 	for i, model := range models {
 		inputs = append(inputs, service.OAuthModelAliasInput{Model: model, Aliases: strings.Join(r.PostForm["alias_"+strconv.Itoa(i)], ","), KeepOriginal: keepOriginal[strings.ToLower(strings.TrimSpace(model))]})
 	}
-	before, _, beforeErr := s.Keys.OAuthModelAliases(r.Context())
-	if err := s.Keys.SetOAuthModelAliases(r.Context(), inputs, r.PostForm.Get("revision")); err != nil {
+	before, _, beforeErr := s.Keys.OAuthModelAliases(r.Context(), channel)
+	if err := s.Keys.SetOAuthModelAliases(r.Context(), inputs, r.PostForm.Get("revision"), channel); err != nil {
 		s.Logger.Error("update OAuth model aliases", "error", err)
-		http.Redirect(w, r, "/admin/upstreams?alias_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "alias_error", err.Error()), http.StatusSeeOther)
 		return
 	}
 	detail := "已保存；变更明细暂不可用"
-	if after, _, err := s.Keys.OAuthModelAliases(r.Context()); beforeErr == nil && err == nil {
+	if after, _, err := s.Keys.OAuthModelAliases(r.Context(), channel); beforeErr == nil && err == nil {
 		detail = aliasChangeDetails(before, after)
 	}
-	s.audit(r, currentUser(r), "oauth_model.aliases.update", "codex", detail)
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("模型别名已保存"), http.StatusSeeOther)
+	s.audit(r, currentUser(r), "oauth_model.aliases.update", channel, detail)
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "模型别名已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminReasoningCaps(w http.ResponseWriter, r *http.Request) {
 	if !s.verifyCSRF(r) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
+	if channel != "codex" && channel != "antigravity" {
+		s.errorPage(w, r, http.StatusBadRequest, "该渠道暂不支持思考强度上限", nil)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -919,23 +1011,23 @@ func (s *Server) adminReasoningCaps(w http.ResponseWriter, r *http.Request) {
 	for i, model := range models {
 		values := r.PostForm["cap_"+strconv.Itoa(i)]
 		if len(values) != 1 {
-			http.Redirect(w, r, "/admin/upstreams?reasoning_error="+url.QueryEscape("思考强度表单已变化，请刷新页面后重试"), http.StatusSeeOther)
+			http.Redirect(w, r, upstreamRedirectURL(channel, "reasoning_error", "思考强度表单已变化，请刷新页面后重试"), http.StatusSeeOther)
 			return
 		}
 		inputs = append(inputs, service.ReasoningCapInput{Model: model, Cap: values[0]})
 	}
-	before, _, beforeErr := s.Keys.OAuthReasoningCaps(r.Context())
-	if err := s.Keys.SetOAuthReasoningCaps(r.Context(), inputs, r.PostForm.Get("reasoning_revision")); err != nil {
+	before, _, beforeErr := s.Keys.OAuthReasoningCaps(r.Context(), channel)
+	if err := s.Keys.SetOAuthReasoningCaps(r.Context(), inputs, r.PostForm.Get("reasoning_revision"), channel); err != nil {
 		s.Logger.Error("update OAuth reasoning caps", "error", err)
-		http.Redirect(w, r, "/admin/upstreams?reasoning_error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "reasoning_error", err.Error()), http.StatusSeeOther)
 		return
 	}
 	detail := "已保存；变更明细暂不可用"
-	if after, _, err := s.Keys.OAuthReasoningCaps(r.Context()); beforeErr == nil && err == nil {
+	if after, _, err := s.Keys.OAuthReasoningCaps(r.Context(), channel); beforeErr == nil && err == nil {
 		detail = reasoningCapChangeDetails(before, after)
 	}
-	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", "codex", detail)
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape("思考强度上限已保存"), http.StatusSeeOther)
+	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", channel, detail)
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "思考强度上限已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
@@ -943,19 +1035,26 @@ func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
 		return
 	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
 	modelID := strings.TrimSpace(r.FormValue("model"))
 	enabled := r.FormValue("enabled") == "true"
-	if err := s.Keys.SetOAuthModelEnabled(r.Context(), modelID, enabled); err != nil {
+	if err := s.Keys.SetOAuthModelEnabled(r.Context(), modelID, enabled, channel); err != nil {
 		s.Logger.Error("update OAuth model status", "model", modelID, "error", err)
-		http.Redirect(w, r, "/admin/upstreams?error="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+		http.Redirect(w, r, upstreamRedirectURL(channel, "error", err.Error()), http.StatusSeeOther)
 		return
 	}
 	action, message, detail := "oauth_model.disable", "OAuth 模型已停用，相关别名和思考强度上限已删除", "Codex；已删除该模型的全部别名和门户思考强度上限"
+	if channel != "codex" {
+		message, detail = "OAuth 模型已停用，相关别名已删除", service.OAuthChannelLabel(channel)+"；已删除该模型的全部别名"
+	}
 	if enabled {
-		action, message, detail = "oauth_model.enable", "OAuth 模型已启用", "Codex"
+		action, message, detail = "oauth_model.enable", "OAuth 模型已启用", service.OAuthChannelLabel(channel)
 	}
 	s.audit(r, currentUser(r), action, modelID, detail)
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", message), http.StatusSeeOther)
 }
 
 func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
@@ -963,8 +1062,12 @@ func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
 		return
 	}
+	channel, ok := s.upstreamChannel(w, r)
+	if !ok {
+		return
+	}
 	disabled := r.FormValue("disabled") == "true"
-	account, err := s.Keys.SetUpstreamAccountDisabled(r.Context(), r.PathValue("id"), disabled)
+	account, err := s.Keys.SetUpstreamAccountDisabled(r.Context(), r.PathValue("id"), disabled, channel)
 	if err != nil {
 		s.Logger.Error("update upstream account status", "error", err)
 		s.errorPage(w, r, http.StatusBadGateway, "更新上游账号失败，请刷新后重试", nil)
@@ -975,7 +1078,7 @@ func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {
 		action, message = "upstream.enable", "上游账号已启用"
 	}
 	s.audit(r, currentUser(r), action, account.ID, account.Provider)
-	http.Redirect(w, r, "/admin/upstreams?msg="+url.QueryEscape(message), http.StatusSeeOther)
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", message), http.StatusSeeOther)
 }
 
 func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
 )
@@ -448,6 +449,7 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 		return errors.New("invalid upstream model list")
 	}
 	filtered := make([]json.RawMessage, 0, len(payload.Data))
+	catalog := make([]cpamp.Model, 0, len(payload.Data))
 	for _, item := range payload.Data {
 		var model struct {
 			ID string `json:"id"`
@@ -458,6 +460,19 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 		if !hidden[strings.ToLower(model.ID)] {
 			filtered = append(filtered, item)
 		}
+		catalog = append(catalog, cpamp.Model{ID: model.ID})
+	}
+	// Preserve original entries and their extension fields; only append models
+	// verified against CPA's current credential/registration snapshot.
+	for _, model := range g.keys.RestoreSchedulableModels(resp.Request.Context(), catalog)[len(catalog):] {
+		if hidden[strings.ToLower(model.ID)] {
+			continue
+		}
+		item, err := json.Marshal(model)
+		if err != nil {
+			return err
+		}
+		filtered = append(filtered, item)
 	}
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(data, &envelope); err != nil {

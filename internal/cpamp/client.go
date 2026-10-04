@@ -268,21 +268,36 @@ type Model struct {
 // AuthFile is the sanitized credential identity needed to query CPAMP quota
 // snapshots. It deliberately excludes auth-file contents and provider tokens.
 type AuthFile struct {
-	Name            string
-	RuntimeID       string
-	Provider        string
-	AuthIndex       string
-	AccountSnapshot string
-	AccountID       string
-	ProjectID       string
-	Disabled        bool
+	Name              string
+	RuntimeID         string
+	Provider          string
+	AuthIndex         string
+	AccountSnapshot   string
+	AccountID         string
+	ProjectID         string
+	Disabled          bool
+	Status            string
+	Unavailable       bool
+	AvailabilityKnown bool
+	Cooldowns         []AuthCooldown
+}
+
+// AuthCooldown retains routing metadata only, never upstream error bodies.
+type AuthCooldown struct {
+	Scope    string    `json:"scope"`
+	ModelKey string    `json:"model_key"`
+	RetryAt  time.Time `json:"retry_at"`
 }
 
 // OAuthModelDefinition is a sanitized static model entry returned by CPAMP.
 type OAuthModelDefinition struct {
-	ID             string
-	DisplayName    string
-	ThinkingLevels []string
+	ID                     string
+	DisplayName            string
+	ThinkingLevels         []string
+	ThinkingMin            int
+	ThinkingMax            int
+	ThinkingZeroAllowed    bool
+	ThinkingDynamicAllowed bool
 }
 
 type CodexQuotaWindow struct {
@@ -645,7 +660,7 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 		if accountID == "" {
 			accountID = rawNestedText(raw, "attributes", "accountId", "account_id", "chatgptAccountId", "chatgpt_account_id")
 		}
-		files = append(files, AuthFile{
+		file := AuthFile{
 			Name:            name,
 			RuntimeID:       rawText(raw, "runtimeId", "runtime_id", "id"),
 			Provider:        provider,
@@ -654,7 +669,18 @@ func (c *Client) ListAuthFiles(ctx context.Context) ([]AuthFile, error) {
 			AccountID:       accountID,
 			ProjectID:       rawText(raw, "projectId", "project_id"),
 			Disabled:        rawBool(raw, "disabled"),
-		})
+			Status:          rawText(raw, "status"),
+			Unavailable:     rawBool(raw, "unavailable"),
+		}
+		// Older CPA responses without an explicit availability snapshot are
+		// unknown, not permission to restore a suspended model.
+		unavailableRaw := strings.TrimSpace(string(raw["unavailable"]))
+		disabledRaw := strings.TrimSpace(string(raw["disabled"]))
+		if (unavailableRaw == "true" || unavailableRaw == "false") && (disabledRaw == "true" || disabledRaw == "false") &&
+			json.Unmarshal(raw["cooldowns"], &file.Cooldowns) == nil && file.Cooldowns != nil && file.Status != "" {
+			file.AvailabilityKnown = true
+		}
+		files = append(files, file)
 	}
 	return files, nil
 }
@@ -848,10 +874,18 @@ func (c *Client) ListOAuthModelDefinitions(ctx context.Context, provider string)
 		definition := OAuthModelDefinition{ID: id, DisplayName: rawText(raw, "display_name", "displayName")}
 		if thinkingRaw, ok := raw["thinking"]; ok {
 			var thinking struct {
-				Levels []string `json:"levels"`
+				Levels         []string `json:"levels"`
+				Min            int      `json:"min"`
+				Max            int      `json:"max"`
+				ZeroAllowed    bool     `json:"zero_allowed"`
+				DynamicAllowed bool     `json:"dynamic_allowed"`
 			}
 			if json.Unmarshal(thinkingRaw, &thinking) == nil {
 				definition.ThinkingLevels = thinking.Levels
+				definition.ThinkingMin = thinking.Min
+				definition.ThinkingMax = thinking.Max
+				definition.ThinkingZeroAllowed = thinking.ZeroAllowed
+				definition.ThinkingDynamicAllowed = thinking.DynamicAllowed
 			}
 		}
 		result = append(result, definition)
@@ -1401,4 +1435,44 @@ func normalizeHash(value string) (string, error) {
 		return "", errors.New("invalid SHA-256 hash")
 	}
 	return hash, nil
+}
+
+// ListOAuthChannels returns only configured channel names, not their mappings.
+func (c *Client) ListOAuthChannels(ctx context.Context) ([]string, error) {
+	found := make(map[string]bool)
+	for _, endpoint := range []string{pathOAuthModelAlias, pathOAuthExcluded} {
+		body, err := c.do(ctx, http.MethodGet, endpoint, nil, c.adminHeader)
+		if err != nil {
+			return nil, err
+		}
+		var envelope map[string]json.RawMessage
+		if err := decodeJSON(endpoint, body, &envelope); err != nil {
+			return nil, err
+		}
+		key := "oauth-model-alias"
+		if endpoint == pathOAuthExcluded {
+			key = "oauth-excluded-models"
+		}
+		channels := envelope
+		if raw := envelope[key]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &channels); err != nil {
+				return nil, err
+			}
+		}
+		for channel, raw := range channels {
+			value := bytes.TrimSpace(raw)
+			if len(value) == 0 || (value[0] != '[' && !bytes.Equal(value, []byte("null"))) {
+				continue
+			}
+			if channel = strings.ToLower(strings.TrimSpace(channel)); channel != "" {
+				found[channel] = true
+			}
+		}
+	}
+	result := make([]string, 0, len(found))
+	for channel := range found {
+		result = append(result, channel)
+	}
+	sort.Strings(result)
+	return result, nil
 }

@@ -589,6 +589,18 @@
       var button = form.querySelector("button[type='submit']");
       if (!button || button.disabled) return;
       var quotaPanelSelector = form.closest("[data-upstream-quotas]") ? "[data-upstream-quotas]" : "[data-quota-pool]";
+      var quotaPage = form.closest("[data-upstream-channel-page]");
+      var quotaChannelPanel = form.closest("[data-upstream-channel-panel]");
+      var quotaChannel = quotaChannelPanel && quotaChannelPanel.getAttribute("data-channel");
+      var quotaPageURL = window.location.href;
+      if (quotaChannelPanel) {
+        var quotaURL = new URL(quotaPageURL);
+        quotaURL.searchParams.set("channel", quotaChannel);
+        quotaPageURL = quotaURL.href;
+      }
+      function quotaPageIsCurrent() {
+        return !quotaPage || quotaPage === document.querySelector("[data-upstream-channel-page]");
+      }
       var previousResult = form.querySelector(".quota-refresh-result");
       if (previousResult) previousResult.remove();
       button.disabled = true;
@@ -599,17 +611,25 @@
       }
 
       function updateQuotaPool() {
-        return fetch(window.location.href, {
+        if (!quotaPageIsCurrent()) return Promise.resolve(false);
+        return fetch(quotaPageURL, {
           credentials: "same-origin",
           cache: "no-store",
-          headers: { "Accept": "text/html" }
+          headers: quotaChannelPanel ? { "Accept": "text/html", "X-Upstream-Channel-Only": "true" } : { "Accept": "text/html" }
         }).then(function (response) {
           if (!response.ok) throw new Error("HTTP " + response.status);
           return response.text();
         }).then(function (html) {
+          if (!quotaPageIsCurrent()) return false;
           var page = new DOMParser().parseFromString(html, "text/html");
-          var current = document.querySelector(quotaPanelSelector);
-          var next = page.querySelector(quotaPanelSelector);
+          var current = (quotaChannelPanel || document).querySelector(quotaPanelSelector);
+          var nextScope = page;
+          if (quotaChannelPanel) {
+            nextScope = Array.prototype.find.call(page.querySelectorAll("[data-upstream-channel-panel]"), function (panel) {
+              return panel.getAttribute("data-channel") === quotaChannel;
+            });
+          }
+          var next = nextScope && nextScope.querySelector(quotaPanelSelector);
           if (!current || !next) throw new Error("quota pool missing");
           var running = next.getAttribute("data-refresh-running") === "true";
           current.replaceWith(document.importNode(next, true));
@@ -631,12 +651,15 @@
         method: "POST",
         body: new URLSearchParams(new FormData(form)),
         credentials: "same-origin",
-        headers: { "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
+        headers: quotaChannelPanel ? {
+          "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Upstream-Channel-Only": "true"
+        } : { "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
       }).then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return pollQuotaPool(0, 0);
       }).catch(function () {
-        var currentButton = document.querySelector(quotaPanelSelector + " [data-quota-refresh-form] button[type='submit']");
+        if (!quotaPageIsCurrent()) return;
+        var currentButton = (quotaChannelPanel || document).querySelector(quotaPanelSelector + " [data-quota-refresh-form] button[type='submit']");
         if (!currentButton) return;
         currentButton.disabled = false;
         currentButton.textContent = "刷新失败，请重试";

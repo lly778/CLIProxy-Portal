@@ -1,12 +1,18 @@
 {{define "quota-pool"}}
 {{if .Show}}
-<section class="card quota-pool-card" data-quota-pool data-refresh-running="{{if .RefreshRunning}}true{{else}}false{{end}}">
+<div data-quota-pool data-refresh-running="{{if .RefreshRunning}}true{{else}}false{{end}}">
+{{if .Providers}}{{range .Providers}}{{template "quota-provider" .}}{{end}}{{else}}{{template "quota-provider" .}}{{end}}
+</div>
+{{end}}
+{{end}}
+{{define "quota-provider"}}
+<section class="card quota-pool-card">
   <div class="quota-pool-head">
     <div><span class="eyebrow">共享资源</span><h2>上游额度池</h2></div>
     <div class="quota-pool-tools"><div class="quota-pool-badges"><span class="badge neutral">{{.Provider}}</span>{{if .Available}}<span class="badge {{.AvailabilityClass}}">{{.AvailabilityLabel}}</span>{{end}}<span class="muted small">{{.Accounts}}</span></div><form method="post" action="/quota/refresh" class="inline-form" data-quota-refresh-form>{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="next" value="{{.ReturnTo}}">{{if .RefreshCompleted}}<span class="muted small quota-refresh-result" role="status">已刷新</span>{{end}}<button class="button secondary quota-refresh-button" type="submit" {{if .RefreshDisabled}}disabled{{end}}>{{.RefreshLabel}}</button></form></div>
   </div>
   {{if .Available}}
-  {{if .NoUsableAccounts}}<div class="quota-pool-unavailable" role="status"><span class="status-dot danger"></span><div><strong>当前无可用上游账号</strong><p>每个账号至少有一个额度周期已经耗尽；下方百分比仅用于查看各周期的汇总情况。</p></div></div>{{end}}
+  {{if .NoUsableAccounts}}<div class="quota-pool-unavailable" role="status"><span class="status-dot danger"></span><div><strong>当前无可用上游账号</strong><p>{{if eq .Provider "Antigravity"}}已同步的模型组额度均已耗尽；未同步账号的可用性尚未确认。{{else}}每个账号至少有一个额度周期已经耗尽；下方百分比仅用于查看各周期的汇总情况。{{end}}</p></div></div>{{end}}
   <div class="quota-group-list">
   {{range .Groups}}<div class="quota-group">
     <div class="quota-pool-summary">
@@ -18,8 +24,7 @@
   </div>
   <p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。</p>
   {{else}}
-  <div class="empty-state compact"><strong>额度信息等待同步</strong><p>CPAMP 尚未提供可用的额度快照；可点击右上角刷新。</p></div>
+  <div class="empty-state compact"><strong>额度信息等待同步</strong><p>当前尚未获取可用额度；可点击右上角刷新。</p></div>
   {{end}}
 </section>
-{{end}}
 {{end}}

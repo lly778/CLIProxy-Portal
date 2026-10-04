@@ -507,12 +507,30 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 			ObservedAt:       s.formatTime(group.ObservedAt),
 			Estimated:        group.Estimated,
 		}
+		if group.Label != "" {
+			item.Label = quotaDisplayLabel(group.Label, "", group.Period)
+		}
 		if group.RemainingPercent < 20 {
 			item.StatusClass = "danger"
 		} else if group.RemainingPercent < 50 {
 			item.StatusClass = "warning"
 		}
 		v.Groups = append(v.Groups, item)
+	}
+	return v
+}
+
+func (s *Server) quotaPoolsView(pools []service.UpstreamQuotaPool, csrfToken, returnTo string) webui.QuotaPoolView {
+	v := webui.QuotaPoolView{}
+	for _, pool := range pools {
+		provider := s.quotaPoolView(pool, csrfToken, returnTo)
+		if !provider.Show {
+			continue
+		}
+		if len(v.Providers) == 0 {
+			v = provider
+		}
+		v.Providers = append(v.Providers, provider)
 	}
 	return v
 }

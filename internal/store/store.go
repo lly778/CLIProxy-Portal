@@ -36,6 +36,7 @@ type PasswordReset struct {
 }
 
 type OAuthPreset struct {
+	Channel   string
 	ID        string
 	Name      string
 	Payload   string
@@ -209,11 +210,13 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS oauth_presets (
 			id TEXT PRIMARY KEY,
-			name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+			channel TEXT NOT NULL DEFAULT 'codex',
+			name TEXT NOT NULL COLLATE NOCASE,
 			payload TEXT NOT NULL,
 			updated_by TEXT NOT NULL DEFAULT '',
 			created_at_ms INTEGER NOT NULL,
-			updated_at_ms INTEGER NOT NULL
+			updated_at_ms INTEGER NOT NULL,
+			UNIQUE(channel,name)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_oauth_presets_updated ON oauth_presets(updated_at_ms DESC)`,
 		`CREATE TABLE IF NOT EXISTS sync_jobs (
@@ -232,6 +235,12 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("migrate database: %w", err)
 		}
+	}
+	if err := s.migrateOAuthPresetChannels(ctx); err != nil {
+		return fmt.Errorf("migrate OAuth preset channels: %w", err)
+	}
+	if err := s.migrateOAuthPresetPayloads(ctx); err != nil {
+		return fmt.Errorf("upgrade OAuth preset format: %w", err)
 	}
 	for _, column := range []string{"request_read_ms", "response_started_ms"} {
 		var present int

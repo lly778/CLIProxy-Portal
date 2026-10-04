@@ -257,6 +257,7 @@ type ModelView struct {
 }
 
 type QuotaPoolView struct {
+	Providers         []QuotaPoolView
 	Show              bool
 	Available         bool
 	Provider          string
@@ -516,7 +517,13 @@ type UpstreamAccountView struct {
 	Disabled    bool
 	StatusLabel string
 	Quotas      []UpstreamAccountQuotaView
+	QuotaGroups []UpstreamAccountQuotaGroupView
 	QuotaStatus string
+}
+
+type UpstreamAccountQuotaGroupView struct {
+	Label  string
+	Quotas []UpstreamAccountQuotaView
 }
 
 type UpstreamAccountQuotaView struct {
@@ -527,8 +534,20 @@ type UpstreamAccountQuotaView struct {
 	ResetAt          string
 }
 
+type OAuthChannelView struct {
+	Value    string
+	Label    string
+	Selected bool
+}
+
 type AdminUpstreamsView struct {
 	LayoutView
+	Channel           string
+	ChannelLabel      string
+	Channels          []OAuthChannelView
+	ChannelPanels     []AdminUpstreamsView
+	SupportsQuota     bool
+	SupportsReasoning bool
 	Accounts          []UpstreamAccountView
 	Presets           []OAuthPresetView
 	PresetError       string

@@ -23,26 +23,28 @@ import (
 )
 
 type Keys struct {
-	Store             *store.Store
-	CPAMP             cpamp.API
-	Now               func() time.Time
-	CacheTTL          time.Duration
-	QuotaCacheTTL     time.Duration
-	cacheMu           sync.Mutex
-	cache             map[string]analyticsCache
-	quota             quotaPoolCache
-	refreshMu         sync.Mutex
-	refresh           QuotaRefreshStatus
-	refreshedQuota    map[string][]cpamp.CodexQuotaWindow
-	quotaFetchMu      sync.Mutex
-	modelConfigMu     sync.Mutex
-	presetMu          sync.Mutex
-	reconcileMu       sync.Mutex
-	reconcileStatusMu sync.RWMutex
-	reconcileStatus   ReconcileStatus
-	lastSeenSyncAt    time.Time
-	RefreshCooldown   time.Duration
-	RefreshTimeout    time.Duration
+	Store              *store.Store
+	CPAMP              cpamp.API
+	Now                func() time.Time
+	CacheTTL           time.Duration
+	QuotaCacheTTL      time.Duration
+	cacheMu            sync.Mutex
+	cache              map[string]analyticsCache
+	quota              quotaPoolCache
+	refreshMu          sync.Mutex
+	refresh            QuotaRefreshStatus
+	refreshedQuota     map[string][]cpamp.CodexQuotaWindow
+	antigravityQuota   map[string][]cpamp.AntigravityQuotaWindow
+	antigravityAttempt map[string]time.Time
+	quotaFetchMu       sync.Mutex
+	modelConfigMu      sync.Mutex
+	presetMu           sync.Mutex
+	reconcileMu        sync.Mutex
+	reconcileStatusMu  sync.RWMutex
+	reconcileStatus    ReconcileStatus
+	lastSeenSyncAt     time.Time
+	RefreshCooldown    time.Duration
+	RefreshTimeout     time.Duration
 }
 
 type analyticsCache struct {
@@ -72,6 +74,7 @@ type UpstreamQuotaPool struct {
 }
 
 type UpstreamQuotaGroup struct {
+	Label             string
 	PlanType          string
 	Period            string
 	KnownAccounts     int
@@ -101,6 +104,8 @@ type UpstreamAccountQuota struct {
 }
 
 type UpstreamAccountQuotaWindow struct {
+	Label            string
+	Available        bool
 	Period           string
 	PlanType         string
 	RemainingPercent int
@@ -112,11 +117,15 @@ type UpstreamAccountQuotaWindow struct {
 // by a wildcard rule is read-only here because removing that rule would affect
 // other models as well.
 type OAuthModelSetting struct {
-	ID             string
-	DisplayName    string
-	ThinkingLevels []string
-	Enabled        bool
-	WildcardRule   string
+	ID                     string
+	DisplayName            string
+	ThinkingLevels         []string
+	ThinkingMin            int
+	ThinkingMax            int
+	ThinkingZeroAllowed    bool
+	ThinkingDynamicAllowed bool
+	Enabled                bool
+	WildcardRule           string
 }
 
 // OAuthModelAliasInput is one editable Codex model mapping. Aliases is a
@@ -156,10 +165,20 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 // StartQuotaRefresh starts one shared background refresh for every approved
 // portal user. The lock and cooldown are global to this portal process so
 // concurrent clicks cannot fan out into duplicate provider requests.
-func (k *Keys) StartQuotaRefresh() (QuotaRefreshStatus, error) {
+func (k *Keys) StartQuotaRefresh(channels ...string) (QuotaRefreshStatus, error) {
+	selected := map[string]bool{"codex": true, "antigravity": true}
+	if len(channels) > 0 {
+		channel, err := selectedOAuthChannel(channels)
+		if err != nil {
+			return QuotaRefreshStatus{}, err
+		}
+		if channel != "codex" && channel != "antigravity" {
+			return QuotaRefreshStatus{}, errors.New("该渠道暂未接入额度查询")
+		}
+		selected = map[string]bool{channel: true}
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-		FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 	})
 	if !ok {
 		return QuotaRefreshStatus{}, errors.New("CPAMP 客户端不支持手动刷新额度")
@@ -189,7 +208,7 @@ func (k *Keys) StartQuotaRefresh() (QuotaRefreshStatus, error) {
 	if timeout <= 0 {
 		timeout = 3 * time.Minute
 	}
-	go k.runQuotaRefresh(typed, timeout)
+	go k.runQuotaRefresh(typed, timeout, selected)
 	return status, nil
 }
 
@@ -201,8 +220,7 @@ func (k *Keys) QuotaRefreshStatus() QuotaRefreshStatus {
 
 func (k *Keys) runQuotaRefresh(client interface {
 	ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
-	FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
-}, timeout time.Duration) {
+}, timeout time.Duration, selected map[string]bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	k.quotaFetchMu.Lock()
@@ -215,10 +233,10 @@ func (k *Keys) runQuotaRefresh(client interface {
 	eligible := make([]cpamp.AuthFile, 0, len(files))
 	seen := make(map[string]struct{}, len(files))
 	for _, file := range files {
-		if file.Disabled || !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || strings.TrimSpace(file.Name) == "" {
+		if file.Disabled || !selected[strings.ToLower(strings.TrimSpace(file.Provider))] || strings.TrimSpace(file.Name) == "" {
 			continue
 		}
-		identity := strings.TrimSpace(file.Name) + "\x00" + strings.TrimSpace(file.AuthIndex)
+		identity := upstreamAccountID(file)
 		if _, exists := seen[identity]; exists {
 			continue
 		}
@@ -229,7 +247,7 @@ func (k *Keys) runQuotaRefresh(client interface {
 		}
 	}
 	if len(eligible) == 0 {
-		k.finishQuotaRefresh(0, 0, "没有可刷新的 Codex 账号")
+		k.finishQuotaRefresh(0, 0, "没有可刷新的上游账号")
 		return
 	}
 	succeeded := 0
@@ -237,7 +255,19 @@ func (k *Keys) runQuotaRefresh(client interface {
 		if ctx.Err() != nil {
 			break
 		}
-		windows, err := client.FetchCodexQuota(ctx, file, k.Now())
+		if strings.EqualFold(strings.TrimSpace(file.Provider), "antigravity") {
+			if k.fetchAntigravityQuota(ctx, file, k.Now()) == nil {
+				succeeded++
+			}
+			continue
+		}
+		codex, ok := k.CPAMP.(interface {
+			FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
+		})
+		if !ok {
+			continue
+		}
+		windows, err := codex.FetchCodexQuota(ctx, file, k.Now())
 		if err == nil {
 			k.putRefreshedQuota(strings.TrimSpace(file.Name)+"\x00"+strings.TrimSpace(file.AuthIndex), windows)
 			succeeded++
@@ -815,10 +845,14 @@ func usageGranularity(from, to time.Time) string {
 	return "day"
 }
 
-// UpstreamAccounts lists Codex credentials that administrators may enable or
+// UpstreamAccounts lists the selected channel's credentials that administrators may enable or
 // disable. The opaque ID is derived from CPAMP's full sanitized identity so a
 // submitted action can be matched against a fresh listing.
-func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) {
+func (k *Keys) UpstreamAccounts(ctx context.Context, channels ...string) ([]UpstreamAccount, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return nil, err
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
@@ -832,7 +866,7 @@ func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) 
 	accounts := make([]UpstreamAccount, 0, len(files))
 	seen := make(map[string]struct{}, len(files))
 	for _, file := range files {
-		if !strings.EqualFold(strings.TrimSpace(file.Provider), "codex") || strings.TrimSpace(file.Name) == "" {
+		if !strings.EqualFold(strings.TrimSpace(file.Provider), channel) || strings.TrimSpace(file.Name) == "" {
 			continue
 		}
 		id := upstreamAccountID(file)
@@ -846,7 +880,7 @@ func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) 
 		}
 		accounts = append(accounts, UpstreamAccount{
 			ID: id, Name: strings.TrimSpace(file.Name), Account: label,
-			Provider: "Codex", AuthIndex: strings.TrimSpace(file.AuthIndex), Disabled: file.Disabled,
+			Provider: OAuthChannelLabel(channel), AuthIndex: strings.TrimSpace(file.AuthIndex), Disabled: file.Disabled,
 		})
 	}
 	sort.SliceStable(accounts, func(i, j int) bool {
@@ -860,7 +894,17 @@ func (k *Keys) UpstreamAccounts(ctx context.Context) ([]UpstreamAccount, error) 
 
 // UpstreamAccountQuotas returns current quota windows per enabled Codex
 // credential. It never exposes provider tokens or credential file contents.
-func (k *Keys) UpstreamAccountQuotas(ctx context.Context) (map[string]UpstreamAccountQuota, error) {
+func (k *Keys) UpstreamAccountQuotas(ctx context.Context, channels ...string) (map[string]UpstreamAccountQuota, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return nil, err
+	}
+	if channel == "antigravity" {
+		return k.antigravityAccountQuotas(ctx)
+	}
+	if channel != "codex" {
+		return nil, errors.New("该渠道暂未接入额度查询")
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 		FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
@@ -924,7 +968,11 @@ func (k *Keys) UpstreamAccountQuotas(ctx context.Context) (map[string]UpstreamAc
 
 // SetUpstreamAccountDisabled re-resolves the submitted opaque ID immediately
 // before mutating CPAMP, then verifies that the requested state was applied.
-func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabled bool) (UpstreamAccount, error) {
+func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabled bool, channels ...string) (UpstreamAccount, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return UpstreamAccount{}, err
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 		SetAuthFileDisabled(context.Context, cpamp.AuthFile, bool) error
@@ -939,7 +987,7 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 	var selected cpamp.AuthFile
 	found := false
 	for _, file := range files {
-		if strings.EqualFold(strings.TrimSpace(file.Provider), "codex") && upstreamAccountID(file) == strings.TrimSpace(id) {
+		if strings.EqualFold(strings.TrimSpace(file.Provider), channel) && upstreamAccountID(file) == strings.TrimSpace(id) {
 			selected, found = file, true
 			break
 		}
@@ -972,12 +1020,14 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 	k.invalidateQuota()
 	k.refreshMu.Lock()
 	k.refreshedQuota = make(map[string][]cpamp.CodexQuotaWindow)
+	k.antigravityQuota = make(map[string][]cpamp.AntigravityQuotaWindow)
+	k.antigravityAttempt = make(map[string]time.Time)
 	k.refreshMu.Unlock()
 	label := strings.TrimSpace(selected.AccountSnapshot)
 	if label == "" {
 		label = strings.TrimSpace(selected.Name)
 	}
-	return UpstreamAccount{ID: upstreamAccountID(selected), Name: strings.TrimSpace(selected.Name), Account: label, Provider: "Codex", AuthIndex: strings.TrimSpace(selected.AuthIndex), Disabled: disabled}, nil
+	return UpstreamAccount{ID: upstreamAccountID(selected), Name: strings.TrimSpace(selected.Name), Account: label, Provider: OAuthChannelLabel(channel), AuthIndex: strings.TrimSpace(selected.AuthIndex), Disabled: disabled}, nil
 }
 
 func upstreamAccountID(file cpamp.AuthFile) string {
@@ -987,9 +1037,13 @@ func upstreamAccountID(file cpamp.AuthFile) string {
 	}, "\x00"))
 }
 
-// OAuthModelSettings combines CPAMP's static Codex catalog with the global
+// OAuthModelSettings combines CPAMP's selected channel catalog with the global
 // OAuth exclusion rules so administrators can see the effective state.
-func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []string, error) {
+func (k *Keys) OAuthModelSettings(ctx context.Context, channels ...string) ([]OAuthModelSetting, []string, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return nil, nil, err
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
@@ -997,18 +1051,18 @@ func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []s
 	if !ok {
 		return nil, nil, errors.New("CPAMP 客户端不支持 OAuth 模型管理")
 	}
-	definitions, err := typed.ListOAuthModelDefinitions(ctx, "codex")
+	definitions, err := typed.ListOAuthModelDefinitions(ctx, channel)
 	if err != nil {
 		return nil, nil, err
 	}
-	rules, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	rules, err := typed.ListOAuthExcludedModels(ctx, channel)
 	if err != nil {
 		return nil, nil, err
 	}
 	models := make([]OAuthModelSetting, 0, len(definitions))
 	for _, definition := range definitions {
 		matched, wildcard := excludedModelRule(definition.ID, rules)
-		models = append(models, OAuthModelSetting{ID: definition.ID, DisplayName: definition.DisplayName, ThinkingLevels: definition.ThinkingLevels, Enabled: matched == "", WildcardRule: wildcard})
+		models = append(models, OAuthModelSetting{ID: definition.ID, DisplayName: definition.DisplayName, ThinkingLevels: definition.ThinkingLevels, ThinkingMin: definition.ThinkingMin, ThinkingMax: definition.ThinkingMax, ThinkingZeroAllowed: definition.ThinkingZeroAllowed, ThinkingDynamicAllowed: definition.ThinkingDynamicAllowed, Enabled: matched == "", WildcardRule: wildcard})
 	}
 	sort.SliceStable(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
 	wildcards := make([]string, 0)
@@ -1020,20 +1074,24 @@ func (k *Keys) OAuthModelSettings(ctx context.Context) ([]OAuthModelSetting, []s
 	return models, wildcards, nil
 }
 
-// OAuthModelAliases returns CPA's current Codex mappings and a revision token
+// OAuthModelAliases returns CPA's selected channel mappings and a revision token
 // so a stale browser form cannot silently overwrite changes made elsewhere.
-func (k *Keys) OAuthModelAliases(ctx context.Context) ([]cpamp.OAuthModelAlias, string, error) {
+func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpamp.OAuthModelAlias, string, error) {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return nil, "", err
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 	})
 	if !ok {
 		return nil, "", errors.New("CPAMP 客户端不支持 OAuth 模型别名")
 	}
-	aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+	aliases, err := typed.ListOAuthModelAliases(ctx, channel)
 	if err != nil {
 		return nil, "", err
 	}
-	return aliases, oauthAliasRevision(aliases), nil
+	return aliases, oauthChannelAliasRevision(channel, aliases), nil
 }
 
 // HiddenModelAliases returns client-visible alias IDs that should not appear
@@ -1069,6 +1127,7 @@ func (k *Keys) HiddenModelAliases(ctx context.Context) (map[string]bool, error) 
 // VisibleModels applies the same catalog policy to models read through CPAMP
 // as the public gateway applies to GET /v1/models.
 func (k *Keys) VisibleModels(ctx context.Context, models []cpamp.Model) ([]cpamp.Model, error) {
+	models = k.RestoreSchedulableModels(ctx, models)
 	hidden, err := k.HiddenModelAliases(ctx)
 	if err != nil {
 		return nil, err
@@ -1095,11 +1154,15 @@ func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 	return security.SHA256(string(data))
 }
 
-// SetOAuthModelAliases replaces the known Codex model mappings while keeping
+// SetOAuthModelAliases replaces the selected channel's known model mappings while keeping
 // mappings for models not in the current static catalog. Fork retains the
 // original ID alongside aliases; force-mapping keeps alias responses labelled
 // with the client-facing name.
-func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string) error {
+func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, channels ...string) error {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return err
+	}
 	k.modelConfigMu.Lock()
 	defer k.modelConfigMu.Unlock()
 	typed, ok := k.CPAMP.(interface {
@@ -1109,18 +1172,18 @@ func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAlia
 	if !ok {
 		return errors.New("CPAMP 客户端不支持 OAuth 模型别名")
 	}
-	models, _, err := k.OAuthModelSettings(ctx)
+	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
 		return err
 	}
 	if len(models) == 0 {
-		return errors.New("尚无 Codex 模型定义，不能保存别名")
+		return errors.New("该渠道暂无模型定义，不能保存别名")
 	}
-	current, err := typed.ListOAuthModelAliases(ctx, "codex")
+	current, err := typed.ListOAuthModelAliases(ctx, channel)
 	if err != nil {
 		return err
 	}
-	if revision != oauthAliasRevision(current) {
+	if revision != oauthChannelAliasRevision(channel, current) {
 		return errors.New("模型别名已由其他操作修改，请刷新页面后重试")
 	}
 	known := make(map[string]OAuthModelSetting, len(models))
@@ -1201,10 +1264,10 @@ func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAlia
 	if oauthAliasRevision(next) == oauthAliasRevision(current) {
 		return nil
 	}
-	if err := typed.SetOAuthModelAliases(ctx, "codex", next); err != nil {
+	if err := typed.SetOAuthModelAliases(ctx, channel, next); err != nil {
 		return err
 	}
-	confirmed, err := typed.ListOAuthModelAliases(ctx, "codex")
+	confirmed, err := typed.ListOAuthModelAliases(ctx, channel)
 	if err != nil {
 		return fmt.Errorf("别名已提交，但无法确认结果：%w", err)
 	}
@@ -1290,7 +1353,11 @@ func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthMo
 
 // SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
 // remain untouched because changing one would alter multiple model switches.
-func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool) error {
+func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool, channels ...string) error {
+	channel, err := selectedOAuthChannel(channels)
+	if err != nil {
+		return err
+	}
 	k.modelConfigMu.Lock()
 	defer k.modelConfigMu.Unlock()
 	typed, ok := k.CPAMP.(interface {
@@ -1304,7 +1371,7 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		return errors.New("CPAMP 客户端不支持 OAuth 模型管理")
 	}
 	modelID = strings.TrimSpace(modelID)
-	definitions, err := typed.ListOAuthModelDefinitions(ctx, "codex")
+	definitions, err := typed.ListOAuthModelDefinitions(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -1318,11 +1385,11 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 	if canonical == "" {
 		return errors.New("OAuth 模型不存在或模型定义已变化，请刷新后重试")
 	}
-	rules, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	rules, err := typed.ListOAuthExcludedModels(ctx, channel)
 	if err != nil {
 		return err
 	}
-	aliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+	aliases, err := typed.ListOAuthModelAliases(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -1355,11 +1422,11 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		next = append(next, canonical)
 	}
 	if (enabled && matched != "") || (!enabled && matched == "") {
-		if err := typed.SetOAuthExcludedModels(ctx, "codex", next); err != nil {
+		if err := typed.SetOAuthExcludedModels(ctx, channel, next); err != nil {
 			return err
 		}
 	}
-	confirmed, err := typed.ListOAuthExcludedModels(ctx, "codex")
+	confirmed, err := typed.ListOAuthExcludedModels(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -1376,32 +1443,32 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		}
 		aliasesChanged := oauthAliasRevision(nextAliases) != oauthAliasRevision(aliases)
 		if aliasesChanged {
-			if err := typed.SetOAuthModelAliases(ctx, "codex", nextAliases); err != nil {
-				if rollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules); rollbackErr != nil {
+			if err := typed.SetOAuthModelAliases(ctx, channel, nextAliases); err != nil {
+				if rollbackErr := typed.SetOAuthExcludedModels(ctx, channel, rules); rollbackErr != nil {
 					return fmt.Errorf("删除模型别名失败：%v；恢复模型状态也失败：%w", err, rollbackErr)
 				}
 				return fmt.Errorf("删除模型别名失败，模型停用已撤销：%w", err)
 			}
-			confirmedAliases, err := typed.ListOAuthModelAliases(ctx, "codex")
+			confirmedAliases, err := typed.ListOAuthModelAliases(ctx, channel)
 			if err != nil || oauthAliasRevision(confirmedAliases) != oauthAliasRevision(nextAliases) {
 				aliasErr := err
 				if aliasErr == nil {
 					aliasErr = errors.New("CPAMP 未确认模型别名已删除")
 				}
-				aliasRollbackErr := typed.SetOAuthModelAliases(ctx, "codex", aliases)
-				statusRollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules)
+				aliasRollbackErr := typed.SetOAuthModelAliases(ctx, channel, aliases)
+				statusRollbackErr := typed.SetOAuthExcludedModels(ctx, channel, rules)
 				if aliasRollbackErr != nil || statusRollbackErr != nil {
 					return fmt.Errorf("%v；恢复别名失败：%v；恢复模型状态失败：%v", aliasErr, aliasRollbackErr, statusRollbackErr)
 				}
 				return fmt.Errorf("%v，模型停用已撤销", aliasErr)
 			}
 		}
-		if err := k.removeOAuthReasoningCap(ctx, canonical); err != nil {
+		if err := k.removeChannelReasoningCap(ctx, channel, canonical); err != nil {
 			var aliasRollbackErr error
 			if aliasesChanged {
-				aliasRollbackErr = typed.SetOAuthModelAliases(ctx, "codex", aliases)
+				aliasRollbackErr = typed.SetOAuthModelAliases(ctx, channel, aliases)
 			}
-			statusRollbackErr := typed.SetOAuthExcludedModels(ctx, "codex", rules)
+			statusRollbackErr := typed.SetOAuthExcludedModels(ctx, channel, rules)
 			if aliasRollbackErr != nil || statusRollbackErr != nil {
 				return fmt.Errorf("删除思考强度上限失败：%v；恢复别名失败：%v；恢复模型状态失败：%v", err, aliasRollbackErr, statusRollbackErr)
 			}

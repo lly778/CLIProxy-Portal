@@ -25,12 +25,14 @@ func (f *presetCPAMP) PutConfigYAML(ctx context.Context, data []byte) error {
 
 func TestOAuthPresetSnapshotsEqual(t *testing.T) {
 	left := OAuthPresetSnapshot{
+		Channel:       "codex",
 		Version:       OAuthPresetVersion,
 		Models:        []OAuthPresetModel{{ID: "gpt-b", Enabled: false}, {ID: "GPT-A", Enabled: true}},
 		Aliases:       []cpamp.OAuthModelAlias{{Name: "GPT-A", Alias: "client-a", Fork: true}},
 		ReasoningCaps: map[string]string{"GPT-A": "HIGH", "gpt-b": ""},
 	}
 	right := OAuthPresetSnapshot{
+		Channel:       "codex",
 		Version:       OAuthPresetVersion,
 		Models:        []OAuthPresetModel{{ID: "gpt-a", Enabled: true}, {ID: "GPT-B", Enabled: false}},
 		Aliases:       []cpamp.OAuthModelAlias{{Name: "gpt-a", Alias: "CLIENT-A", Fork: true}},
