@@ -32,16 +32,13 @@ function fixture(count, width, health = false, options = {}) {
   const chart = element();
   const svg = element();
   const plot = element();
-  const bars = options.stacked === false ? [
+  const stacked = options.stacked ?? health;
+  const bars = !stacked ? [
     element({ barX: 496, barY: 118, barWidth: 8, barHeight: 100 }),
-  ] : health ? [
+  ] : [
     element({ barX: 496, barY: 208, barWidth: 8, barHeight: 10, barSquare: 'true' }),
     element({ barX: 496, barY: 138, barWidth: 8, barHeight: 70, barSquare: 'true' }),
     element({ barX: 496, barY: 118, barWidth: 8, barHeight: 20, barSquare: 'false' }),
-  ] : [
-    element({ barX: 496, barY: 198, barWidth: 8, barHeight: 20, barSquare: 'true' }),
-    element({ barX: 496, barY: 148, barWidth: 8, barHeight: 50, barSquare: 'true' }),
-    element({ barX: 496, barY: 118, barWidth: 8, barHeight: 30, barSquare: 'false' }),
   ];
   if (options.thinTop) {
     const top = bars.at(-1), below = bars.at(-2);
@@ -58,12 +55,11 @@ function fixture(count, width, health = false, options = {}) {
   tooltip.getBoundingClientRect = () => ({ width: 230, height: 100 });
   const tooltipDate = element(), requestValue = element(), tokenValue = element();
   const healthValues = ['successRate', 'failureRate', 'averageTotal', 'averageUpload', 'averageWait', 'averageResponse'].map((trendValue) => element({ trendValue }));
-  const tokenValues = ['inputTokens', 'cacheTokens', 'outputTokens'].map((trendValue) => element({ trendValue }));
   tooltip.querySelector = (selector) => ({ '[data-trend-date]': tooltipDate, '[data-trend-requests]': requestValue, '[data-trend-tokens]': tokenValue })[selector] ?? null;
-  tooltip.querySelectorAll = (selector) => selector === '[data-trend-value]' ? (health ? healthValues : tokenValues) : [];
+  tooltip.querySelectorAll = (selector) => selector === '[data-trend-value]' && health ? healthValues : [];
   const points = Array.from({ length: count }, (_, i) => {
     const x = Math.round(100 + i * 800 / Math.max(1, count - 1));
-    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', inputTokens: '200', cacheTokens: '500', outputTokens: '300', successRate: '95%', failureRate: '5%', averageTotal: '4 s', averageUpload: '500 ms', averageWait: '1.5 s', averageResponse: '2 s' });
+    const point = element({ x, y: 100, tokenY: 160, date: `point-${i}`, requests: '20', tokens: '1000', successRate: '95%', failureRate: '5%', averageTotal: '4 s', averageUpload: '500 ms', averageWait: '1.5 s', averageResponse: '2 s' });
     point.dots = Array.from({ length: health ? 2 : 1 }, () => {
       const dot = element(); dot.setAttribute('cx', x); return dot;
     });
@@ -75,7 +71,7 @@ function fixture(count, width, health = false, options = {}) {
   chart.clientWidth = width; chart.clientHeight = 260;
   chart.getBoundingClientRect = () => ({ left: 0, top: 0, width, height: 260 });
   chart.querySelector = (selector) => selection[selector] ?? null;
-  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels, '.trend-bar[data-bar-x]': bars, '[data-trend-bar-stack]': options.stacked === false ? [] : [stack] })[selector] ?? [];
+  chart.querySelectorAll = (selector) => ({ '[data-trend-point]': points, '[data-trend-label]': labels, '.trend-bar[data-bar-x]': bars, '[data-trend-bar-stack]': stacked ? [stack] : [] })[selector] ?? [];
   chart.contains = (target) => target === svg || target === chart;
   chart.setPointerCapture = () => {};
   chart.hasPointerCapture = () => false;
@@ -105,7 +101,7 @@ function fixture(count, width, health = false, options = {}) {
     send('touchstart', [touch(1, 400)]);
     return send('touchstart', [touch(1, 400), touch(2, 600)]);
   }
-  return { chart, tooltip, tooltipDate, healthValues, tokenValues, points, bars, stackOutline, stackClip, stackTarget, resize, touch, send, viewport, visiblePoints, pinch };
+  return { chart, tooltip, tooltipDate, healthValues, requestValue, tokenValue, points, bars, stackOutline, stackClip, stackTarget, resize, touch, send, viewport, visiblePoints, pinch };
 }
 
 for (const health of [false, true]) {
@@ -117,13 +113,16 @@ for (const health of [false, true]) {
       assert.ok(f.pinch().defaultPrevented);
       assert.ok(f.send('touchmove', [f.touch(1, 200), f.touch(2, 800)]).defaultPrevented);
       assert.equal(f.viewport().scale, 3);
-      assert.ok(f.bars.every((bar) => !bar.getAttribute('d').includes(' A')));
-      assert.ok(f.stackOutline.getAttribute('d').includes(' A'));
       if (health) {
+        assert.ok(f.bars.every((bar) => !bar.getAttribute('d').includes(' A')));
+        assert.ok(f.stackOutline.getAttribute('d').includes(' A'));
         assert.ok(f.bars.slice(0, 2).every((bar) => !bar.getAttribute('d').includes(' A')));
         assert.ok(!f.bars[2].getAttribute('d').includes(' A'));
         assert.equal(f.bars[0].getAttribute('d'), 'M496,208 h8 v10 h-8 Z');
         assert.equal(f.bars[1].getAttribute('d'), 'M496,138 h8 v70 h-8 Z');
+      } else {
+        assert.equal(f.bars.length, 1);
+        assert.ok(f.bars[0].getAttribute('d').includes(' A'));
       }
       assert.ok(f.visiblePoints().length <= 36);
       assert.ok(f.visiblePoints().every((p) => p.dots.every((dot) => !dot.hidden)));
@@ -160,7 +159,10 @@ for (const health of [false, true]) {
       assert.ok(!f.tooltip.hidden);
       assert.match(f.tooltipDate.textContent, /^point-/);
       if (health) assert.deepEqual(f.healthValues.map((v) => v.textContent), ['95%', '5%', '4 s', '500 ms', '1.5 s', '2 s']);
-      else assert.deepEqual(f.tokenValues.map((v) => v.textContent), ['200', '500', '300']);
+      else {
+        assert.equal(f.requestValue.textContent, '20');
+        assert.equal(f.tokenValue.textContent, '1000');
+      }
       f.send('touchstart', [f.touch(1, 500)]);
       assert.ok(!f.send('touchmove', [f.touch(1, 501, 150)]).defaultPrevented);
       f.send('touchend', [], [f.touch(1, 501, 150)]);
@@ -209,7 +211,7 @@ test('12 or fewer points stay unzoomable but support tap values', () => {
 });
 
 for (const health of [false, true]) {
-  test(`${health ? 'health' : 'usage'}: thin top segments retain full-column rounded corners on resize and zoom`, () => {
+  if (health) test('health: thin top segments retain full-column rounded corners on resize and zoom', () => {
     const f = fixture(60, 400, health, { thinTop: true });
     const radiusY = () => Number(f.stackOutline.getAttribute('d').match(/ A[^,]+,([^ ]+)/)[1]);
     assert.equal(f.stackClip.id, 'trend-bar-clip-0-0');
@@ -225,10 +227,10 @@ for (const health of [false, true]) {
     assert.equal(first.dataset.barY + first.dataset.barHeight, 218, 'bottom baseline stays square and fixed');
     assert.equal(top.dataset.barY, 118, 'total top and segment proportions stay fixed');
     assert.equal(top.dataset.barHeight, 0.01);
-    const otherChart = fixture(60, 400, !health, { chartIndex: 1 });
+    const otherChart = fixture(60, 400, health, { chartIndex: 1 });
     assert.notEqual(otherChart.stackClip.id, f.stackClip.id, 'the two charts must not share clip IDs');
   });
-  test(`${health ? 'health' : 'usage'}: legacy total-only bars still have rounded top corners`, () => {
+  test(`${health ? 'health' : 'usage'}: total-only bars still have rounded top corners`, () => {
     const f = fixture(60, 400, health, { stacked: false });
     assert.ok(f.bars[0].getAttribute('d').includes(' A'));
     f.resize(1000);
@@ -236,22 +238,12 @@ for (const health of [false, true]) {
   });
 }
 
-test('three Token greens are dark/light/dark with a similar lightness range to the blue timing stages', () => {
+test('total Token bars, legend and tooltip keep the original green', () => {
   const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
-  function luminance(color) {
-    const rgb = color.match(/[\da-f]{2}/gi).map((v) => parseInt(v, 16) / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
-    return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
-  }
-  function color(part) { return css.match(new RegExp(`\\.trend-bar\\.tokens-${part},[^\\n]+fill: (#[\\da-f]{6});`))[1]; }
-  for (const [one, two, minimumContrast] of [['input', 'cache', 1.4], ['cache', 'output', 3]]) {
-    const values = [luminance(color(one)), luminance(color(two))].sort((a, b) => b - a);
-    assert.ok((values[0] + 0.05) / (values[1] + 0.05) >= minimumContrast, `${one}/${two} must retain their chosen dark/light distinction`);
-  }
-  assert.ok(luminance(color('input')) < luminance(color('cache')));
-  assert.ok(luminance(color('cache')) > luminance(color('output')));
-  assert.ok(luminance(color('cache')) < 0.6, 'cache must not return to a near-white green');
-  for (const [tokenPart, timingPart] of [['input', 'upload'], ['cache', 'wait'], ['output', 'response']]) {
-    const timingColor = css.match(new RegExp(`\\.trend-bar\\.duration-${timingPart},[^\\n]+fill: (#[\\da-f]{6});`))[1];
-    assert.ok(Math.abs(luminance(color(tokenPart)) - luminance(timingColor)) < 0.1, 'green and blue stages should have similar lightness');
-  }
+  assert.ok(css.includes('.trend-bar { fill: #5ab38e; }'));
+  assert.ok(css.includes('.trend-tooltip .tokens i { background: #5ab38e; }'));
+  assert.ok(css.includes('.trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }'));
+  assert.ok(!css.includes('.trend-bar.tokens-input'));
+  assert.ok(!css.includes('.trend-bar.tokens-cache'));
+  assert.ok(!css.includes('.trend-bar.tokens-output'));
 });

@@ -183,22 +183,17 @@ type HealthTrendView struct {
 }
 
 type UsageTrendPointView struct {
-	X                 int
-	LabelTick         int64
-	RequestY          int
-	TokenY            int
-	BarX              int
-	BarWidth          int
-	BarHeight         int
-	Date              string
-	Requests          string
-	Tokens            string
-	ShowLabel         bool
-	HasTokenBreakdown bool
-	InputTokens       string
-	CacheTokens       string
-	OutputTokens      string
-	TokenSegments     []TrendBarSegmentView
+	X         int
+	LabelTick int64
+	RequestY  int
+	TokenY    int
+	BarX      int
+	BarWidth  int
+	BarHeight int
+	Date      string
+	Requests  string
+	Tokens    string
+	ShowLabel bool
 }
 
 type UsageTrendView struct {

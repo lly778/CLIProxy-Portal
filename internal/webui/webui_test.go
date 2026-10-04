@@ -156,9 +156,6 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 		{"duration-upload", "#58a0e7"},
 		{"duration-wait", "#8dbded"},
 		{"duration-response", "#357dc4"},
-		{"tokens-input", "#5ab38e"},
-		{"tokens-cache", "#98d0b6"},
-		{"tokens-output", "#28764f"},
 	} {
 		rule := ".trend-bar." + part.class + ", .trend-tooltip ." + part.class + " i { fill: " + part.color + "; background: " + part.color + "; }"
 		if !bytes.Contains(css, []byte(rule)) {
@@ -166,6 +163,7 @@ func TestTrendSegmentsUseTheirLegendColorFamiliesAndMatchingTooltipSwatches(t *t
 		}
 	}
 	for _, rule := range []string{
+		".trend-bar { fill: #5ab38e; }",
 		".trend-tooltip .tokens i { background: #5ab38e; }",
 		".trend-legend .tokens i { background: #5ab38e; border-radius: 1px; }",
 		".trend-bar.duration, .trend-legend .duration i, .trend-tooltip .duration i { fill: #58a0e7; background: #58a0e7; }",
@@ -612,41 +610,32 @@ func TestDenseUsageTrendHidesOnlySymbols(t *testing.T) {
 	}
 }
 
-func TestUsageTrendRendersThreeTokenPartsAndLegacyFallback(t *testing.T) {
+func TestUsageTrendRendersOnlyTotalTokenBarsAndTooltip(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
 		t.Fatal(err)
 	}
-	point := UsageTrendPointView{BarX: 100, BarWidth: 8, TokenY: 158, BarHeight: 60, HasTokenBreakdown: true, InputTokens: "35", CacheTokens: "65", OutputTokens: "40", Tokens: "140"}
-	for i, class := range []string{"tokens-input", "tokens-cache", "tokens-output"} {
-		point.TokenSegments = append(point.TokenSegments, TrendBarSegmentView{Class: class, BarX: 100, BarWidth: 8, Y: float64(198 - i*20), Height: 20, Square: i < 2})
-	}
-	view := UsageView{Trend: UsageTrendView{Points: []UsageTrendPointView{point, {Tokens: "140", InputTokens: "—", CacheTokens: "—", OutputTokens: "—"}}}}
+	view := UsageView{Trend: UsageTrendView{Points: []UsageTrendPointView{
+		{BarX: 100, BarWidth: 8, TokenY: 158, BarHeight: 60, Tokens: "140", Requests: "2"},
+		{BarX: 120, BarWidth: 8, TokenY: 218, BarHeight: 0, Tokens: "0", Requests: "0"},
+	}}}
 	var out bytes.Buffer
 	if err := r.Execute(&out, PageUsage, view); err != nil {
 		t.Fatal(err)
 	}
 	html := out.String()
-	if strings.Contains(html, "Token 柱按输入、缓存、输出、推理四段堆叠") {
-		t.Fatal("removed Token stack description must not appear")
-	}
-	for _, want := range []string{`class="trend-bar tokens-input"`, `class="trend-bar tokens-cache"`, `class="trend-bar tokens-output"`, `data-input-tokens="35"`, `data-cache-tokens="65"`, `data-output-tokens="40"`, `data-trend-value="inputTokens"`, `data-trend-value="cacheTokens"`, `data-trend-value="outputTokens"`, `data-output-tokens="—"`, `<i></i>输入</span>`, `<i></i>缓存</span>`, `<i></i>输出</span>`} {
+	for _, want := range []string{`data-bar-x="100" data-bar-y="158" data-bar-width="8" data-bar-height="60"`, `data-tokens="140"`, `data-tokens="0"`, `data-trend-tokens`, `data-trend-requests`} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("missing %s", want)
+			t.Fatalf("missing total-only chart value: %s", want)
 		}
 	}
-	for _, unwanted := range []string{"tokens-reasoning", "reasoningTokens", "data-reasoning-tokens", "不含推理"} {
+	for _, unwanted := range []string{"tokens-input", "tokens-cache", "tokens-output", "tokens-reasoning", "data-input-tokens", "data-cache-tokens", "data-output-tokens", "data-trend-value", "data-trend-bar-stack", "data-bar-square", "Token 柱按输入"} {
 		if strings.Contains(html, unwanted) {
-			t.Fatalf("reasoning must not appear as a separate chart part: %s", unwanted)
+			t.Fatalf("removed Token breakdown still rendered: %s", unwanted)
 		}
 	}
-	if strings.Count(html, `class="trend-bar tokens"`) != 1 || strings.Count(html, `data-bar-square="true"`) != 2 || strings.Count(html, `data-bar-square="false"`) != 1 {
-		t.Fatal("fallback or top-only rounded corners lost")
-	}
-	for _, want := range []string{`data-trend-bar-stack`, `data-trend-bar-stack-target`, `data-trend-bar-clip clipPathUnits="userSpaceOnUse"`, `data-trend-bar-outline data-bar-x="100" data-bar-y="158" data-bar-width="8" data-bar-height="60"`} {
-		if !strings.Contains(html, want) {
-			t.Fatalf("Token stack missing total-column corner clip: %s", want)
-		}
+	if strings.Count(html, `class="trend-bar tokens"`) != 2 {
+		t.Fatal("each interval must render exactly one total Token bar")
 	}
 }
 

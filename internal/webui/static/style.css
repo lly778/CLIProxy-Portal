@@ -406,9 +406,6 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .trend-bar.duration-response, .trend-tooltip .duration-response i { fill: #357dc4; background: #357dc4; }
 .trend-tooltip .trend-stage-value { padding-left: 12px; }
 .trend-tooltip .trend-stage-value i { border-radius: 1px; }
-.trend-bar.tokens-input, .trend-tooltip .tokens-input i { fill: #5ab38e; background: #5ab38e; }
-.trend-bar.tokens-cache, .trend-tooltip .tokens-cache i { fill: #98d0b6; background: #98d0b6; }
-.trend-bar.tokens-output, .trend-tooltip .tokens-output i { fill: #28764f; background: #28764f; }
 .trend-axis-label.health-rate { left: 8.8%; transform: translate(-100%, -50%); }
 .trend-axis-label.duration { left: 91.4%; color: #58a0e7; transform: translateY(-50%); }
 .usage-list { display: grid; gap: 16px; }

@@ -1,7 +1,7 @@
 package httpserver
 
 import (
-	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -83,30 +83,15 @@ func TestGroupedTokenPartsPreserveBoundsTotalsAndSourceValues(t *testing.T) {
 	}
 }
 
-func TestTokenStackGeometrySharesTotalHeightWidthAndTopCorners(t *testing.T) {
+func TestTokenTrendAlwaysUsesTotalOnlyGeometry(t *testing.T) {
 	for _, parts := range [][4]int64{{35, 65, 25, 15}, {0, 100, 40, 0}, {140, 0, 0, 0}, {0, 0, 0, 0}} {
 		p := webui.UsagePointView{RequestValue: 2, TokenValue: parts[0] + parts[1] + parts[2] + parts[3], HasTokenBreakdown: true, InputTokenValue: parts[0], CacheTokenValue: parts[1], OutputTokenValue: parts[2], ReasoningTokenValue: parts[3]}
+		p.Tokens = compactNumber(p.TokenValue)
 		got := usageTrend([]webui.UsagePointView{p}).Points[0]
 		p.HasTokenBreakdown = false
 		legacy := usageTrend([]webui.UsagePointView{p}).Points[0]
-		if !got.HasTokenBreakdown || got.BarHeight != legacy.BarHeight || got.BarWidth != legacy.BarWidth || got.TokenY != legacy.TokenY {
-			t.Fatal("stack changed total geometry")
-		}
-		bottom := float64(got.TokenY + got.BarHeight)
-		for i, segment := range got.TokenSegments {
-			if math.Abs(segment.Y+segment.Height-bottom) > 1e-9 || segment.BarWidth != got.BarWidth || segment.BarX != got.BarX || segment.Square != (i < len(got.TokenSegments)-1) {
-				t.Fatalf("bad segment: %#v", segment)
-			}
-			bottom = segment.Y
-		}
-		if math.Abs(bottom-float64(got.TokenY)) > 1e-9 {
-			t.Fatal("stack height differs from total")
-		}
-		if got.OutputTokens != compactNumber(parts[2]+parts[3]) || len(got.TokenSegments) > 3 {
-			t.Fatal("three-part stack must include reasoning in output")
-		}
-		if legacy.InputTokens != "—" || legacy.CacheTokens != "—" || legacy.OutputTokens != "—" {
-			t.Fatal("unavailable parts must not show zero")
+		if !reflect.DeepEqual(got, legacy) || got.Tokens != compactNumber(p.TokenValue) {
+			t.Fatal("Token breakdown availability must not change the total-only chart")
 		}
 	}
 }

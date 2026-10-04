@@ -7,18 +7,15 @@
     {{range .AxisTicks}}<line class="trend-grid-line" x1="100" y1="{{.Y}}" x2="900" y2="{{.Y}}"></line>{{end}}
     <g data-trend-clip-target><g data-trend-plot>
     <path class="trend-area requests" d="{{.RequestAreaPath}}"></path>
-    {{range .Points}}{{if .HasTokenBreakdown}}<g data-trend-bar-stack>
-      <defs><clipPath data-trend-bar-clip clipPathUnits="userSpaceOnUse"><path data-trend-bar-outline data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path></clipPath></defs>
-      <g data-trend-bar-stack-target>{{range .TokenSegments}}<path class="trend-bar {{.Class}}" data-bar-x="{{.BarX}}" data-bar-y="{{.Y}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.Height}}" data-bar-square="{{.Square}}" d="M{{.BarX}},{{.Y}} h{{.BarWidth}} v{{.Height}} h-{{.BarWidth}} Z"></path>{{end}}</g>
-    </g>{{else}}<path class="trend-bar tokens" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}{{end}}
+    {{range .Points}}<path class="trend-bar tokens" data-bar-x="{{.BarX}}" data-bar-y="{{.TokenY}}" data-bar-width="{{.BarWidth}}" data-bar-height="{{.BarHeight}}" d="M{{.BarX}},{{.TokenY}} h{{.BarWidth}} v{{.BarHeight}} h-{{.BarWidth}} Z"></path>{{end}}
     <path class="trend-line requests" d="{{.RequestPath}}"></path>
-    {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}" data-input-tokens="{{.InputTokens}}" data-cache-tokens="{{.CacheTokens}}" data-output-tokens="{{.OutputTokens}}"><circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle></g>{{end}}
+    {{range .Points}}<g data-trend-point data-x="{{.X}}" data-y="{{.RequestY}}" data-token-y="{{.TokenY}}" data-date="{{.Date}}" data-requests="{{.Requests}}" data-tokens="{{.Tokens}}"><circle class="trend-dot requests" cx="{{.X}}" cy="{{.RequestY}}" r="3"{{if not $.ShowSymbols}} hidden{{end}}></circle></g>{{end}}
     </g></g>
     <line class="trend-cursor" x1="0" y1="28" x2="0" y2="218" hidden></line>
   </svg>
   {{range .AxisTicks}}<span class="trend-axis-label tokens" style="top:calc({{.Y}} * 100% / 260)">{{.Tokens}}</span><span class="trend-axis-label requests" style="top:calc({{.Y}} * 100% / 260)">{{.Requests}}</span>{{end}}
   {{range .Points}}<span class="trend-x-label" data-trend-label data-x="{{.X}}" data-tick="{{.LabelTick}}" style="left:calc({{.X}} * .1%)" {{if not .ShowLabel}}hidden{{end}}>{{.Date}}</span>{{end}}
-  <div class="trend-tooltip" data-trend-tooltip hidden><strong data-trend-date></strong><div><span class="requests"><i></i>请求数</span><b data-trend-requests></b></div><div><span class="tokens"><i></i>Token 数</span><b data-trend-tokens></b></div><div class="trend-stage-value"><span class="tokens-input"><i></i>输入</span><b data-trend-value="inputTokens"></b></div><div class="trend-stage-value"><span class="tokens-cache"><i></i>缓存</span><b data-trend-value="cacheTokens"></b></div><div class="trend-stage-value"><span class="tokens-output"><i></i>输出</span><b data-trend-value="outputTokens"></b></div></div>
+  <div class="trend-tooltip" data-trend-tooltip hidden><strong data-trend-date></strong><div><span class="requests"><i></i>请求数</span><b data-trend-requests></b></div><div><span class="tokens"><i></i>Token 数</span><b data-trend-tokens></b></div></div>
 </div>
 {{else}}<div class="empty-state compact"><p>暂无统计数据。</p></div>{{end}}
 {{end}}
