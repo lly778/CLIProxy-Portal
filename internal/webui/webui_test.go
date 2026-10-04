@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-9`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-10`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -1344,11 +1344,49 @@ func TestOAuthPresetNarrowHeaderIsCompactAndPreservesSaveForm(t *testing.T) {
 	for _, rule := range []string{
 		`.upstream-card > .oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }`,
 		`.oauth-preset-tools { width: 100%; flex-wrap: wrap; justify-content: flex-start; }`,
-		`.oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr) auto; }`,
+		`.oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr); }`,
 	} {
 		if !strings.Contains(narrow, rule) || strings.Count(css, rule) != 1 {
 			t.Fatalf("compact preset layout must be narrow-only: %s", rule)
 		}
+	}
+	if !strings.Contains(narrow, `.oauth-preset-save .button { width: 100%; justify-self: stretch; }`) {
+		t.Fatal("narrow preset save button must fill its own row, like user suspension controls")
+	}
+}
+
+func TestOAuthPresetSaveMatchesSuspensionControlBreakpoints(t *testing.T) {
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	for _, rule := range []string{
+		`.oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }`,
+		`.oauth-preset-head > div:first-child { min-width: 0; }`,
+		`.oauth-preset-save { display: grid; width: auto; max-width: 100%; grid-template-columns: clamp(190px, 22vw, 300px) auto; gap: 9px; align-items: center; }`,
+		`.detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }`,
+	} {
+		if !strings.Contains(css, rule) {
+			t.Fatalf("wide preset controls must match suspension controls: %s", rule)
+		}
+	}
+	_, medium, found := strings.Cut(css, "@media (min-width: 761px) and (max-width: 1080px) {")
+	medium, _, _ = strings.Cut(medium, "\n}")
+	if !found {
+		t.Fatal("missing medium-page breakpoint")
+	}
+	for _, rule := range []string{
+		`.oauth-preset-head { grid-template-columns: minmax(0, 1fr) minmax(0, 200px); }`,
+		`.oauth-preset-save { width: 100%; grid-template-columns: minmax(0, 1fr); }`,
+		`.oauth-preset-save .button { width: 100%; justify-self: stretch; }`,
+	} {
+		if !strings.Contains(medium, rule) {
+			t.Fatalf("medium preset controls must stack inside the right-hand column: %s", rule)
+		}
+	}
+	if strings.Contains(css, `.oauth-preset-tools { flex: 1 1 100%; justify-content: flex-start; }`) {
+		t.Fatal("preset controls must not move below the heading prematurely")
 	}
 }
 

@@ -571,19 +571,13 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 }
 .oauth-rule-note { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 11px 13px; margin: 4px 0 10px; background: var(--warning-bg); border-radius: 9px; }
 .oauth-rule-note > div { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.oauth-preset-head { align-items: center; }
-.oauth-preset-head > div:first-child { min-width: 260px; }
-.oauth-preset-tools { display: flex; flex: 0 0 auto; gap: 10px; align-items: center; justify-content: flex-end; }
-.oauth-preset-save { display: grid; width: 370px; max-width: 42vw; grid-template-columns: minmax(170px, 1fr) auto; gap: 9px; align-items: center; }
+.oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.oauth-preset-head > div:first-child { min-width: 0; }
+.oauth-preset-tools { display: flex; min-width: 0; gap: 10px; align-items: center; justify-content: flex-end; }
+.oauth-preset-save { display: grid; width: auto; max-width: 100%; grid-template-columns: clamp(190px, 22vw, 300px) auto; gap: 9px; align-items: center; }
 .oauth-preset-save label { min-width: 0; }
 .oauth-preset-save input { min-height: 38px; background: var(--surface); }
 .oauth-preset-save .button { justify-self: start; white-space: nowrap; }
-@container (max-width: 800px) {
-  .oauth-preset-head { flex-wrap: wrap; }
-  .oauth-preset-head > div:first-child { min-width: 0; }
-  .oauth-preset-tools { flex: 1 1 100%; justify-content: flex-start; }
-  .oauth-preset-save { width: min(100%, 370px); max-width: none; grid-template-columns: minmax(0, 1fr) auto; }
-}
 .oauth-preset-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .oauth-preset-row { min-width: 0; padding: 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }
 .oauth-preset-main { display: grid; min-width: 0; gap: 3px; }
@@ -746,6 +740,9 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .detail-hero > .stack-actions form { min-width: 0; width: 100%; }
   .detail-hero .filter-inline { display: grid; grid-template-columns: minmax(0, 1fr); }
   .detail-hero .suspend-action input[type="text"], .detail-hero .stack-actions .button { min-width: 0; width: 100%; }
+  .oauth-preset-head { grid-template-columns: minmax(0, 1fr) minmax(0, 200px); }
+  .oauth-preset-save { width: 100%; grid-template-columns: minmax(0, 1fr); }
+  .oauth-preset-save .button { width: 100%; justify-self: stretch; }
 }
 @media (max-width: 760px) {
   /* Only the narrow, stacked overview uses adaptive operation tiles. Keep
@@ -780,7 +777,8 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .nav-item span, .nav-heading, .nav-divider { display: none; }
   .upstream-card > .oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
   .oauth-preset-tools { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
-  .oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr) auto; }
+  .oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr); }
+  .oauth-preset-save .button { width: 100%; justify-self: stretch; }
 	.oauth-preset-list { grid-template-columns: 1fr; }
 	.oauth-preset-card-head { align-items: flex-start; flex-direction: column; }
   .oauth-model-row { grid-template-columns: minmax(0, 1fr) auto; }
