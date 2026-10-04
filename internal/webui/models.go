@@ -261,12 +261,15 @@ type QuotaPoolView struct {
 	Show              bool
 	Available         bool
 	Provider          string
+	SlideID           string
+	SlideLayout       string
 	Accounts          string
 	AvailabilityLabel string
 	AvailabilityClass string
 	NoUsableAccounts  bool
 	UnknownCount      int
 	Groups            []QuotaGroupView
+	Columns           [][]QuotaGroupView
 	CSRFToken         string
 	ReturnTo          string
 	RefreshLabel      string

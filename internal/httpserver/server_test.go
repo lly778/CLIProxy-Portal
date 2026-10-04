@@ -1074,6 +1074,23 @@ func TestQuotaPoolViewLabelsFiveHourWindow(t *testing.T) {
 	}
 }
 
+func TestQuotaPoolViewBuildsIndependentAntigravityColumns(t *testing.T) {
+	server := &Server{Cfg: config.Config{TimeZone: time.UTC}, Keys: &service.Keys{}}
+	groups := []service.UpstreamQuotaGroup{
+		{Label: "Claude and GPT models · Five Hour Limit Remaining", Period: "five_hour", RemainingPercent: 34},
+		{Label: "Claude and GPT models · Weekly Limit Remaining", Period: "weekly", RemainingPercent: 63},
+		{Label: "Gemini Models · Five Hour Limit Remaining", Period: "five_hour", RemainingPercent: 96},
+		{Label: "Gemini Models · Weekly Limit Remaining", Period: "weekly", RemainingPercent: 99},
+	}
+	view := server.quotaPoolView(service.UpstreamQuotaPool{TotalAccounts: 2, UsableAccounts: 2, Provider: "Antigravity", Groups: groups}, "", "/dashboard")
+	if len(view.Columns) != 2 || len(view.Columns[0]) != 2 || len(view.Columns[1]) != 2 {
+		t.Fatalf("expected two independent model-family columns: %#v", view.Columns)
+	}
+	if view.Columns[0][0].Label != "Claude / GPT · 5 小时额度" || view.Columns[1][1].Label != "Gemini · 周额度" || view.Columns[0][0].StatusClass != "warning" || view.Columns[1][1].RemainingPercent != 99 {
+		t.Fatal("model family, period, percent or status changed during grouping")
+	}
+}
+
 func getBody(t *testing.T, client *http.Client, endpoint string, want int) string {
 	t.Helper()
 	resp, err := client.Get(endpoint)

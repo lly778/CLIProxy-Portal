@@ -48,6 +48,42 @@ func groupAccountQuotaViews(quotas []webui.UpstreamAccountQuotaView) []webui.Ups
 	return groups
 }
 
+// Separate model families for presentation only; never combine their quotas.
+// Unrecognized labels keep the original flat layout.
+func groupPoolQuotaViews(quotas []webui.QuotaGroupView) [][]webui.QuotaGroupView {
+	if len(quotas) <= 2 {
+		return nil
+	}
+	var columns [][]webui.QuotaGroupView
+	indices := map[string]int{}
+	for _, quota := range quotas {
+		at := strings.LastIndex(quota.Label, " · ")
+		if at < 1 {
+			return nil
+		}
+		name, period := quota.Label[:at], quota.Label[at+len(" · "):]
+		if period != "5 小时额度" && period != "周额度" && period != "月额度" {
+			return nil
+		}
+		index, exists := indices[name]
+		if !exists {
+			index = len(columns)
+			indices[name] = index
+			columns = append(columns, nil)
+		}
+		columns[index] = append(columns[index], quota)
+	}
+	if len(columns) < 2 {
+		return nil
+	}
+	for _, column := range columns {
+		if len(column) > 2 {
+			return nil
+		}
+	}
+	return columns
+}
+
 // Keep provider IDs and grouping keys untouched; localize only display text.
 func quotaDisplayLabel(label, plan, period string) string {
 	if label = strings.TrimSpace(label); label != "" {

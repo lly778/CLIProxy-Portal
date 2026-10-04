@@ -78,6 +78,7 @@ func NewRenderer() (*Renderer, error) {
 			"unobfuscatedEmail": unobfuscatedEmail,
 			"inc":               func(n int) int { return n + 1 },
 			"join":              strings.Join,
+			"quotaSlides":       quotaSlides,
 			"statusClass":       statusClass,
 			"statusLabel":       statusLabel,
 		}).ParseFS(assets, "templates/base.html", "templates/quota-pool.html", "templates/usage-trend.html", "templates/"+page+".html")
@@ -87,6 +88,33 @@ func NewRenderer() (*Renderer, error) {
 		r.templates[page] = t
 	}
 	return r, nil
+}
+
+// Keep both layouts preloaded: one combined card on desktop, separate model
+// family cards in narrow containers. Quota values and refresh routing stay intact.
+func quotaSlides(provider QuotaPoolView) []QuotaPoolView {
+	if len(provider.Columns) < 2 {
+		return []QuotaPoolView{provider}
+	}
+	combined := provider
+	combined.SlideLayout = "wide"
+	slides := []QuotaPoolView{combined}
+	for _, column := range provider.Columns {
+		if len(column) == 0 {
+			continue
+		}
+		name := column[0].Label
+		if at := strings.LastIndex(name, " · "); at > 0 {
+			name = name[:at]
+		}
+		split := provider
+		split.SlideID = provider.Provider + " · " + name
+		split.SlideLayout = "narrow"
+		split.Columns = nil
+		split.Groups = column
+		slides = append(slides, split)
+	}
+	return slides
 }
 
 var (

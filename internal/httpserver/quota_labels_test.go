@@ -2,8 +2,34 @@ package httpserver
 
 import (
 	"cliproxy-portal/internal/webui"
+	"reflect"
 	"testing"
 )
+
+func TestPoolQuotaColumnsPreserveIndependentWindows(t *testing.T) {
+	quotas := []webui.QuotaGroupView{
+		{Label: "Claude / GPT · 5 小时额度", RemainingPercent: 34, StatusClass: "warning", ResetAt: "claude-short", Accounts: "1 个可用 · 2 个已同步"},
+		{Label: "Gemini · 5 小时额度", RemainingPercent: 96, StatusClass: "success", ResetAt: "gemini-short"},
+		{Label: "Claude / GPT · 周额度", RemainingPercent: 63, ResetAt: "claude-week"},
+		{Label: "Gemini · 周额度", RemainingPercent: 99, ResetAt: "gemini-week"},
+	}
+	columns := groupPoolQuotaViews(quotas)
+	want := [][]webui.QuotaGroupView{{quotas[0], quotas[2]}, {quotas[1], quotas[3]}}
+	if !reflect.DeepEqual(columns, want) {
+		t.Fatalf("columns changed independent quota data: %#v", columns)
+	}
+	for _, rows := range [][]webui.QuotaGroupView{
+		quotas[:2],
+		{{Label: "Custom"}, quotas[1], quotas[2]},
+		{{Label: "Custom · Unknown"}, quotas[1], quotas[2]},
+		{{Label: " · 周额度"}, quotas[1], quotas[2]},
+		{quotas[0], quotas[2], {Label: "Claude / GPT · 月额度"}},
+	} {
+		if groupPoolQuotaViews(rows) != nil {
+			t.Fatal("single family or unknown labels should retain the original flat layout")
+		}
+	}
+}
 
 func TestUpstreamAccountQuotaLabel(t *testing.T) {
 	for _, tt := range []struct{ channel, label, period, want string }{

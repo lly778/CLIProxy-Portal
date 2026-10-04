@@ -6,6 +6,35 @@
     var mobileNavStorageKey = "cliproxy-mobile-nav-scroll-left";
     var mobileNavMedia = window.matchMedia("(max-width: 760px)");
     var mobileNavSaveFrame = 0;
+    var navControls = document.querySelector("[data-nav-controls]");
+    var navPrevious = document.querySelector("[data-nav-previous]");
+    var navNext = document.querySelector("[data-nav-next]");
+
+    function updateNavArrows() {
+      if (!navControls || !navPrevious || !navNext) return;
+      var overflow = mobileNavMedia.matches && mobileNav.scrollWidth > navControls.clientWidth + 1;
+      navPrevious.hidden = navNext.hidden = !overflow;
+      navPrevious.disabled = mobileNav.scrollLeft <= 1;
+      navNext.disabled = mobileNav.scrollLeft >= mobileNav.scrollWidth - mobileNav.clientWidth - 1;
+    }
+
+    function scrollNav(direction) {
+      var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      mobileNav.scrollBy({ left: direction * Math.max(80, mobileNav.clientWidth * .75), behavior: reduced ? "auto" : "smooth" });
+    }
+
+    if (navPrevious) navPrevious.addEventListener("click", function () { scrollNav(-1); });
+    if (navNext) navNext.addEventListener("click", function () { scrollNav(1); });
+    if (navControls) navControls.addEventListener("wheel", function (event) {
+      if (!mobileNavMedia.matches || event.ctrlKey || mobileNav.scrollWidth <= mobileNav.clientWidth + 1) return;
+      var delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (event.deltaMode === 1) delta *= 16;
+      else if (event.deltaMode === 2) delta *= mobileNav.clientWidth;
+      var target = Math.max(0, Math.min(mobileNav.scrollWidth - mobileNav.clientWidth, mobileNav.scrollLeft + delta));
+      if (Math.abs(target - mobileNav.scrollLeft) < 1) return;
+      event.preventDefault();
+      mobileNav.scrollLeft = target;
+    }, { passive: false });
 
     function saveMobileNavScroll() {
       if (!mobileNavMedia.matches) return;
@@ -17,6 +46,7 @@
     }
 
     function scheduleMobileNavSave() {
+      updateNavArrows();
       if (mobileNavSaveFrame) return;
       mobileNavSaveFrame = window.requestAnimationFrame(function () {
         mobileNavSaveFrame = 0;
@@ -25,6 +55,7 @@
     }
 
     function restoreMobileNavScroll() {
+      updateNavArrows();
       if (!mobileNavMedia.matches) return;
       try {
         var saved = Number(window.sessionStorage.getItem(mobileNavStorageKey));
@@ -32,6 +63,7 @@
       } catch (_) {
         // Keep the browser's default position when storage is unavailable.
       }
+      updateNavArrows();
     }
 
     restoreMobileNavScroll();
@@ -42,6 +74,11 @@
     });
     window.addEventListener("pagehide", saveMobileNavScroll);
     window.addEventListener("pageshow", restoreMobileNavScroll);
+    window.addEventListener("resize", updateNavArrows);
+    if (window.ResizeObserver) {
+      var navObserver = new window.ResizeObserver(updateNavArrows);
+      navObserver.observe(mobileNav);
+    }
     if (mobileNavMedia.addEventListener) {
       mobileNavMedia.addEventListener("change", restoreMobileNavScroll);
     } else if (mobileNavMedia.addListener) {
@@ -632,7 +669,12 @@
           var next = nextScope && nextScope.querySelector(quotaPanelSelector);
           if (!current || !next) throw new Error("quota pool missing");
           var running = next.getAttribute("data-refresh-running") === "true";
-          current.replaceWith(document.importNode(next, true));
+          var replacement = document.importNode(next, true);
+          var carousel = quotaPanelSelector === "[data-quota-pool]" && window.QuotaCarousel;
+          var selectedProvider = carousel && carousel.selected(current);
+          if (carousel) carousel.destroy(current);
+          current.replaceWith(replacement);
+          if (carousel) carousel.init(replacement, selectedProvider);
           return running;
         });
       }

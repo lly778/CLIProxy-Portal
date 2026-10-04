@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="page-head"><div><span class="eyebrow">用户中心</span><h1>{{if .Greeting}}{{.Greeting}}{{else}}账户概览{{end}}</h1><p class="muted">查看账号状态、API Key 和最近的模型调用。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
-<div class="grid grid-3">
+<div class="grid grid-3 dashboard-summary-grid">
   <article class="card summary-card"><div class="card-label">账号状态</div><div class="status-line summary-value"><span class="status-dot {{statusClass .StatusCard.Status}}"></span><strong>{{.StatusCard.StatusLabel}}</strong></div><p class="summary-detail">{{.StatusCard.Description}}</p><a class="text-link" href="/status">查看状态详情 →</a></article>
   <article class="card summary-card"><div class="card-label">API Key</div>{{if .Key.Last4}}<div class="key-mask summary-value">•••• {{.Key.Last4}}</div><p class="summary-detail muted">状态：{{.Key.StatusLabel}}{{if ne .Key.SyncStatus .Key.Status}} · 同步：{{.Key.SyncStatusLabel}}{{end}}</p>{{else}}<div class="empty-title summary-value">尚未领取</div><p class="summary-detail muted">批准后可领取一次性 API Key。</p>{{end}}<a class="text-link" href="/key">管理 API Key →</a></article>
   <article class="card summary-card"><div class="card-label">最近 7 天用量</div><div class="metric-big summary-value">{{.Usage.Requests}}</div><p class="summary-detail muted">请求 · {{.Usage.TotalTokens}} tokens</p><a class="text-link" href="/usage?range=7d">查看趋势 →</a></article>

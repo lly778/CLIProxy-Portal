@@ -517,6 +517,7 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 		}
 		v.Groups = append(v.Groups, item)
 	}
+	v.Columns = groupPoolQuotaViews(v.Groups)
 	return v
 }
 

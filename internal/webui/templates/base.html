@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>{{if .Title}}{{.Title}} · {{end}}{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=20261004-8">
+  <link rel="stylesheet" href="/static/style.css?v=20261004-17">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -39,6 +39,8 @@
   {{if .IsLoggedIn}}
   <div class="shell">
     <aside class="sidebar" aria-label="主导航">
+      <div class="sidebar-navigation" data-nav-controls>
+      <button type="button" class="nav-scroll-arrow" data-nav-previous aria-label="向左浏览导航" hidden>{{template "chevron-left"}}</button>
       <nav data-mobile-nav>
         <a class="nav-item{{if eq .ActiveNav "dashboard"}} active{{end}}" href="/dashboard"><span>⌂</span>门户概览</a>
         <a class="nav-item{{if eq .ActiveNav "status"}} active{{end}}" href="/status"><span>◌</span>账号状态</a>
@@ -60,6 +62,8 @@
         <a class="nav-item{{if eq .ActiveNav "admin-system"}} active{{end}}" href="/admin/system"><span>♥</span>系统管理</a>
         {{end}}
       </nav>
+      <button type="button" class="nav-scroll-arrow" data-nav-next aria-label="向右浏览导航" hidden>{{template "chevron-right"}}</button>
+      </div>
     </aside>
     <main class="main" id="main">
       {{template "content" .}}
@@ -71,8 +75,11 @@
   </main>
   {{end}}
   <footer class="footer">{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}} · 内部服务</footer>
-  <script src="/static/app.js?v=20261004-6" defer></script>
+  <script src="/static/app.js?v=20261004-12" defer></script>
+  <script src="/static/quota-carousel.js?v=20261004-4" defer></script>
   {{if eq .ActiveNav "admin-upstreams"}}<script src="/static/upstream-channels.js?v=20261004-6" defer></script>{{end}}
 </body>
 </html>
 {{end}}
+{{define "chevron-left"}}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m15 6-6 6 6 6"/></svg>{{end}}
+{{define "chevron-right"}}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>{{end}}

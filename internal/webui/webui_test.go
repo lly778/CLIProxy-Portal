@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-8`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-17`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -790,6 +790,145 @@ func TestQuotaPoolRendersAsyncRefreshMarkers(t *testing.T) {
 	}
 }
 
+func TestQuotaPoolsRenderOneChannelCarouselWithPreloadedProviders(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, page := range []string{PageDashboard, PageUsage} {
+		quota := QuotaPoolView{Show: true, Providers: []QuotaPoolView{
+			{Provider: "Codex", Available: true, Groups: []QuotaGroupView{{Label: "PLUS · 周额度", RemainingPercent: 50}}},
+			{Provider: "Antigravity", Available: true, Groups: []QuotaGroupView{{Label: "Gemini · 周额度", RemainingPercent: 75}}},
+		}}
+		var view any = DashboardView{Quota: quota}
+		if page == PageUsage {
+			view = UsageView{Quota: quota}
+		}
+		var out bytes.Buffer
+		if err := r.Execute(&out, page, view); err != nil {
+			t.Fatal(err)
+		}
+		html := out.String()
+		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261004-4`} {
+			if !strings.Contains(html, want) {
+				t.Fatalf("%s missing carousel markup: %s", page, want)
+			}
+		}
+		if strings.Count(html, `data-quota-pool data-refresh-running=`) != 1 {
+			t.Fatal("providers must share one replaceable carousel root")
+		}
+		if strings.Contains(html, `quota-carousel-channels`) || strings.Contains(html, `data-quota-select=`) {
+			t.Fatal("carousel must not render a separate bottom channel row")
+		}
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, DashboardView{Quota: QuotaPoolView{Show: true, Provider: "Codex"}}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), `data-quota-controls`) {
+		t.Fatal("single-provider pool must not show channel navigation")
+	}
+}
+
+func TestQuotaPoolColumnsRenderAllWindowsWithoutFourFullWidthRows(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	quota := QuotaPoolView{Show: true, Available: true, Provider: "Antigravity", Columns: [][]QuotaGroupView{
+		{{Label: "Claude / GPT · 5 小时额度", RemainingPercent: 34}, {Label: "Claude / GPT · 周额度", RemainingPercent: 63}},
+		{{Label: "Gemini · 5 小时额度", RemainingPercent: 96}, {Label: "Gemini · 周额度", RemainingPercent: 99}},
+	}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, DashboardView{LayoutView: LayoutView{IsLoggedIn: true}, Quota: quota}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	if !strings.Contains(html, `class="quota-pool-columns"`) || strings.Count(html, `class="quota-group-list"`) != 4 || strings.Count(html, `class="quota-group"`) != 8 {
+		t.Fatal("expected desktop columns and two preloaded narrow cards")
+	}
+	for _, column := range quota.Columns {
+		for _, window := range column {
+			if strings.Count(html, window.Label+`</span>`) != 2 {
+				t.Fatalf("window must appear in desktop and narrow layout: %s", window.Label)
+			}
+		}
+	}
+	for _, identity := range []string{`data-quota-provider="Antigravity"`, `data-quota-provider="Antigravity · Claude / GPT"`, `data-quota-provider="Antigravity · Gemini"`} {
+		if !strings.Contains(html, identity) {
+			t.Fatalf("missing independent card identity: %s", identity)
+		}
+	}
+	if strings.Contains(html, "<select") {
+		t.Fatal("quota model families must use cards, not dropdowns")
+	}
+	if !strings.Contains(html, `<svg width="16" height="16"`) {
+		t.Fatal("navigation arrows must use centered SVG icons")
+	}
+}
+
+func TestAllQuotaChannelsUseOnePercentageLayoutAndEstimateTooltip(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	quota := QuotaPoolView{Show: true, Providers: []QuotaPoolView{
+		{Available: true, Provider: "Codex", Groups: []QuotaGroupView{{Label: "PLUS · 5 小时额度", RemainingPercent: 22}}},
+		{Available: true, Provider: "Antigravity", Columns: [][]QuotaGroupView{{{Label: "Gemini · 5 小时额度", RemainingPercent: 96}}}},
+	}}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, DashboardView{Quota: quota}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`<div class="quota-pool-value"><span>PLUS · 5 小时额度</span><strong title="额度剩余（按账号等权估算）">22%</strong></div>`, `<div class="quota-pool-value"><span>Gemini · 5 小时额度</span><strong title="额度剩余（按账号等权估算）">96%</strong></div>`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("channel must share the title/percentage markup: %s", want)
+		}
+	}
+	if strings.Count(html, `title="额度剩余（按账号等权估算）"`) != 2 || strings.Count(html, `<p class="quota-pool-note">这是所有用户共享的上游账号池状态，不是个人限额。</p>`) != 2 {
+		t.Fatal("estimate must remain available in percentage tooltips without adding visible explanation rows")
+	}
+}
+
+func TestRecentAuditUsesResponsiveCardWithoutTruncatingTargets(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const target = "上游账号 (d1711e2f9e0cf4cb7fa94b89bedabb29a1cffe94501a6648021122299abcdef)"
+	var out bytes.Buffer
+	view := AdminDashboardView{RecentAudit: []AuditView{{Action: "启用上游账号", Actor: "管理员", Target: target, At: "2026-10-04 19:32"}}}
+	if err := r.Execute(&out, PageAdminDashboard, view); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`class="card audit-mini-card"`, target, `<time class="muted small">2026-10-04 19:32</time>`} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing responsive audit markup or full data: %s", want)
+		}
+	}
+}
+
+func TestDashboardSummaryUsesScopedResponsiveLayoutAndPreservesActions(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageDashboard, DashboardView{}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`class="grid grid-3 dashboard-summary-grid"`, `href="/status"`, `href="/key"`, `href="/usage?range=7d"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("missing responsive summary layout or existing action: %s", want)
+		}
+	}
+	if strings.Count(html, `class="card summary-card"`) != 3 {
+		t.Fatal("summary must retain all three cards")
+	}
+}
+
 func TestQuotaRefreshCompletedTextPrecedesButton(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
@@ -831,5 +970,10 @@ func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
 	}
 	if !strings.Contains(got, `<nav data-mobile-nav>`) {
 		t.Fatal("mobile navigation scroll restoration marker was not rendered")
+	}
+	for _, want := range []string{`data-nav-controls`, `data-nav-previous aria-label="向左浏览导航" hidden`, `data-nav-next aria-label="向右浏览导航" hidden`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing narrow navigation control: %s", want)
+		}
 	}
 }
