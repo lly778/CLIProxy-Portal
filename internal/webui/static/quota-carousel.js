@@ -66,15 +66,19 @@
       var left = Math.min(value * viewport.clientWidth, Math.max(0, viewport.scrollWidth - viewport.clientWidth));
       scrollingTo = Math.abs(viewport.scrollLeft - left) > 1 ? left : null;
       viewport.scrollTo({ left: left, behavior: animate && !reducedMotion ? "smooth" : "auto" });
+      if (scrollingTo === null) viewport.classList.remove("is-settling");
     }
     function resized() { stopDrag(true); refreshSlides(); go(index, false); }
     function stopDrag(cancelled) {
       if (!drag) return;
       var finished = drag;
       drag = null;
+      // Re-enabling native snapping here would first jump to the nearest card.
+      // Keep it off until our animation reaches its target from the release point.
+      if (finished.moving) viewport.classList.add("is-settling");
       viewport.classList.remove("is-dragging");
       if (viewport.hasPointerCapture(finished.id)) viewport.releasePointerCapture(finished.id);
-      if (!finished.moving) return;
+      if (!finished.moving) { viewport.classList.remove("is-settling"); return; }
       suppressClick = true;
       var threshold = Math.min(72, viewport.clientWidth * .15);
       var target = cancelled ? finished.index : Math.abs(finished.dx) >= threshold ? finished.index + (finished.dx < 0 ? 1 : -1) : finished.index;
@@ -85,6 +89,7 @@
       if (scrollingTo !== null) {
         if (Math.abs(viewport.scrollLeft - scrollingTo) > 1) return;
         scrollingTo = null;
+        viewport.classList.remove("is-settling");
       }
       activate(clamp(Math.round(viewport.scrollLeft / viewport.clientWidth)), true);
     });
@@ -109,8 +114,19 @@
     // Touch scrolling stays native, including vertical page scroll and pinch zoom.
     listen(viewport, "pointerdown", function (event) {
       suppressClick = false;
+      if (event.pointerType === "touch") {
+        if (viewport.classList.contains("is-settling")) {
+          viewport.scrollTo({ left: viewport.scrollLeft, behavior: "auto" });
+          scrollingTo = null;
+          viewport.classList.remove("is-settling");
+        }
+        return;
+      }
+      if (slides.length < 2 || event.button !== 0 || event.target.closest("button, a, input, select, textarea, label")) return;
       scrollingTo = null;
-      if (slides.length < 2 || event.pointerType === "touch" || event.button !== 0 || event.target.closest("button, a, input, select, textarea, label")) return;
+      if (viewport.classList.contains("is-settling")) {
+        viewport.scrollTo({ left: viewport.scrollLeft, behavior: "auto" });
+      }
       drag = { id: event.pointerId, x: event.clientX, y: event.clientY, dx: 0, index: index, left: viewport.scrollLeft, moving: false };
     });
     listen(viewport, "pointermove", function (event) {
@@ -136,7 +152,7 @@
       event.stopPropagation();
     }, true);
     listen(window, "resize", resized);
-    listen(viewport, "wheel", function () { scrollingTo = null; }, { passive: true });
+    listen(viewport, "wheel", function () { scrollingTo = null; viewport.classList.remove("is-settling"); }, { passive: true });
     var lastWidth = viewport.clientWidth;
     var observer = window.ResizeObserver ? new window.ResizeObserver(function () {
       if (lastWidth !== viewport.clientWidth) { lastWidth = viewport.clientWidth; resized(); }
@@ -149,6 +165,8 @@
       destroy: function () {
         if (observer) observer.disconnect();
         removers.forEach(function (remove) { remove(); });
+        viewport.classList.remove("is-dragging");
+        viewport.classList.remove("is-settling");
         delete root.quotaCarousel;
       }
     };

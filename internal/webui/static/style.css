@@ -118,6 +118,7 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .quota-carousel-track > .quota-pool-card { display: flex; flex: 0 0 100%; flex-direction: column; min-width: 0; margin-top: 0; scroll-snap-align: start; scroll-snap-stop: always; }
 .quota-carousel-track > .quota-slide-narrow { display: none; }
 .quota-carousel-viewport.is-dragging { scroll-snap-type: none; user-select: none; cursor: grabbing; }
+.quota-carousel-viewport.is-settling { scroll-snap-type: none; }
 .quota-carousel-controls { position: absolute; inset: 0; pointer-events: none; }
 .quota-carousel-controls[hidden] { display: none; }
 .quota-carousel:has([data-quota-controls]) .quota-pool-card { padding-inline: 44px; }
@@ -435,6 +436,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .usage-list { display: grid; gap: 16px; }
 .model-usage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; }
 .model-usage-chart { min-width: 0; }
+.user-usage-grid > .model-usage-chart { container: user-ranking / inline-size; }
+.user-usage-grid .usage-row, .user-usage-grid .usage-main { min-width: 0; }
+.user-usage-grid .usage-main > a { min-width: 0; overflow-wrap: anywhere; }
+.user-usage-grid .usage-main > span { flex-shrink: 0; }
 .model-usage-chart h3 { margin: 0 0 18px; font-size: 14px; }
 .model-usage-chart.tokens .progress span { background: #5ab39e; }
 .usage-unlinked-note { margin: 20px 0 0; }
@@ -759,6 +764,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .page-head { display: block; margin-bottom: 22px; }
   .page-head > .button, .page-head > .button-row, .page-head > form, .page-head > .muted { margin-top: 15px; }
   .grid-2, .grid-3, .model-grid, .model-usage-grid, .approval-grid, .health-grid { grid-template-columns: 1fr; }
+  .user-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
   .system-health-grid { grid-template-columns: 1fr; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-grid, .sync-panel .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -810,6 +816,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .quota-pool-columns > .quota-group-list { grid-template-rows: none; grid-row: auto; }
 }
 @media (max-width: 460px) {
+  .user-usage-grid { gap: 14px; }
   .quota-carousel:has([data-quota-controls]) .quota-pool-card { padding-inline: 30px; }
   .quota-carousel-arrow { width: 24px; height: 32px; }
   .quota-carousel-arrow[data-quota-previous] { left: 3px; }
@@ -834,6 +841,10 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
   .button-row { align-items: stretch; }
   .button-row > .button, .button-row > form, .button-row > form > .button { flex: 1; }
   .button-row > form > .button { width: 100%; }
+}
+
+@container user-ranking (max-width: 220px) {
+  .usage-main { flex-direction: column; align-items: flex-start; gap: 2px; }
 }
 
 /* Each quota window adapts to its real card width, including browser zoom. */

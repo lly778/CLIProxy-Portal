@@ -30,10 +30,23 @@ function setup(names = ['Codex', 'Antigravity', 'Gemini'], preferred, layouts = 
   });
   const buttons = names.map(name => { const button = node(); button.attrs.set('data-quota-select', name); return button; });
   viewport.clientWidth = 600; viewport.scrollWidth = names.length * 600; viewport.scrollLeft = 0;
-  let captured = null, pending = null, disconnected = false, asyncScroll = false;
-  const classes = new Set(); viewport.classList = { add: c => classes.add(c), remove: c => classes.delete(c) };
+  let captured = null, pending = null, disconnected = false, asyncScroll = false, emulateSnap = false;
+  const scrollCalls = [];
+  const classes = new Set(); viewport.classList = {
+    add: c => classes.add(c), contains: c => classes.has(c),
+    remove(c) {
+      classes.delete(c);
+      if (emulateSnap && c === 'is-dragging' && !classes.has('is-settling')) {
+        viewport.scrollLeft = Math.round(viewport.scrollLeft / viewport.clientWidth) * viewport.clientWidth;
+      }
+    },
+  };
   viewport.setPointerCapture = id => { captured = id; }; viewport.hasPointerCapture = id => captured === id; viewport.releasePointerCapture = () => { captured = null; };
-  viewport.scrollTo = ({ left, behavior }) => { if (asyncScroll && behavior === 'smooth') pending = left; else { viewport.scrollLeft = left; viewport.emit('scroll'); } };
+  viewport.scrollTo = ({ left, behavior }) => {
+    scrollCalls.push({ from: viewport.scrollLeft, left, behavior });
+    if (asyncScroll && behavior === 'smooth') pending = left;
+    else { pending = null; viewport.scrollLeft = left; viewport.emit('scroll'); }
+  };
   track.querySelectorAll = () => slides;
   root.querySelectorAll = () => buttons;
   root.querySelector = s => ({ '[data-quota-viewport]': viewport, '[data-quota-track]': track, '[data-quota-controls]': controls, '[data-quota-previous]': previous, '[data-quota-next]': next, '[data-quota-carousel-status]': status }[s]);
@@ -42,9 +55,10 @@ function setup(names = ['Codex', 'Antigravity', 'Gemini'], preferred, layouts = 
   window.ResizeObserver = class { observe() {} disconnect() { disconnected = true; } };
   vm.runInNewContext(script, { window, document: { querySelectorAll: () => [] } });
   window.QuotaCarousel.init(root, preferred);
-  return { window, root, viewport, slides, buttons, controls, previous, next, classes, status,
+  return { window, root, viewport, slides, buttons, controls, previous, next, classes, status, scrollCalls,
     selected: () => window.QuotaCarousel.selected(root), disconnected: () => disconnected,
     asyncScroll() { asyncScroll = true; },
+    emulateSnap() { emulateSnap = true; },
     finishScroll() { viewport.scrollLeft = pending; viewport.emit('scroll'); },
     scroll(left) { viewport.scrollLeft = left; viewport.emit('scroll'); },
     pointer(name, x, y = 0, extra = {}) { return viewport.emit(name, { clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse', button: 0, ...extra }); },
@@ -70,6 +84,44 @@ test('mouse dragging changes one channel, cancels safely, and suppresses the dra
   assert.equal(f.selected(), 'Antigravity');
   f.pointer('pointerdown', 80); f.pointer('pointermove', 220); f.pointer('pointerup', 220);
   assert.equal(f.selected(), 'Codex');
+});
+
+test('release animates from the dragged position and restores snapping only after landing', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../static/style.css'), 'utf8');
+  assert.match(css, /\.quota-carousel-viewport\.is-settling\s*\{\s*scroll-snap-type:\s*none;\s*\}/);
+  for (const [start, dx, target] of [[0, -220, 600], [0, -390, 600], [1, 220, 0], [1, 390, 0], [0, -30, 0], [1, 30, 600]]) {
+    const f = setup(undefined, ['Codex', 'Antigravity'][start]);
+    f.asyncScroll(); f.emulateSnap();
+    f.pointer('pointerdown', 500); f.pointer('pointermove', 500 + dx);
+    const released = f.viewport.scrollLeft;
+    f.pointer('pointerup', 500 + dx);
+    assert.deepEqual(f.scrollCalls.at(-1), { from: released, left: target, behavior: 'smooth' });
+    assert.equal(f.viewport.scrollLeft, released, 'release must not resnap before animation');
+    assert.equal(f.classes.has('is-dragging'), false);
+    assert.equal(f.classes.has('is-settling'), true);
+    f.scroll((released + target) / 2);
+    assert.equal(f.classes.has('is-settling'), true);
+    f.finishScroll();
+    assert.equal(f.classes.has('is-settling'), false);
+    assert.equal(f.viewport.scrollLeft, target);
+  }
+});
+
+test('cancel, wheel interruption, repeated dragging and destroy clear settling state', () => {
+  const f = setup(); f.asyncScroll();
+  f.pointer('pointerdown', 500); f.pointer('pointermove', 280); f.pointer('pointercancel', 280);
+  assert.equal(f.viewport.scrollLeft, 0); assert.equal(f.classes.has('is-settling'), false);
+  f.pointer('pointerdown', 500); f.pointer('pointermove', 280); f.pointer('pointerup', 280);
+  f.scroll(300);
+  f.pointer('pointerdown', 280);
+  assert.deepEqual(f.scrollCalls.at(-1), { from: 300, left: 300, behavior: 'auto' });
+  f.pointer('pointermove', 140); f.pointer('pointerup', 140); f.finishScroll();
+  assert.equal(f.classes.has('is-settling'), false);
+  f.pointer('pointerdown', 100); f.pointer('pointermove', 250); f.pointer('pointerup', 250);
+  f.viewport.emit('wheel'); assert.equal(f.classes.has('is-settling'), false);
+  f.pointer('pointerdown', 100); f.pointer('pointermove', 250); f.pointer('pointerup', 250);
+  f.window.QuotaCarousel.destroy(f.root);
+  assert.equal(f.classes.has('is-settling'), false); assert.equal(f.classes.has('is-dragging'), false);
 });
 
 test('boundary arrows hide and reappear after clicks, native scroll, keyboard and resize', () => {

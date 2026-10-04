@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-17`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-18`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -230,6 +230,41 @@ func TestUserUsageSectionOmitsKeyAggregationCaption(t *testing.T) {
 	}
 	if strings.Contains(html, "同一用户的历次 API Key 用量合并统计") {
 		t.Fatal("removed key aggregation caption must not appear")
+	}
+}
+
+func TestUserUsageRankingKeepsTwoColumnsOnNarrowScreens(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	users := []UserUsageView{{User: UserView{Name: "测试用户"}, UsageURL: "/admin/usage?user=u1", Requests: "2.5K", Tokens: "378.2M", RequestPercent: 100, TokenPercent: 100}}
+	if err := r.Execute(&out, PageUsage, UsageView{IsAdmin: true, ShowUserStats: true, ByUserRequests: users, ByUserTokens: users}); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, want := range []string{`class="model-usage-grid user-usage-grid"`, `<h3>按请求数</h3>`, `<h3>按 Token 数</h3>`, `2.5K 请求`, `378.2M tokens`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("user rankings missing %s", want)
+		}
+	}
+	if strings.Count(html, `href="/admin/usage?user=u1"`) != 2 {
+		t.Fatal("both user rankings must retain their detail links")
+	}
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		".user-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }",
+		".user-usage-grid > .model-usage-chart { container: user-ranking / inline-size; }",
+		".user-usage-grid .usage-main > a { min-width: 0; overflow-wrap: anywhere; }",
+		"@container user-ranking (max-width: 220px)",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing narrow user ranking layout: %s", rule)
+		}
 	}
 }
 
@@ -809,7 +844,7 @@ func TestQuotaPoolsRenderOneChannelCarouselWithPreloadedProviders(t *testing.T) 
 			t.Fatal(err)
 		}
 		html := out.String()
-		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261004-4`} {
+		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261004-5`} {
 			if !strings.Contains(html, want) {
 				t.Fatalf("%s missing carousel markup: %s", page, want)
 			}
