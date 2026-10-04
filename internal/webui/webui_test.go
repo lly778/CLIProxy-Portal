@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261004-18`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-1`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -257,13 +257,52 @@ func TestUserUsageRankingKeepsTwoColumnsOnNarrowScreens(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rule := range []string{
-		".user-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }",
-		".user-usage-grid > .model-usage-chart { container: user-ranking / inline-size; }",
-		".user-usage-grid .usage-main > a { min-width: 0; overflow-wrap: anywhere; }",
-		"@container user-ranking (max-width: 220px)",
+		".model-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }",
+		".model-usage-grid > .model-usage-chart { container: usage-ranking / inline-size; }",
+		".model-usage-grid .usage-main > :first-child { min-width: 0; overflow-wrap: anywhere; }",
+		"@container usage-ranking (max-width: 220px)",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing narrow user ranking layout: %s", rule)
+		}
+	}
+}
+
+func TestModelUsageRankingSharesNarrowTwoColumnLayout(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	models := []ModelUsageView{{Model: "claude-opus-4-6-thinking-long-model-name", Requests: "2.5K", Tokens: "378.2M", Percent: 100, TokenPercent: 100}}
+	for _, isAdmin := range []bool{false, true} {
+		var out bytes.Buffer
+		if err := r.Execute(&out, PageUsage, UsageView{IsAdmin: isAdmin, ByModelRequests: models, ByModelTokens: models}); err != nil {
+			t.Fatal(err)
+		}
+		html := out.String()
+		for _, want := range []string{`class="model-usage-grid"`, `<h3>按请求数</h3>`, `<h3>按 Token 数</h3>`, `2.5K 请求`, `378.2M tokens`} {
+			if !strings.Contains(html, want) {
+				t.Fatalf("model rankings missing %s (admin=%t)", want, isAdmin)
+			}
+		}
+		if strings.Count(html, `<span class="mono">`+models[0].Model+`</span>`) != 2 {
+			t.Fatal("both rankings must preserve the complete model name")
+		}
+	}
+	css, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(css, []byte(".model-grid, .model-usage-grid, .approval-grid")) {
+		t.Fatal("model rankings must not collapse with unrelated single-column card grids")
+	}
+	for _, rule := range []string{
+		".model-usage-grid { gap: 14px; }",
+		".model-usage-grid .usage-main > :last-child { flex-shrink: 0; }",
+		".usage-main { flex-direction: column; align-items: flex-start; gap: 2px; }",
+	} {
+		if !bytes.Contains(css, []byte(rule)) {
+			t.Fatalf("missing shared model ranking overflow protection: %s", rule)
 		}
 	}
 }
