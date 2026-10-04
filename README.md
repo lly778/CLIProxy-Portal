@@ -1,201 +1,274 @@
 # CLIProxy 账号门户
 
-面向 CLIProxyAPI + CPA-Manager-Plus 的轻量账号注册、人工审批与 API Key 自助门户。单个 Go 可执行文件、服务端渲染页面、SQLite WAL；运行时不需要 Node.js、Redis 或独立数据库。
+为 CLIProxyAPI（CPA）与 CPA-Manager-Plus（CPAMP）提供账号注册、人工审批、API Key 自助管理和用量查询。
 
-> **重要风险提示**：按当前需求，门户和模型 API 均使用公网 HTTP。手机号、姓名、密码、会话 Cookie 和 API Key 都可能被链路上的第三方窃听或篡改。系统已经启用密码哈希、CSRF、防点击劫持等应用层保护，但这些不能替代 HTTPS。建议至少限制可信网络/VPN；一旦条件允许，应在反向代理上启用 HTTPS。
+门户使用 Go、服务端渲染页面与 SQLite WAL，前端资源嵌入单个可执行文件。运行时不需要 Node.js、Redis 或独立数据库。模型请求仍由 CPA 鉴权和调度；门户不是独立模型服务。
 
-## 已实现功能
+## 功能
 
-- 手机号、姓名、密码注册；管理员人工批准或填写原因拒绝；被拒用户可修正后重提。
-- Argon2id 密码哈希；管理员看不到密码；人工签发 15 分钟一次性重置码。
-- 每位批准用户一个有效 `cpa_portal_` API Key；完整 Key 只显示一次；CPAMP 中保存 Key，门户只保存 SHA-256 和末四位。
-- 用户用密码确认后领取、轮换或撤销 Key；撤销后可立即重新领取，已有 Key 可随时轮换。
-- CPAMP Full/Manager Server 提供按用户 7 天、30 天和自定义区间用量、模型列表、全局统计与健康状态。
-- 管理员可审批、停用、恢复、修改手机号、重置密码、彻底删除/匿名化账号、控制开放注册、发布版本化使用规则并查看审计日志。
-- CPAMP 故障时不会假报撤销成功；待停用/删除任务每 30 秒重试；每 5 分钟对账，尊重在 CPAMP 中手工删除的 Key，不会自动补回。
-- 可选模型网关隐藏 `/v1/models` 中的别名，同时继续转发别名调用；日志可下载包含用户/助手文本及实际工具交互的加密结构化记录。
+- **账号与审批**：手机号注册、人工批准或拒绝、拒绝后重提；管理员可停用、恢复、修改手机号、调整角色及删除账号。
+- **API Key**：每位批准用户最多一个有效 Key；领取与撤销需确认登录密码。完整 Key 仅领取时显示，门户数据库保存哈希和末四位，不保存完整 Key。
+- **用量与日志**：用户及全局用量、请求数与 Token 趋势、实际模型排名、请求日志及操作审计。
+- **上游管理**：按 OAuth 渠道启停凭证和模型、维护模型别名、设置支持渠道的思考强度上限。
+- **调用预设**：保存、应用和删除当前渠道的模型、别名及思考上限配置；每个渠道最多 20 个，同名保存更新已有预设，不包含 OAuth 凭证。
+- **共享额度池**：Codex 与 Antigravity 分别展示上游账号及模型组额度；这些是所有用户共享的上游资源，不是个人限额。
+- **可选模型网关**：提供模型目录过滤、加密交互记录下载和服务器总耗时统计。
+- **运维管理**：注册开关、版本化使用规则、Key 对账、系统健康与存储占用检查。
 
-现有手工 Key 不导入用户账号，也不在门户展示；全局用量中仍可能包含它们。门户变更 Key 时采用“读取—合并—写回”，会保留 CPAMP 中已有的手工 Key。极少数同时修改可能产生竞争，因此避免在同一秒由门户和 CPAMP 两边同时改 Key。
+页面适配桌面与移动端。共享额度池支持拖动、滑动、箭头和键盘切换；请求日志与操作日志在空间不足时横向滚动。调用预设保存区宽屏并排、中宽屏右侧上下排列、窄屏全宽上下排列。
+
+### 使用边界
+
+- 新的上游 OAuth 凭证仍在 CPAMP 添加；门户管理已有凭证及其配置。
+- 额度查询和思考强度上限目前针对 Codex、Antigravity 接入；其他渠道以 CPAMP 实际提供的能力为准，不套用 Codex 数据。
+- 别名共享实际模型的思考上限。规则只降低明确超过上限的请求，不提高较低值，也不改未指定或自动预算。
+- 停用模型会移除该模型的别名及思考上限；配置变更影响所选渠道的后续请求。
+- 门户不把既有手工 Key 导入用户账号；修改 Key 列表时会保留它们。避免门户与 CPAMP 同时修改同一份配置。
+- CPAMP 不可用时不会误报撤销成功：待处理撤销任务默认每 30 秒重试，Key 默认每 5 分钟对账。CPAMP 中手动删除的 Key 不会自动补回。
 
 ## 部署前提
 
-- Linux 主机已安装 Docker Engine 和 Docker Compose。
-- CLIProxyAPI 已在 `8317` 端口运行。
-- CPA-Manager-Plus 已以 **Full/Manager Server** 模式在 `18317` 端口运行，并能访问 CLIProxyAPI 管理接口。
-- 准备 CPAMP 管理员 Key。它只挂载进门户容器，不会显示在网页或日志中。
+- Go 1.24 或更高版本，用于编译；运行已编译文件时不需要 Go。
+- Linux 主机安装 Docker Engine 与 Docker Compose。
+- 已有可用的 CPA 和 CPAMP **Full/Manager Server**；CPAMP 能访问 CPA 管理接口。
+- 准备 CPAMP 管理员 Key，不能用普通客户端 API Key 替代。
+- 确认门户到 CPAMP、网关到 CPA 的网络连通性及端口分配。
 
-CLIProxyAPI 的 Management Center 是管理 UI，本身不是代理；管理 Key 与客户端 API Key 不同。上游说明也要求远程管理时显式允许 remote management。参考 [CLI Proxy API Management Center](https://github.com/router-for-me/Cli-Proxy-API-Management-Center/tree/main) 与 [CPA-Manager-Plus](https://github.com/seakee/CPA-Manager-Plus)。
+公网入口应通过反向代理提供 HTTPS。示例中的 HTTP 内部地址仅用于本机或可信网络；密码哈希、CSRF 等应用层措施不能保护明文 HTTP 链路。
+
+### 地址的区别
+
+| 配置 | 用途 | 示例 |
+|---|---|---|
+| `PORTAL_EXTERNAL_URL` | 用户访问门户的地址 | `https://portal.example.com` |
+| `CPA_API_BASE_URL` | 展示给用户的模型 API 基础地址，不带末尾 `/v1` | `https://api.example.com` |
+| `CPAMP_BASE_URL` | 门户访问 CPAMP 的内部地址 | `http://host.docker.internal:18317` |
+| `CPA_UPSTREAM_URL` | 可选网关访问 CPA 的内部地址 | `http://cli-proxy-api:8317` |
+
+容器中的 `localhost` 指容器自身。CPAMP 在其他 Docker 网络中时，需要加入对应网络并使用可解析的容器名；`host.docker.internal` 则依赖宿主机端口确实可从容器访问。
 
 ## 快速部署
 
-### 低内存服务器：使用预编译二进制（推荐）
+以下命令在 Linux Bash 中运行。先准备配置与秘密文件，再选择一种启动方式。
 
-如果 VPS 无法完成 Go/Docker 多阶段构建，不要在服务器运行 `docker compose build`。在另一台机器执行：
+### 1. 准备配置与秘密文件
 
 ```bash
+cp .env.example .env
+mkdir -p secrets
+chmod 700 secrets
+openssl rand -hex 32 > secrets/portal_app_secret
+read -r -s -p 'CPAMP 管理员 Key：' cpamp_admin_key
+printf '\n'
+printf '%s' "$cpamp_admin_key" > secrets/cpamp_admin_key
+unset cpamp_admin_key
+chmod 600 secrets/portal_app_secret secrets/cpamp_admin_key
+sudo chown 10001:10001 secrets/portal_app_secret secrets/cpamp_admin_key
+```
+
+编辑 `.env` 中的三个基础地址。不要把 `.env`、管理员 Key、应用密钥或数据库提交到 Git。已有部署必须保留原 `portal_app_secret`，不要重新生成：更换它会使已有加密交互记录无法解密。
+
+### 2. 选择启动方式
+
+两种方式的容器名相同，但数据挂载不同。不要同时启动，也不要直接切换而不迁移数据。
+
+| 方式 | Compose 文件 | 二进制来源 | 数据存储 |
+|---|---|---|---|
+| 预编译部署 | `compose.prebuilt.yaml` | 宿主机 `dist/portal-linux-amd64` | 项目下 `./data` |
+| 源码构建部署 | `compose.yaml` | Docker 多阶段构建 | Compose 命名卷 `portal-data` |
+
+#### 方式 A：预编译部署
+
+适合低内存 VPS。在开发机或构建机编译：
+
+```bash
+mkdir -p dist
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
   go build -trimpath -ldflags='-s -w' -o dist/portal-linux-amd64 ./cmd/portal
 ```
 
-ARM64 服务器把 `GOARCH` 和文件名改为 `arm64`。将项目与 `dist/` 一并上传后，执行：
+Windows PowerShell 编译同一 Linux 二进制：
 
-```bash
-chmod 755 dist/portal-linux-*
-mkdir -p data
-chown 10001:10001 data
-docker compose -f compose.prebuilt.yaml up -d
+```powershell
+New-Item -ItemType Directory -Force dist | Out-Null
+$env:CGO_ENABLED = '0'
+$env:GOOS = 'linux'
+$env:GOARCH = 'amd64'
+go build -trimpath -ldflags='-s -w' -o dist/portal-linux-amd64 ./cmd/portal
 ```
 
-该方式只拉取很小的 Alpine 运行镜像，不在 VPS 编译。`.env` 中 x86_64 使用 `PORTAL_BINARY=portal-linux-amd64`，ARM64 使用 `PORTAL_BINARY=portal-linux-arm64`。
+编译结果就在指定的 `dist/portal-linux-amd64`，该目录不纳入 Git。ARM64 主机改为 `GOARCH=arm64`，输出 `portal-linux-arm64`，并在 `.env` 设置 `PORTAL_BINARY=portal-linux-arm64`。
 
-1. 创建本地配置：
+将二进制、Compose 文件、`.env` 和秘密文件放到服务器项目目录，然后启动：
 
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+chmod 755 dist/portal-linux-amd64
+mkdir -p data
+sudo chown 10001:10001 data
+docker compose -f compose.prebuilt.yaml up -d
+docker compose -f compose.prebuilt.yaml ps
+curl -fsS http://127.0.0.1:18080/healthz
+```
 
-   编辑 `.env`，把域名替换为实际值：
+此方式不在 VPS 编译，只拉取 Alpine 运行镜像。若内部上游使用 HTTPS，应确认运行镜像信任所需 CA，必要时使用包含相应证书的自定义镜像，不要关闭证书校验。
 
-   ```dotenv
-   PORTAL_EXTERNAL_URL=http://portal.example.com:18080
-   CPA_API_BASE_URL=http://portal.example.com:8317
-   CPAMP_BASE_URL=http://host.docker.internal:18317
-   ```
+#### 方式 B：Docker 源码构建
 
-   `CPA_API_BASE_URL` 是用户最终复制到客户端的公网地址；`CPAMP_BASE_URL` 是门户容器访问 CPAMP 的内部地址。如果两个现有容器不向宿主机暴露 `18317`，请将门户加入它们的 Docker 网络，并把该值改成 CPAMP 容器名。
+```bash
+docker compose -f compose.yaml up -d --build
+docker compose -f compose.yaml ps
+curl -fsS http://127.0.0.1:18080/healthz
+```
 
-2. 创建秘密文件：
+Dockerfile 使用 Go 多阶段构建，并在运行镜像中安装 CA 证书和时区数据。两种 Compose 当前均限制为 0.75 CPU、192 MiB 内存；密码哈希操作会短时使用较多内存。
 
-   ```bash
-   mkdir -p secrets
-   openssl rand -hex 32 > secrets/portal_app_secret
-   printf '%s' '你的_CPAMP_管理员_Key' > secrets/cpamp_admin_key
-   chown 10001:10001 secrets/*
-   chmod 600 secrets/*
-   ```
+### 3. 创建首位管理员
 
-3. 构建并启动：
+普通用户密码至少 10 个字符，管理员至少 14 个字符，均不能包含完整手机号。
 
-   ```bash
-   docker compose up -d --build
-   docker compose ps
-   curl http://127.0.0.1:18080/healthz
-   ```
+以下示例使用预编译部署；源码构建部署把 `-f compose.prebuilt.yaml` 改为 `-f compose.yaml`。启用网关后，日常命令应保持与启动时相同的 Compose 文件组合。
 
-4. 创建首位管理员。密码至少 14 位，且不能包含手机号：
+```bash
+read -r -s -p '初始管理员密码：' portal_admin_password
+printf '\n'
+printf '%s' "$portal_admin_password" > secrets/initial_admin_password
+unset portal_admin_password
+chmod 600 secrets/initial_admin_password
+sudo chown 10001:10001 secrets/initial_admin_password
+docker compose -f compose.prebuilt.yaml run --rm \
+  -v "$PWD/secrets/initial_admin_password:/run/secrets/initial_admin_password:ro" \
+  cliproxy-portal create-admin \
+  --phone 13800138000 --name 系统管理员 \
+  --password-file /run/secrets/initial_admin_password
+rm -- secrets/initial_admin_password
+```
 
-   ```bash
-   printf '%s' '请换成强初始密码' > secrets/initial_admin_password
-   chown 10001:10001 secrets/initial_admin_password
-   chmod 600 secrets/initial_admin_password
-   docker compose run --rm \
-     -v "$PWD/secrets/initial_admin_password:/run/secrets/initial_admin_password:ro" \
-     cliproxy-portal create-admin \
-     --phone 13800138000 --name 系统管理员 \
-     --password-file /run/secrets/initial_admin_password
-   rm secrets/initial_admin_password
-   ```
-
-5. 浏览器访问 `http://你的域名:18080/login`。管理员可在“使用规则”页面调整规则和开放注册状态。
-
-默认情况下，模型调用仍直接使用 `http://你的域名:8317/v1`。需要隐藏模型别名并下载交互记录时，启用下面的可选网关。
-
-## 多 OAuth 渠道管理
-
-管理员可在“上游管理”中切换 OAuth 渠道。渠道由 CPAMP 的凭证及已有模型配置自动发现；未指定渠道的旧链接仍进入 Codex。新凭证继续在 CPAMP 添加。
-
-首次打开“上游管理”时加载全部渠道卡片；渠道切换仅在本地显示、隐藏已有卡片，不重新请求页面，并保留各渠道未保存的别名、预设名称及强度上限输入。浏览器前进、后退同样只切换卡片。手动刷新额度仅更新发起刷新的渠道凭证区，不覆盖其他渠道或未保存的设置；禁用 JavaScript 时仍可通过“切换渠道”按钮正常访问。
-
-上游账号额度使用紧凑横排：周期、剩余百分比、进度条及重置时间按行显示，不使用独立额度卡片。周期使用 `5H`、`7D`、`月` 简写，Codex 套餐单独显示；Antigravity 按 Claude / GPT、Gemini 等明确返回的模型组排列，宽屏并排、窄屏上下排列，每组显示各自周期，不合并额度值。未知周期仍按原始标签展示。共享上游额度池保持完整标题；窄屏时重置时间移至下一行。
-
-概览及用量页面的共享上游额度池按渠道轮播，一次显示一个渠道。全部渠道随页面预加载，支持桌面左右拖动、手机横向滑动、卡片两侧箭头及键盘方向键切换，无需重新请求页面；箭头为卡片内的无边框图标，不超出卡片或占用底部空间，内容为箭头预留侧边空隙，到达首尾时隐藏对应箭头。当前渠道仍在卡片标题区显示，渠道状态和刷新按钮始终与标题同排靠右。手机上下滚动仍由浏览器处理。渠道卡片按自然内容等高，额度行保留各自自然高度，不强制每行一样高或额外增加留白；异步刷新额度后保留当前渠道与模型组。禁用 JavaScript 时仍可横向滚动查看。
-
-多模型组的共享额度池按已返回的标签分列：Claude / GPT 与 Gemini 各列两个周期，桌面呈两列两行，标题、百分比和进度条对齐。所有渠道共用标题靠左、百分比靠右的布局，估算说明可在百分比悬停提示中查看；各组独立的账号状态、重置时间和更新时间均保留。信息排列按每项额度的实际宽度调整：窄时每项信息各占一行，标签和值同排、不折行。额度池实际宽度 680px 及以下将 Antigravity 两个模型组分成独立卡片，与 Codex 共三个卡片左右拖动切换，每张保留两个额度周期，无下拉框。全部布局随页面预加载，跨宽度切换和刷新保留当前渠道/模型组；未启用 JavaScript 时仍可横向滚动查看。未知标签或超过两个周期的模型组保留原有平铺显示，不猜测或合并额度。
-
-窄界面（760px 及以下）的横排导航隐藏滚动条，标签溢出时显示左右浏览箭头，并支持鼠标滚轮横向浏览、触摸滑动及跨页面保留浏览位置；鼠标停在导航栏内时，即使已到达边缘或全部标签均可显示，滚轮也不会带动页面上下滚动，Ctrl + 滚轮缩放仍保留。宽界面仍使用原有竖向侧栏及其滚动行为。
-
-“最近操作”卡片允许长模型名和账号标识完整断行，时间保持单行，卡片较窄时移到内容下方，避免越界。
-
-账户概览摘要、存储占用与系统健康在 1080px 及以下保持两列卡片；概览与系统健康的第三张独占第二行，避免留下空格，存储卡片按两列排列。手机宽度下缩小卡片内边距并允许长说明断行，避免内容溢出。宽屏仍保留原有三列卡片。
-
-上游管理的 OAuth 模型列表、模型别名映射及思考强度上限也按各自区域的实际可用宽度保持两列，每张不足 260px 时才改为单列。模型名完整断行，状态、启停按钮、别名输入及强度选项根据卡片宽度排列，不改变表单功能。
-
-思考强度卡片内固定为上方模型名、下方全宽下拉选项，避免下拉框把长模型名挤成逐字换行。
-
-“可用模型”和门户网关的 `/v1/models` 会修复 Antigravity 冷却结束后的目录缺项：仅从 CPA 当前已启用、可调度且状态明确的凭证读取已注册模型，不使用静态模型目录猜测。仍在冷却、已停用、鉴权失败或状态未知的模型不会补回；读取过程不重置冷却、不改额度、不发送模型生成请求。
-
-凭证启停、模型启停和别名保存仅作用于所选渠道，模型目录以 CPAMP 返回的能力为准。调用预设按渠道隔离，每个渠道最多 20 个，不同渠道可以使用相同名称；旧预设启动时一次性升级为带明确渠道的 version 2 格式，原有模型、别名、思考上限和时间信息保留。运行时只接受新版预设，不再把缺失渠道的预设当作 Codex。跨渠道的预设应用、删除和账号状态提交会被拒绝。
-
-门户对 Codex 和 Antigravity 接入额度查询及思考强度上限。Antigravity 优先查询额度汇总接口，不可用时回退模型额度接口，按 Claude、Gemini 模型组分别显示；共享上游额度池按渠道独立汇总，不与 Codex 的 5 小时、周/月额度混算。其他渠道不会显示 Codex 的额度或修改其强度规则。
-
-Antigravity 的 Gemini 模型按声明的等级提供选项，Claude 等预算型模型显示等级对应的 token 预算（并受模型自身最大预算约束）。规则在 CPA 的 Antigravity 协议下按实际模型生效：仅降低明确超过上限的等级或数值预算，不改变较低、未指定或自动预算（`-1`）的请求。该渠道的思考上限可保存到预设，停用模型时移除该模型的上限；Codex 规则和其他 CPA 配置保留。
+替换示例手机号和姓名，确认创建成功后访问 `/login`。管理员可在“使用规则”中调整规则与注册开关，在“用户管理”中审批账号；密码重置使用管理员签发的 15 分钟一次性重置码。
 
 ## 可选模型网关
 
-门户可以在独立监听地址上运行模型网关。`GET /v1/models`、账户概览和“可用模型”页面都会移除在门户中配置的、仅作为 Codex 别名的模型 ID；其他路径原样转发给 CPA，鉴权和路由均由 CPA 处理，别名请求仍由 CPA 路由。若别名恰好也是一个已启用的真实 Codex 模型名，模型列表会保留该真实名称。
+不开启网关时，用户直接调用 CPA，门户仍可查询 CPAMP 提供的用量与日志。开启网关后，客户端请求必须经过网关才能生成门户交互记录和总耗时样本。
 
-本机使用本项目配套的 CPA Manager Plus Compose 时，可以叠加 `compose.gateway.yaml`：它把网关发布到宿主机 `8317`，并将门户加入 `cpamp_default` 网络，通过容器名直连 CPA。须先把 CPA 原有的宿主机 `8317` 映射改为仅本机的其他端口（例如 `.env` 中的 `CPA_PORT=127.0.0.1:18319`），再运行 `docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml up -d`；`CPA_API_BASE_URL` 保持用户原来的公网地址，不用改客户端 URL。若 CPA 不在该 Docker 网络或已有其他反代，应按实际拓扑修改网关的内部上游和端口绑定。**不要把 `CPA_UPSTREAM_URL` 指回网关自身**；仅启用环境变量不会自动完成入口切换。
+手动配置至少需要：
 
-经网关处理的 Responses、Chat Completions、Messages 和 Gemini 对话请求，会提取用户与助手文本，以及实际工具调用、参数和结果，作为结构化交互事件加密保存；系统/开发者指令、推理、工具定义、图片和其他非文本内容不保留。同一用户反复提交的相同事件只保存一次，不同用户之间不共用；下载按每次请求重建当次交互，默认提供 JSON，添加 `?format=txt` 可下载易读文本。旧版独立文件及旧版共用消息记录均不再兼容，并在新版启动时自动清理。用户可下载自己的记录，管理员可下载全局记录。每位用户按是否具有 CPA 请求 ID 分组，各保留最近 100 条，不按保存天数删除；无 ID 的错误请求不会挤占可关联日志的 100 条名额；请求或响应原始数据单侧超过 16 MB 时标注“已截断”，调用仍正常转发。请求头中的 API Key、Authorization 和门户 Cookie 不会写入记录；用户自行写进对话的秘密仍属于对话文本。未经网关的旧请求或直连 CPA 的请求没有可下载交互记录。更换 `PORTAL_APP_SECRET_FILE` 会使已有加密记录无法解密。
-
-网关不额外设置请求读取、响应写入或连接空闲超时，也不添加环境代理、改写对话参数或强制改变对话的压缩协商。普通请求头、Cookie、上游状态码和响应正文按 HTTP 代理语义转发；模型列表仅进行过滤所需的缓存与编码处理。交互记录的解析、去重和持久化在响应结束后后台完成，避免记录存储拖延连接结束；压缩内容只在记录副本中解码。
-
-请求日志及账户概览统一显示“耗时”（服务器总耗时），鼠标移上去显示接入及请求上传、请求收齐到开始写出回复、持续生成及发送回复三个阶段，完整记录时三段相加为总耗时。流式回复的第三段包含等待模型后续内容和发送回复的时间。模型调用耗时和模型首 token 等待单独列为模型指标，明确注明与阶段耗时重合，不参与累加。总耗时从服务器接入新连接起计；复用连接从收到本次请求的首批字节起计，排除连接空闲时间；HTTP/1 已缓冲的流水线请求只能从请求头解析完成起计，悬停说明会注明。终点在 HTTP 服务完成最终响应及尾部写出之后，包含阻塞写出时间；连接中断会保留中断前耗时并注明未完整写出。它不含服务器接入前的 DNS/TCP 握手、客户端准备、客户端最终接收与显示。历史请求、直连 CPA 的请求或缺少关联标识的请求显示“—”，不使用模型耗时冒充总耗时。
-
-分段计时仅保存时间、API Key 哈希及请求标识，不保存请求正文；即使无法提取交互记录也独立保存，响应结束后异步入库，每位用户有 CPA 请求 ID 和无 ID 的明细各保留最近 100 条，与交互记录使用相同的分组保留规则；长期统计样本不受明细限额影响。总耗时通过 CPA 返回的 `X-CPA-TRACE-ID` 中的完整请求 ID 与 CPAMP 日志及同一 Key 哈希关联，不按时间相近猜配。
-
-用量页面的“平均耗时”和全局“请求健康趋势”采用上述服务器总耗时，不采用模型调用延迟。成功率和失败率按 CPAMP 的区段请求计数计算；总耗时按实际计时请求数加权平均（包括失败及中断请求）。用于统计的轻量样本单独持久保存在 `gateway_timing_samples`，包含随机记录 ID、用户 ID、开始时间、总耗时及两处阶段边界，不受最近 100 条明细保留限制。升级时补入仍保留的计时明细，已清理的历史总耗时无法恢复；直连 CPA、外部 Key 等未经过门户计时的请求不计入耗时平均值。没有请求的区段不连接成功率/失败率曲线，没有总耗时记录时显示“—”，不以模型延迟补齐。健康图沿用用量图的时间范围和粒度、最少 12 点缩放窗口以及可见点数不超过 36 时显示圆点的规则。两个趋势图均支持鼠标滚轮缩放、拖动平移，以及移动端双指捏合缩放、单指左右平移和轻点查看数值；单指上下移动仍可滚动页面。数据点不超过 12 个时不启用图表缩放。
-
-请求健康趋势的柱状图支持接入及上传、等待回复、生成及发送三段堆叠，提示框显示三段平均耗时。两处阶段边界与总耗时一起长期保存在 `gateway_timing_samples`，不随最近 100 条明细清理。升级会从仍保留的明细补入分段边界；历史分段已丢失时不能恢复。一个区间只有所有计时请求的分段边界都完整且有效，才展示堆叠；否则保留原平均耗时柱，三段显示“—”。三段与总平均使用相同请求数为分母，避免不同样本口径导致三段之和与总耗时不一致。零耗时为有效值，分段不完整不视为零；三段取未舍入值相加，显示值可能存在舍入差异。
-
-“按模型”按实际使用模型汇总，而不是用户请求的别名：优先使用 CPAMP 的 `resolved_model`，缺失时使用 `response_model`；两者均缺失时归入“未记录实际模型”，不猜测别名对应关系。门户分页读取所选区间内的完整请求元数据并核对请求数与 Token 总数，不使用最近 100 条日志重算历史排名。若明细已被上游清理、分页失败或 totals 不一致，仅暂停模型排名并提示记录不完整，其他用量统计不受影响。日志继续显示“请求模型 → 实际模型”。
-
-最近七天按精确的 168 小时查询，门户把 CPAMP 小时数据合并为每 3 小时一段。管理及用户概览使用同一个结束时间推算开始时间，小时和日统计使用独立缓存键，避免页面间复用缓存时误变为按天展示。两个趋势图在同一时间范围内使用相同柱宽和位置；柱高各自按 Token 数或平均耗时计算。
-
-请求健康趋势的堆叠柱使用整根柱子的轮廓裁剪顶部圆角，分段内部保持直边；即使最上方分段很薄，顶部圆角也不由该分段高度决定。缩放和窗口尺寸变化时按屏幕像素重新计算圆角，不改变分段比例或放大微小分段。
-
-用量趋势总览的 Token 柱按总量显示，不再按输入、缓存、输出分段，恢复原来的绿色 `#5ab38e`；柱子、图例及悬停框的 Token 色块一致。悬停框仅展示请求数与 Token 总数。请求数曲线、顶部圆角、缩放和平移功能保持不变，原始 Token 分项数据及请求日志中的输入、输出、缓存、推理字段不删除、不改变统计口径。
-
-## 日常命令
-
-```bash
-docker compose logs -f --tail=100 cliproxy-portal
-docker compose restart cliproxy-portal
-docker compose pull
-docker compose up -d --build
+```dotenv
+PORTAL_GATEWAY_LISTEN_ADDR=:18318
+CPA_UPSTREAM_URL=http://cli-proxy-api:8317
 ```
 
-SQLite 位于 Compose 命名卷 `portal-data`。当前版本按需求不自动备份。删除该卷会永久丢失账号、Key 映射和审计数据：
+还需映射网关端口、连通 CPA，并将 `CPA_API_BASE_URL` 指向网关的公网入口。不要把 `CPA_UPSTREAM_URL` 指回网关，否则会形成循环。
+
+仓库的 `compose.gateway.yaml` 是特定网络拓扑的覆盖文件：
+
+- 网关容器监听 `18318`，发布到宿主机 `8317`。
+- CPA 地址固定为 `http://cli-proxy-api:8317`。
+- 门户加入已有的 `cpamp_default` Docker 网络。
+
+先确认该网络、容器名和端口有效，并迁移 CPA 原有的宿主机 `8317` 映射以避免冲突，再启动：
 
 ```bash
-# 危险：仅在确实要彻底清空门户时执行
-docker compose down -v
+docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml \
+  up -d --no-deps cliproxy-portal
 ```
 
-## 配置
+不同部署拓扑应调整覆盖文件；它不是通用的一键安装脚本。
 
-| 变量 | 默认值 | 说明 |
-|---|---:|---|
+### 模型目录与交互记录
+
+- 网关过滤 `GET /v1/models` 中仅作为 Codex 别名的名称，别名调用仍由 CPA 路由；与真实已启用模型重名的名称保留。
+- Antigravity 冷却后的目录缺项只依据 CPA 当前明确可调度的凭证和已注册模型恢复，不猜测模型、不重置冷却，也不发起生成请求。
+- 支持 Responses、Chat Completions、Messages 和 Gemini 的用户/助手文本及实际工具调用、参数、结果；不保存系统/开发者指令、推理、工具定义、图片等非文本内容。
+- 记录加密存储，同一用户的重复事件去重；用户只可下载自己的记录，管理员可下载全局记录。默认 JSON，下载链接增加 `?format=txt` 可获取文本。
+- 每位用户的交互记录及计时明细，按有、无 CPA 请求 ID 分组，各保留最近 100 条；长期统计样本不受该明细上限影响，也不会按天自动清除。
+- 请求或响应的记录副本单侧超过 16 MB 时标注截断，不截断实际代理流量。旧格式交互记录会在启动清理时移除。
+- Authorization、API Key 请求头及门户 Cookie 不写入交互记录；用户写进对话正文的秘密仍可能被保存。
+
+网关不额外设置对话读取、写入或连接空闲超时。记录解析与持久化在响应结束后异步完成；代理仍遵循 HTTP 转发语义，不是所有协议字段的逐字节透传。
+
+### 统计口径
+
+| 指标 | 来源与边界 |
+|---|---|
+| 请求数、Token、成功率/失败率 | CPAMP 的用量数据；全局统计可能包含未绑定用户的手工 Key |
+| 按模型排行 | 优先 `resolved_model`，其次 `response_model`；都缺失则记为“未记录实际模型” |
+| 请求日志“耗时” | 门户网关记录的服务器总耗时，不用 CPA 模型延迟替代 |
+| 平均耗时与请求健康趋势 | 实际网关计时样本，包括失败及中断请求，不包含未计时的直连请求 |
+
+最近 7 天使用精确的 168 小时范围，小时数据合并为每 3 小时一段。实际模型排名会分页读取所选区间的完整请求元数据并核对总量；明细缺失或核对失败时暂停排行，不拿最近 100 条日志代替历史数据。
+
+总耗时分为接入及上传、等待回复、生成及发送三个阶段；它不包含服务器接入前的 DNS/TCP 握手、客户端准备和最终显示。计时通过完整 CPA 请求 ID 与 Key 哈希关联，不按时间近似匹配；历史或未关联请求显示“—”。模型调用与首 Token 指标可能与阶段计时重合，不能再累加。健康趋势仅在区段全部样本具有有效边界时展示三段堆叠。
+
+## 配置参考
+
+以下默认值来自 `internal/config/config.go`。Compose 会覆盖其中部分值，例如将 `CPAMP_BASE_URL` 设置为 `http://host.docker.internal:18317`。
+
+| 变量 | 程序默认值 | 说明 |
+|---|---|---|
 | `PORTAL_LISTEN_ADDR` | `:18080` | 门户监听地址 |
-| `PORTAL_DATABASE_PATH` | `/data/portal.db` | SQLite 路径 |
+| `PORTAL_DATABASE_PATH` | `/data/portal.db` | SQLite 文件 |
 | `PORTAL_EXTERNAL_URL` | `http://localhost:18080` | 门户对外地址 |
-| `CPA_API_BASE_URL` | `http://localhost:8317` | 展示给用户的模型 API 地址 |
-| `CPA_UPSTREAM_URL` | 空 | 网关访问 CPA 的内部地址；启用网关时必填 |
-| `PORTAL_GATEWAY_LISTEN_ADDR` | 空（关闭） | 网关监听地址，与门户页面监听地址分开 |
-| `PORTAL_GATEWAY_CAPTURE_DIR` | `/data/gateway-captures` | 加密交互记录目录 |
-| `PORTAL_HOST_LOG_METRICS_PATH` | `/data/host-log-metrics.json` | 宿主机日志大小摘要；缺失或超过 5 分钟未更新时显示待采集 |
-| `CPAMP_BASE_URL` | `http://host.docker.internal:18317` | CPAMP Manager Server 地址 |
-| `CPAMP_ADMIN_KEY_FILE` | `/run/secrets/cpamp_admin_key` | CPAMP 管理 Key 文件 |
-| `PORTAL_APP_SECRET_FILE` | `/run/secrets/portal_app_secret` | 至少 32 字符的会话/CSRF 密钥文件 |
+| `CPA_API_BASE_URL` | `http://localhost:8317` | 展示给用户的模型 API 基础地址 |
+| `CPAMP_BASE_URL` | `http://cpa-manager-plus:18317` | CPAMP Manager Server 地址 |
+| `CPAMP_ADMIN_KEY_FILE` | `/run/secrets/cpamp_admin_key` | CPAMP 管理员 Key 文件 |
+| `PORTAL_APP_SECRET_FILE` | `/run/secrets/portal_app_secret` | 至少 32 字符的应用密钥文件 |
+| `PORTAL_COOKIE_NAME` | `cliproxy_portal_session` | 会话 Cookie 名称 |
+| `PORTAL_TIME_ZONE` | `Asia/Shanghai` | 页面时间显示时区 |
+| `CPAMP_TIMEOUT` | `15s` | CPAMP 管理请求超时 |
 | `PORTAL_RECONCILE_INTERVAL` | `5m` | Key 对账间隔 |
-| `PORTAL_PENDING_RETRY` | `30s` | 待撤销任务重试间隔 |
-| `PORTAL_USAGE_CACHE_TTL` | `2m` | CPAMP 用量查询的进程内短缓存；重启即清空 |
-| `PORTAL_REGISTRATION_OPEN` | `true` | 仅首次建库时的注册开关默认值 |
-| `PORTAL_TRUST_PROXY_HEADERS` | `false` | 是否信任 `X-Forwarded-For`；直连公网时保持 false |
+| `PORTAL_PENDING_RETRY` | `30s` | 待处理撤销任务重试间隔 |
+| `PORTAL_USAGE_CACHE_TTL` | `2m` | 用量查询进程内缓存，重启清空 |
+| `PORTAL_REGISTRATION_OPEN` | `true` | 仅首次建库时的注册默认值 |
+| `PORTAL_TRUST_PROXY_HEADERS` | `false` | 是否信任转发 IP 请求头，只在受控代理后按需启用 |
+| `PORTAL_GATEWAY_LISTEN_ADDR` | 空，关闭网关 | 网关独立监听地址 |
+| `CPA_UPSTREAM_URL` | 空 | 启用网关时必填 |
+| `PORTAL_GATEWAY_CAPTURE_DIR` | `/data/gateway-captures` | 加密交互记录目录 |
+| `PORTAL_HOST_LOG_METRICS_PATH` | `/data/host-log-metrics.json` | 宿主机日志大小摘要 |
+| `PORTAL_BINARY` | `portal-linux-amd64`（Compose 默认） | 预编译 Compose 挂载的文件名，不是程序环境变量 |
+
+`.env` 只为 Compose 中显式写出的变量提供替换值，不会自动把表中全部变量传入容器。调整其他配置时，修改 Compose 的 `environment` 或使用自己的覆盖文件，并重新创建容器。
+
+## 日常运维
+
+### 查看状态与日志
+
+预编译部署：
+
+```bash
+docker compose -f compose.prebuilt.yaml ps
+docker compose -f compose.prebuilt.yaml logs -f --tail=100 cliproxy-portal
+curl -fsS http://127.0.0.1:18080/healthz
+```
+
+`/healthz` 返回 `ok` 表示门户 HTTP 服务可用，不代表 CPAMP、CPA 或模型额度全部正常；详细状态在系统管理页检查。源码构建部署改用 `compose.yaml`；启用网关时加上 `-f compose.gateway.yaml`。
+
+### 更新版本
+
+1. 在构建机测试并生成新的二进制，按服务器架构选择文件。
+2. 保留当前二进制与一致性数据库备份，将新文件以临时文件名上传。
+3. 在服务器项目目录替换二进制，再重新创建门户容器。以下假定已上传 `dist/portal-linux-amd64.new`：
+
+```bash
+chmod 755 dist/portal-linux-amd64.new
+mv -- dist/portal-linux-amd64.new dist/portal-linux-amd64
+docker compose -f compose.prebuilt.yaml up -d --no-deps --force-recreate cliproxy-portal
+curl -fsS http://127.0.0.1:18080/healthz
+```
+
+网关部署使用相同的两个 Compose 文件。不要只执行 `restart`：文件级绑定挂载更换后，需要重建容器才能确保使用新文件。失败时恢复原二进制并重建；涉及数据库迁移的版本应另行评估数据回滚，不要盲目恢复旧数据库覆盖新数据。
+
+源码构建部署使用 `docker compose -f compose.yaml up -d --build --no-deps cliproxy-portal`。
+
+### 数据与备份
+
+应用不自动创建部署备份。数据库使用 WAL：服务运行时不要只复制 `portal.db` 当作完整备份，应使用 SQLite 一致性备份，或停服后按实际状态备份数据目录。备份中同时保留应用密钥与加密记录，注意限制访问权限。
+
+预编译部署的数据在项目的 `data/`；源码构建部署的数据在命名卷。删除数据目录、命名卷或执行 `docker compose down -v` 会丢失相应部署的数据。备份和诊断报告可能包含敏感信息，不要公开上传。
 
 ### 宿主机日志占用采集
 
-系统管理页直接统计门户 SQLite、CPAMP SQLite 和加密交互记录；CPA 主日志、CPA 请求/响应日志及三个容器的运行日志由宿主机每分钟生成一次大小摘要。门户只读取数字，不读取日志内容，也不挂载 Docker socket。按实际目录/容器名调整 `ops/collect-host-log-metrics.py` 和 service 后，在宿主机安装定时器：
+系统管理页直接查询门户数据库、CPAMP 数据库及交互记录占用。CPA 主日志、请求/响应日志和容器日志大小由宿主机采集脚本生成摘要；缺失或超过 5 分钟未更新时显示待采集。
+
+先检查 `ops/collect-host-log-metrics.py` 的容器名，以及 service 的脚本、日志和输出路径。当前 service 示例面向 `/root/cliproxy-portal` 与 `/root/cpa-manager-plus/cliproxyapi/logs`，不是所有安装都能直接使用。
 
 ```bash
 sudo cp ops/cliproxy-portal-log-metrics.service ops/cliproxy-portal-log-metrics.timer /etc/systemd/system/
@@ -204,30 +277,50 @@ sudo systemctl enable --now cliproxy-portal-log-metrics.timer
 sudo systemctl start cliproxy-portal-log-metrics.service
 ```
 
-默认 service 适配 `/root/cliproxy-portal` 下的门户数据目录和 `/root/cpa-manager-plus/cliproxyapi/logs` 下的 CPA 日志；容器名在脚本顶部。摘要不含日志正文或文件路径，未采集、过期或不可读取时页面显示待采集，不显示旧数值。
+门户只读取大小摘要，不读取这些日志正文，也不挂载 Docker socket。
 
-## 本地验证
-
-### Windows 客户端网络诊断
-
-双击 `ops/Run-PortalNetwork.cmd`，或使用 PowerShell 运行 `ops/Test-PortalNetwork.ps1`，可检查客户端到模型门户的 DNS、TCP、模型列表、连接复用及约 242KB 的请求上传。脚本不修改服务端配置；上传使用不存在的诊断模型，**会在 CPA 日志中产生预期的 400，不调用真实模型**。建议在慢电脑的原网络和热点各跑一轮，保存报告对比。参数、时间字段含义和判断边界见 [网络诊断说明](ops/portal-network-diagnostics.md)。
-
-### Go 检查
+## 开发与验证
 
 ```bash
 go test ./...
 go vet ./...
 go build ./cmd/portal
+node --test internal/webui/tests/*.test.cjs
 ```
 
-### 图表手势检查
+前端测试使用 Node.js 内置测试运行器，不需要 `npm install` 或 `node_modules`。覆盖额度轮播、拖动与选字、导航滚动、渠道切换、刷新状态和图表手势；这些模拟测试不替代真实浏览器的视觉与交互验证。
 
-使用 Node.js 内置测试运行器，无须安装依赖；若项目位于 OneDrive，从同步目录外的临时工作目录运行，并将测试文件路径改为绝对路径：
+Windows PowerShell 可先枚举测试路径：
 
-```bash
-node --test /absolute/path/to/CLIProxy-Portal/internal/webui/tests/trend-gestures.test.cjs
+```powershell
+$portalTests = Get-ChildItem internal/webui/tests -Filter '*.test.cjs' |
+  ForEach-Object { $_.FullName }
+node --test $portalTests
 ```
 
-该测试模拟触摸及鼠标事件，验证两个趋势图的缩放、平移、缩放上限、轻点提示和纵向滚动放行逻辑，不替代真实手机浏览器的手势体验验证。
+项目位于 OneDrive 时，不要在同步目录中创建、安装或链接 `node_modules`。需要第三方 Node 依赖的处理应放在同步目录外的独立临时工作区，仅把最终产物复制回来。
 
-运行时资源上限在 `compose.yaml` 中设为 0.75 CPU、256 MiB 内存。Argon2id 登录/改密会短时使用较多内存，这是有意的密码保护成本。
+### Windows 网络诊断
+
+`ops/Run-PortalNetwork.cmd` 与 `ops/Test-PortalNetwork.ps1` 用于比较客户端网络中的 DNS、TCP、连接复用和请求上传时间。调用脚本时显式指定实际模型 API 地址：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ops/Test-PortalNetwork.ps1 -BaseUrl 'https://api.example.com/v1'
+```
+
+上传测试使用不存在的诊断模型，预期产生 400 日志，不调用真实模型；不要把它误认为业务请求故障。详情见[网络诊断说明](ops/portal-network-diagnostics.md)。
+
+## 目录结构
+
+```text
+cmd/portal/         程序入口、管理员初始化命令
+internal/config/   环境配置
+internal/cpamp/    CPAMP 管理接口客户端
+internal/service/  账号、Key、额度、模型与预设逻辑
+internal/store/    SQLite 存储与迁移
+internal/gateway/  模型代理、交互记录与分段计时
+internal/httpserver/ 门户路由、权限与视图数据
+internal/webui/    HTML 模板、静态资源与前端测试
+ops/              宿主机日志采集与网络诊断工具
+dist/             本地构建产物，不纳入 Git
+```
