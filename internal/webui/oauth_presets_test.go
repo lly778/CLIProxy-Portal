@@ -47,8 +47,9 @@ func TestOAuthPresetCardsUseIndependentColumns(t *testing.T) {
 	}
 	css := string(asset)
 	for _, want := range []string{
-		`.oauth-preset-list { column-count: 2; column-gap: 10px; }`,
-		`.oauth-preset-row { display: inline-block; width: 100%; min-width: 0; margin-bottom: 10px; break-inside: avoid; vertical-align: top;`,
+		`.oauth-preset-list { position: relative; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 10px; }`,
+		`.oauth-preset-list.is-masonry { display: block; }`,
+		`.oauth-preset-list.is-masonry > .oauth-preset-row { position: absolute; }`,
 	} {
 		if !strings.Contains(css, want) {
 			t.Fatalf("preset cards must stack independently without splitting: %s", want)
@@ -56,10 +57,10 @@ func TestOAuthPresetCardsUseIndependentColumns(t *testing.T) {
 	}
 	_, narrow, found := strings.Cut(css, "@media (max-width: 760px) {")
 	narrow, _, _ = strings.Cut(narrow, "\n}")
-	if !found || !strings.Contains(narrow, `.oauth-preset-list { column-count: 1; }`) {
+	if !found || !strings.Contains(narrow, `.oauth-preset-list { grid-template-columns: 1fr; }`) {
 		t.Fatal("narrow preset cards must retain their single-column layout")
 	}
-	if strings.Contains(css, `.oauth-preset-list { display: grid;`) {
-		t.Fatal("preset cards must not share fixed grid rows")
+	if strings.Contains(css, `.oauth-preset-list { column-count:`) {
+		t.Fatal("preset cards must not depend on browser column balancing")
 	}
 }

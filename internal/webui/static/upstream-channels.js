@@ -1,6 +1,46 @@
 (function () {
   "use strict";
 
+  // Keep DOM/keyboard order intact; place each next card in the shorter column.
+  var presets = document.querySelector("[data-global-oauth-presets] .oauth-preset-list");
+  if (presets && window.matchMedia && window.requestAnimationFrame) {
+    var cards = Array.prototype.slice.call(presets.querySelectorAll(".oauth-preset-row"));
+    var narrowPresets = window.matchMedia("(max-width: 760px)");
+    var pendingLayout = false;
+    function layoutPresets() {
+      pendingLayout = false;
+      var width = presets.getBoundingClientRect().width;
+      if (!width || !cards.length) return;
+      var columns = narrowPresets.matches ? 1 : 2;
+      var gap = 10;
+      var cardWidth = (width - gap * (columns - 1)) / columns;
+      var heights = [0, 0];
+      cards.forEach(function (card) { card.style.width = cardWidth + "px"; });
+      presets.classList.add("is-masonry");
+      cards.forEach(function (card) {
+        var column = columns === 2 && heights[1] < heights[0] ? 1 : 0;
+        card.style.left = column * (cardWidth + gap) + "px";
+        card.style.top = heights[column] + "px";
+        heights[column] += card.getBoundingClientRect().height + gap;
+      });
+      presets.style.height = Math.max(0, Math.max.apply(null, heights) - gap) + "px";
+    }
+    function schedulePresetLayout() {
+      if (pendingLayout) return;
+      pendingLayout = true;
+      window.requestAnimationFrame(layoutPresets);
+    }
+    layoutPresets();
+    window.addEventListener("resize", schedulePresetLayout);
+    if (narrowPresets.addEventListener) narrowPresets.addEventListener("change", schedulePresetLayout);
+    if (window.ResizeObserver) {
+      var presetObserver = new window.ResizeObserver(schedulePresetLayout);
+      presetObserver.observe(presets);
+      cards.forEach(function (card) { presetObserver.observe(card); });
+    }
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedulePresetLayout);
+  }
+
   var page = document.querySelector("[data-upstream-channel-page]");
   if (!page || !window.history) return;
   var form = page.querySelector(".upstream-channel-form");
