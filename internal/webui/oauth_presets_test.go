@@ -2,6 +2,7 @@ package webui
 
 import (
 	"bytes"
+	"io/fs"
 	"strings"
 	"testing"
 )
@@ -36,5 +37,29 @@ func TestOAuthPresetIsGlobalAndOutsideChannelPanels(t *testing.T) {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("global preset UI contains removed content %s", unwanted)
 		}
+	}
+}
+
+func TestOAuthPresetCardsUseIndependentColumns(t *testing.T) {
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	for _, want := range []string{
+		`.oauth-preset-list { column-count: 2; column-gap: 10px; }`,
+		`.oauth-preset-row { display: inline-block; width: 100%; min-width: 0; margin-bottom: 10px; break-inside: avoid; vertical-align: top;`,
+	} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("preset cards must stack independently without splitting: %s", want)
+		}
+	}
+	_, narrow, found := strings.Cut(css, "@media (max-width: 760px) {")
+	narrow, _, _ = strings.Cut(narrow, "\n}")
+	if !found || !strings.Contains(narrow, `.oauth-preset-list { column-count: 1; }`) {
+		t.Fatal("narrow preset cards must retain their single-column layout")
+	}
+	if strings.Contains(css, `.oauth-preset-list { display: grid;`) {
+		t.Fatal("preset cards must not share fixed grid rows")
 	}
 }
