@@ -272,24 +272,23 @@ func (s *Server) quotaRefresh(w http.ResponseWriter, r *http.Request) {
 func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	u := currentUser(r)
-	to := time.Now().UTC()
-	from := u.CreatedAt.UTC()
-	if from.IsZero() || !from.Before(to) {
-		from = to.AddDate(-10, 0, 0)
-	}
 	if r.URL.Query().Get("refresh") == "1" {
-		if _, err := s.Keys.RefreshUsage(r.Context(), u.ID, from, to, 100); err != nil {
+		if _, err := s.Keys.RefreshUserRequests(r.Context(), u.ID, u.CreatedAt, 100); err != nil {
 			s.errorPage(w, r, http.StatusBadGateway, "刷新模型请求日志失败", err)
 			return
 		}
 		http.Redirect(w, r, "/activity", http.StatusSeeOther)
 		return
 	}
-	a, err := s.Keys.Usage(r.Context(), u.ID, from, to, 100)
-	_, _, _, requests := s.usageViews(a, from, to)
-	v := webui.ActivityView{LayoutView: s.layout(u, currentToken(r), "模型请求日志", "activity"), Requests: requests}
+	page, err := s.Keys.UserRequests(r.Context(), u.ID, u.CreatedAt, 100)
+	v := webui.ActivityView{LayoutView: s.layout(u, currentToken(r), "模型请求日志", "activity")}
 	if err != nil {
+		s.Logger.Warn("list user request metadata", "error", err)
 		v.Error = "模型请求日志暂时不可用"
+	} else {
+		for _, event := range page.Items {
+			v.Requests = append(v.Requests, s.requestView(event))
+		}
 	}
 	_ = s.UI.Render(w, webui.PageActivity, v)
 }

@@ -211,6 +211,23 @@ docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml \
 
 加密包作为 `backup.cbackup` 上传到私有仓库 **Releases**，不提交到源码分支。流程包括一致性快照、压缩、加密、本地恢复验证、上传与远端下载校验；验证成功后才清理超出保留数量的旧成功备份。压缩率取决于数据内容，不能按数据库原大小保证固定比例。
 
+低配置主机采用快速 gzip 压缩、复用加密缓冲区及流式解密验证，减少 CPU、内存分配和中间文件读写；快速压缩可能增加上传体积。同一份未变化的数据库快照不重复执行完整性检查，但生成快照和恢复后的数据库均须通过校验。宿主机 `status.json` 和任务日志记录各阶段及总耗时，便于区分快照、压缩、验证和网络传输的瓶颈。
+
+### 低配置主机性能
+
+当前采用 `VACUUM INTO` 一致性快照、gzip 快速等级 1、分块 AES-256-GCM 加密及流式恢复验证。快照仍会压实数据库，不使用实验性的在线备份 API。优化不减少备份范围，不跳过必要的完整性、认证或远端下载校验。
+
+2026-10-06 在同一台主机上，以同一份约 639 MiB 的完整数据、50% CPU 配额和 384 MiB 内存上限进行单次对比：
+
+| 指标 | 优化前 | 当前方案 | 变化 |
+| --- | --- | --- | --- |
+| 完整数据纯压缩耗时 | 16.9 秒 | 7.8 秒 | 减少约 54% |
+| 本地全流程耗时 | 308.4 秒 | 176.8 秒 | 减少约 42.7% |
+| 本地全流程 CPU 时间 | 81.0 秒 | 46.4 秒 | 减少约 42.7% |
+| 加密备份包大小 | 92.3 MiB | 109.2 MiB | 增加约 18.3% |
+
+本地全流程包含快照、压缩、加密、本地恢复验证及加密包 SHA256 读取；不包含测试数据准备、服务停启和 GitHub 上传下载。纯压缩是单独测量，不应再叠加到全流程耗时。CPU 时间表示处理器累计工作时间，耗时表示实际等待时间；结果受数据内容、磁盘、主机负载和网络影响，不保证每次备份都有相同比例的收益。
+
 ### 备份范围
 
 | 内容 | 保留的信息 |
@@ -342,11 +359,28 @@ sudo systemctl start cliproxy-portal-log-metrics.service
 
 ## 开发与验证
 
+### 个人请求日志查询
+
+个人请求日志独立查询用户所有 Key（包括已撤销 Key）最近 100 条元数据，不计算完整用量汇总、时间线或模型排行；手动刷新绕过缓存。缓存按用户、Key 集合与历史起点隔离，正常复用时间由 `PORTAL_USAGE_CACHE_TTL` 决定。
+
+CPAMP 1.14.1 的 Key 筛选使用 `coalesce(api_key_hash, '')` 表达式。对应查询较慢时，可在宿主机添加匹配表达式的索引（不修改记录、密钥或配置）：
+
+```bash
+# 先检查表结构并预览，再按实际宿主机路径执行
+python3 ops/optimize-cpamp-request-indexes.py /var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data/usage.sqlite
+python3 ops/optimize-cpamp-request-indexes.py /var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data/usage.sqlite --apply
+```
+
+脚本可重复执行；未知表结构或同名索引定义不符时会停止。索引随 CPAMP 数据库快照一起备份；恢复到早于此次优化的数据库后应重新执行。升级 CPAMP 后需重新核对其查询表达式，不能假定此优化适用于所有版本。
+
+### 测试
+
 ```bash
 go test ./...
 go vet ./...
 go build ./cmd/portal
 node --test internal/webui/tests/*.test.cjs
+python -B -m unittest discover -s ops -p 'test_optimize_cpamp_request_indexes.py'
 ```
 
 前端测试使用 Node.js 内置测试运行器，不需要 `npm install` 或 `node_modules`，覆盖备份弹窗、私密下载、瀑布流排序、渠道切换、额度轮播、导航和图表手势。模拟测试不能替代真实浏览器的视觉与交互验证。

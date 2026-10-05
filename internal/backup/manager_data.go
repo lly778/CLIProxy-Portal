@@ -11,6 +11,10 @@ func checkManagerDatabase(ctx context.Context, file string) error {
 	if err := checkSQLite(ctx, file); err != nil {
 		return err
 	}
+	return checkManagerDatabaseSchema(ctx, file)
+}
+
+func checkManagerDatabaseSchema(ctx context.Context, file string) error {
 	db, err := openSQLite(file)
 	if err != nil {
 		return err
@@ -24,6 +28,12 @@ func checkManagerDatabase(ctx context.Context, file string) error {
 }
 
 func validateManagerBackup(ctx context.Context, dir string, required bool) error {
+	return validateManagerBackupIntegrity(ctx, dir, required, true)
+}
+
+// integrity=false is reserved for immutable files already checked in the same
+// create/restore invocation; other callers always perform a fresh quick_check.
+func validateManagerBackupIntegrity(ctx context.Context, dir string, required, integrity bool) error {
 	db := filepath.Join(dir, filepath.FromSlash(managerDatabaseName))
 	key := filepath.Join(dir, filepath.FromSlash(managerDataKeyName))
 	_, dbErr := os.Lstat(db)
@@ -38,7 +48,12 @@ func validateManagerBackup(ctx context.Context, dir string, required bool) error
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 4096 {
 		return errors.New("CPAMP data.key 缺失或无效")
 	}
-	if err = checkManagerDatabase(ctx, db); err != nil {
+	if integrity {
+		err = checkManagerDatabase(ctx, db)
+	} else {
+		err = checkManagerDatabaseSchema(ctx, db)
+	}
+	if err != nil {
 		return err
 	}
 	if required {

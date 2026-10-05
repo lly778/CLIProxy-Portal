@@ -85,6 +85,12 @@ sudo systemctl enable --now cliproxy-portal-backup.timer
 
 流程为 SQLite `VACUUM INTO` → `quick_check` → 文件 SHA256 清单 → gzip → 分块 AES-256-GCM → 本地解密验证 → 确认私有仓库 → 草稿 Release 上传 → 下载 SHA256 验证 → 发布 → 清理旧备份。
 
+低配置主机默认使用 gzip 快速等级 1，压缩与加密直接串流执行；AES 帧缓冲区复用，不按帧反复分配大块内存。本地验证与恢复采用解密 → 解压 → 文件校验的流式处理，不落盘中间 `archive.tar.gz`。同一轮中已做完整性检查的快照只追加 CPAMP 表结构与配套 `data.key` 校验，避免重复扫描；解压后的数据库仍单独检查。末尾认证帧、gzip 校验、文件 SHA256、SQLite 完整性和远端下载校验均保留。
+
+快照继续采用 `VACUUM INTO`，不使用在线备份 API 实验方案。完整数据的单次性能对比及计时边界见 [主 README 的低配置主机性能](../../README.md#低配置主机性能)；网络上传下载未计入该测试，不能把本地节省比例直接当作实际定时任务的总提速。
+
+任务状态 `status.json` 的 `phase` 表示当前阶段，`stage_duration_ms` 记录 `preflight`、`snapshot`、`compress_encrypt`、`local_verify`、`upload`、`download_verify`、`publish`、`retention` 的毫秒耗时，`total_duration_ms` 记录当前尝试总耗时。失败保留失败阶段和已有耗时，不覆盖上次成功备份链接；下一次真实任务开始时重置阶段耗时。宿主机日志也记录 `backup stage=... duration_ms=...`，不包含密钥或文件正文。通过 `journalctl -u cliproxy-portal-backup.service` 可判断瓶颈；不要将每分钟空闲检查的耗时当成实际备份耗时。
+
 每个 Release 仅包含加密的 `backup.cbackup`，标题为“门户备份”，标签使用 `portal-backup-` 前缀，说明标识为 `CLIProxy Portal backup v1`；不再生成或上传恢复脚本。旧版备份仍可恢复，新旧发布按时间统一计算保留份数。认证帧与末尾标记检测损坏、乱序和截断；加密文件小于 GitHub 单附件 2 GiB 限制，解压总量限制为 8 GiB、最多 10000 文件。压缩直接流向加密输出，生成快照的临时副本在验证前释放。备份和恢复在停服前检查磁盘余量，为快照、解密验证及失败回退预留空间；容量不够会拒绝，不会自动删除现有数据或回退副本。只清理本安装标识的成功备份 Release 和 tag，不碰其他安装、软件发布或源码。失败不会清理旧成功备份。
 
 如果快照任务异常退出，下一次 tick 通过独立的宿主机文件锁确认没有仍在取快照的进程，再启动批准的 CPAMP 容器。暂停记录位于 `.manager-backup-paused`；启动或健康检查失败会保留记录。主任务遗留的 `runner.lock` 不会盲目删除，确认任务结束后由管理员处理。

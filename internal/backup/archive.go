@@ -122,7 +122,13 @@ func Create(ctx context.Context, sources []Source, dir string, key []byte, image
 
 // freeze covers only snapshot collection. CPAMP resumes before compression,
 // encryption, local restore verification and network upload.
-func createArchive(ctx context.Context, sources []Source, dir string, key []byte, images map[string]string, freeze func(func() error) error) (string, Manifest, error) {
+func createArchive(ctx context.Context, sources []Source, dir string, key []byte, images map[string]string, freeze func(func() error) error, observers ...*stageHooks) (string, Manifest, error) {
+	var stages *stageHooks
+	if len(observers) > 0 {
+		stages = observers[0]
+	}
+	finishSnapshot := stages.start("snapshot")
+	defer finishSnapshot()
 	m := Manifest{Version: 1, Kind: manifestKind, CreatedAt: time.Now().UTC()}
 	m.Images = images
 	if err := validateSources(sources); err != nil {
@@ -232,10 +238,14 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		return "", m, errors.New("备份缺少门户数据库或 CPA 配置")
 	}
 	if seen[managerDatabaseName] {
-		if err = validateManagerBackup(ctx, stage, false); err != nil {
+		// snapshotSQLite already checked these exact immutable staged bytes.
+		if err = validateManagerBackupIntegrity(ctx, stage, false, false); err != nil {
 			return "", m, err
 		}
 	}
+	finishSnapshot()
+	finishCompression := stages.start("compress_encrypt")
+	defer finishCompression()
 	sort.Slice(m.Entries, func(i, j int) bool { return m.Entries[i].Name < m.Entries[j].Name })
 	encrypted := filepath.Join(dir, archiveName)
 	out, err := os.OpenFile(encrypted, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -281,9 +291,12 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 }
 
 func writeTarGzip(ctx context.Context, output io.Writer, stage string, m Manifest) error {
-	gz := gzip.NewWriter(output)
+	// Keep the gzip/container format compatible, but favor low CPU consumption.
+	gz, err := gzip.NewWriterLevel(output, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
 	tw := tar.NewWriter(gz)
-	var err error
 	for _, entry := range m.Entries {
 		if err = ctx.Err(); err != nil {
 			break
@@ -434,27 +447,12 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > MaxEncryptedSize {
 		return errors.New("加密备份文件类型或大小无效")
 	}
-	if err = requireSpace(work, info.Size()+(128<<20)); err != nil {
+	if err = requireSpace(work, 128<<20); err != nil {
 		return err
 	}
-	compressed := filepath.Join(work, "archive.tar.gz")
-	f, err := os.OpenFile(compressed, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	err = Decrypt(f, io.LimitReader(input, MaxEncryptedSize+1), key)
-	if e := f.Close(); err == nil {
-		err = e
-	}
-	if err != nil {
-		return err
-	}
-	f, err = os.Open(compressed)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
+	decrypted := newDecryptedStream(ctx, io.LimitReader(input, MaxEncryptedSize+1), key)
+	defer decrypted.Close()
+	gz, err := gzip.NewReader(decrypted)
 	if err != nil {
 		return err
 	}
@@ -535,6 +533,11 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 	if trailing > 1<<20 {
 		return errors.New("备份包含过多额外压缩内容")
 	}
+	// Gzip/tar EOF alone is insufficient: authenticate the terminal AES frame
+	// and reject appended ciphertext before trusting or promoting any output.
+	if err = decrypted.finish(); err != nil {
+		return err
+	}
 	if !manifestSeen || manifest.Version != 1 || !supportedManifestKind(manifest.Kind) || len(manifest.Entries) != len(entries) || len(entries) == 0 {
 		return errors.New("备份清单版本或文件数量无效")
 	}
@@ -565,7 +568,8 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 			return err
 		}
 	}
-	if err = validateManagerBackup(ctx, dir, false); err != nil {
+	// Manifest verification above already quick_checked the restored database.
+	if err = validateManagerBackupIntegrity(ctx, dir, false, false); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(filepath.Join(dir, "upstream/cliproxyapi/auths")); err != nil || !info.IsDir() {

@@ -28,17 +28,20 @@ type Config struct {
 }
 
 type Status struct {
-	Repository        string    `json:"repository"`
-	SuccessRepository string    `json:"success_repository"`
-	Running           bool      `json:"running"`
-	StartedAt         time.Time `json:"started_at"`
-	FinishedAt        time.Time `json:"finished_at"`
-	LastSuccessAt     time.Time `json:"last_success_at"`
-	LastAttemptDay    string    `json:"last_attempt_day"`
-	Message           string    `json:"message"`
-	ReleaseURL        string    `json:"release_url"`
-	Size              int64     `json:"size"`
-	SHA256            string    `json:"sha256"`
+	Repository        string           `json:"repository"`
+	SuccessRepository string           `json:"success_repository"`
+	Running           bool             `json:"running"`
+	StartedAt         time.Time        `json:"started_at"`
+	FinishedAt        time.Time        `json:"finished_at"`
+	LastSuccessAt     time.Time        `json:"last_success_at"`
+	LastAttemptDay    string           `json:"last_attempt_day"`
+	Message           string           `json:"message"`
+	ReleaseURL        string           `json:"release_url"`
+	Size              int64            `json:"size"`
+	SHA256            string           `json:"sha256"`
+	Phase             string           `json:"phase,omitempty"`
+	StageDurationMS   map[string]int64 `json:"stage_duration_ms,omitempty"`
+	TotalDurationMS   int64            `json:"total_duration_ms,omitempty"`
 }
 
 var repositoryPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9_.-]{1,100}$`)

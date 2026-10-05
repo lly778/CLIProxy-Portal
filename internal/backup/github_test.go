@@ -222,6 +222,14 @@ func TestRunnerManualAndWeeklyJobsPersistSuccessAndFailure(t *testing.T) {
 	if err != nil || status.Running || status.LastSuccessAt.IsZero() || status.Size == 0 || status.LastAttemptDay != "2026-10-05" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
+	if status.Phase != "" || status.TotalDurationMS <= 0 || len(status.StageDurationMS) != 8 {
+		t.Fatalf("missing stage metrics: %+v", status)
+	}
+	for _, stage := range []string{"preflight", "snapshot", "compress_encrypt", "local_verify", "upload", "download_verify", "publish", "retention"} {
+		if _, ok := status.StageDurationMS[stage]; !ok {
+			t.Fatalf("missing stage %s", stage)
+		}
+	}
 	if err = tick(t.Context(), dir, sourcesFile, now.Add(time.Hour), newClient); err != nil || f.created != 1 {
 		t.Fatal("same day retried scheduled backup")
 	}
@@ -233,6 +241,9 @@ func TestRunnerManualAndWeeklyJobsPersistSuccessAndFailure(t *testing.T) {
 	failed, _ := LoadStatus(dir)
 	if failed.Running || !failed.LastSuccessAt.Equal(status.LastSuccessAt) || failed.ReleaseURL != status.ReleaseURL || !strings.Contains(failed.Message, "失败") || Pending(dir) {
 		t.Fatal("failure lost successful history or left running state")
+	}
+	if failed.Phase != "download_verify" || len(failed.StageDurationMS) != 6 {
+		t.Fatalf("failed-stage metrics or reset incorrect: %+v", failed)
 	}
 	if _, err = os.Stat(filepath.Join(dir, "runner.lock")); !os.IsNotExist(err) {
 		t.Fatal("runner lock not cleaned")

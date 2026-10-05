@@ -28,6 +28,12 @@ func Encrypt(dst io.Writer, src io.Reader, key []byte) error {
 		return err
 	}
 	buf := make([]byte, chunkSize)
+	sealedBuffer := make([]byte, 0, chunkSize+aead.Overhead())
+	var nonce [12]byte
+	copy(nonce[:8], header[len(magic):])
+	aad := make([]byte, len(header)+4)
+	copy(aad, header)
+	var length [4]byte
 	for seq := uint32(0); ; seq++ {
 		n, readErr := io.ReadFull(src, buf)
 		if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
@@ -36,12 +42,9 @@ func Encrypt(dst io.Writer, src io.Reader, key []byte) error {
 		if seq == ^uint32(0) {
 			return errors.New("backup too large")
 		}
-		nonce := make([]byte, 12)
-		copy(nonce, header[len(magic):])
 		binary.BigEndian.PutUint32(nonce[8:], seq)
-		aad := append(append([]byte(nil), header...), nonce[8:]...)
-		sealed := aead.Seal(nil, nonce, buf[:n], aad)
-		var length [4]byte
+		copy(aad[len(header):], nonce[8:])
+		sealed := aead.Seal(sealedBuffer[:0], nonce[:], buf[:n], aad)
 		binary.BigEndian.PutUint32(length[:], uint32(len(sealed)))
 		if _, err = dst.Write(length[:]); err != nil {
 			return err
@@ -64,8 +67,14 @@ func Decrypt(dst io.Writer, src io.Reader, key []byte) error {
 	if _, err = io.ReadFull(src, header); err != nil || string(header[:len(magic)]) != magic {
 		return errors.New("备份文件格式无效")
 	}
+	sealedBuffer := make([]byte, chunkSize+aead.Overhead())
+	plainBuffer := make([]byte, 0, chunkSize)
+	var nonce [12]byte
+	copy(nonce[:8], header[len(magic):])
+	aad := make([]byte, len(header)+4)
+	copy(aad, header)
+	var length [4]byte
 	for seq := uint32(0); ; seq++ {
-		var length [4]byte
 		if _, err = io.ReadFull(src, length[:]); err != nil {
 			return errors.New("备份文件不完整")
 		}
@@ -73,15 +82,13 @@ func Decrypt(dst io.Writer, src io.Reader, key []byte) error {
 		if n < uint32(aead.Overhead()) || n > chunkSize+uint32(aead.Overhead()) || seq == ^uint32(0) {
 			return errors.New("备份数据帧无效")
 		}
-		sealed := make([]byte, n)
+		sealed := sealedBuffer[:n]
 		if _, err = io.ReadFull(src, sealed); err != nil {
 			return errors.New("备份文件不完整")
 		}
-		nonce := make([]byte, 12)
-		copy(nonce, header[len(magic):])
 		binary.BigEndian.PutUint32(nonce[8:], seq)
-		aad := append(append([]byte(nil), header...), nonce[8:]...)
-		plain, err := aead.Open(nil, nonce, sealed, aad)
+		copy(aad[len(header):], nonce[8:])
+		plain, err := aead.Open(plainBuffer[:0], nonce[:], sealed, aad)
 		if err != nil {
 			return errors.New("恢复密钥不正确或备份已损坏")
 		}

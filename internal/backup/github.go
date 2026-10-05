@@ -112,6 +112,12 @@ func (g *GitHub) CheckPrivate(ctx context.Context, repository string) error {
 }
 
 func (g *GitHub) Upload(ctx context.Context, c Config, file, tag string) (string, int64, string, error) {
+	return g.upload(ctx, c, file, tag, nil)
+}
+
+func (g *GitHub) upload(ctx context.Context, c Config, file, tag string, stages *stageHooks) (string, int64, string, error) {
+	finishUpload := stages.start("upload")
+	defer finishUpload()
 	if err := g.CheckPrivate(ctx, c.Repository); err != nil {
 		return "", 0, "", err
 	}
@@ -151,10 +157,16 @@ func (g *GitHub) Upload(ctx context.Context, c Config, file, tag string) (string
 	if uploaded.Digest != "" && uploaded.Digest != "sha256:"+entry.SHA256 {
 		return "", 0, "", errors.New("GitHub 附件校验不一致")
 	}
+	finishUpload()
+	finishDownload := stages.start("download_verify")
+	defer finishDownload()
 	// Download and hash the encrypted asset, not just its upload response.
 	if err = g.verifyAsset(ctx, c.Repository, uploaded.ID, entry); err != nil {
 		return "", 0, "", err
 	}
+	finishDownload()
+	finishPublish := stages.start("publish")
+	defer finishPublish()
 	if err = g.CheckPrivate(ctx, c.Repository); err != nil {
 		return "", 0, "", err
 	}

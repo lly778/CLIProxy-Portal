@@ -34,6 +34,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	var lastSeenMS int64
 	var lastSeenAnalyticsCalls int
 	var eventAnalyticsCalls int
+	var lastEventAnalytics cpamp.AnalyticsRequest
 	var lastUsageAnalytics cpamp.AnalyticsRequest
 	var cpampStatusCalls int
 	var apiKeyListCalls int
@@ -171,6 +172,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			}
 			if req.Include.EventsPage != nil {
 				eventAnalyticsCalls++
+				lastEventAnalytics = req
 				event := map[string]any{"timestamp_ms": time.Now().UnixMilli(), "model": "gpt-test", "requested_model": "gpt-test", "resolved_model": "gpt-upstream", "reasoning_effort": "high", "input_tokens": 120, "output_tokens": 30, "cached_tokens": 20, "cache_read_tokens": 40, "cache_creation_tokens": 10, "reasoning_tokens": 25, "total_tokens": 150, "latency_ms": 1_200, "failed": false}
 				if len(keys) > 0 {
 					event["api_key_hash"] = cpamp.HashAPIKey(keys[0])
@@ -327,6 +329,12 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("user dashboard missing requested-to-resolved model: %s", dashboard)
 	}
 	activityPage := getBody(t, client, portal.URL+"/activity", http.StatusOK)
+	mu.Lock()
+	activityQuery := lastEventAnalytics
+	mu.Unlock()
+	if activityQuery.Include.EventsPage == nil || activityQuery.Include.EventsPage.Limit != 100 || activityQuery.Include.Summary || activityQuery.Include.Timeline || activityQuery.Include.ModelStats || len(activityQuery.Filters.APIKeyHashes) != 1 {
+		t.Fatalf("activity must request only scoped recent metadata: %+v", activityQuery)
+	}
 	if !strings.Contains(activityPage, "模型请求日志") || !strings.Contains(activityPage, modelRoute) || !strings.Contains(activityPage, ">150<") {
 		t.Fatalf("user activity page missing model request: %s", activityPage)
 	}
