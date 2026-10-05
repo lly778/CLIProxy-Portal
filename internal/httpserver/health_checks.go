@@ -187,6 +187,7 @@ func (s *Server) captureHealthView() webui.HealthCheckView {
 	writable := probeCaptureStorage(s.Cfg.GatewayCaptureDir)
 	if err == nil {
 		v.Metric = fileSizeLabel(bytes)
+		v.StorageBytes, v.StorageSizeKnown = bytes, true
 	}
 	switch {
 	case err == nil && writable:

@@ -62,10 +62,12 @@ func (s *Server) hostLogHealthViews() []webui.HealthCheckView {
 	}
 	checkedAt := s.formatTime(metrics.GeneratedAt)
 	if metrics.CPAMainLogBytes != nil {
+		main.StorageBytes, main.StorageSizeKnown = *metrics.CPAMainLogBytes, true
 		main.Status, main.StatusLabel, main.Metric = "healthy", "正常", fileSizeLabel(*metrics.CPAMainLogBytes)
 		main.Message, main.CheckedAt = "CPA main.log 文件占用", checkedAt
 	}
 	if metrics.CPAResponseBytes != nil {
+		responses.StorageBytes, responses.StorageSizeKnown = *metrics.CPAResponseBytes, true
 		responses.Status, responses.StatusLabel, responses.Metric = "healthy", "正常", fileSizeLabel(*metrics.CPAResponseBytes)
 		responses.Message, responses.CheckedAt = "CPA v1-responses 日志合计", checkedAt
 	}
@@ -86,6 +88,7 @@ func (s *Server) hostLogHealthViews() []webui.HealthCheckView {
 	}
 	docker.Message, docker.CheckedAt = strings.Join(parts, " · "), checkedAt
 	if allAvailable {
+		docker.StorageBytes, docker.StorageSizeKnown = total, true
 		docker.Status, docker.StatusLabel, docker.Metric = "healthy", "正常", fileSizeLabel(total)
 	} else {
 		docker.StatusLabel = "部分不可用"

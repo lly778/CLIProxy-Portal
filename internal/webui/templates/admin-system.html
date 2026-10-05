@@ -13,6 +13,62 @@
     </article>
     {{else}}<div class="empty-state"><p>暂无存储数据。</p></div>{{end}}
   </div>
+<div class="card backup-section" id="backup" data-backup-busy="{{if or .Backup.Running .Backup.Pending}}true{{else}}false{{end}}">
+  {{if .Backup.Warning}}<div class="alert warning" role="status">{{.Backup.Warning}}</div>{{end}}
+  <div class="backup-overview">
+  <dl class="backup-status detail-grid">
+    <div><dt>备份状态</dt><dd>{{.Backup.Message}}</dd></div>
+    <div><dt>上次成功</dt><dd>{{.Backup.LastSuccess}}{{if .Backup.Size}} · {{.Backup.Size}}{{end}}</dd></div>
+    <div><dt>下次定时</dt><dd>{{.Backup.NextRun}}</dd></div>
+  </dl>
+  <div class="button-row"><button class="button primary" type="button" data-backup-open="backup-run-dialog" {{if or (not .Backup.Available) .Backup.Running .Backup.Pending}}disabled{{end}}>备份</button><button class="button secondary" type="button" data-backup-open="backup-restore-dialog" {{if or (not .Backup.Available) .Backup.Running .Backup.Pending}}disabled{{end}}>恢复</button></div>
+  </div>
+  {{if .Backup.RestoreMessage}}<div class="backup-restore-status"><span class="muted small">最近恢复</span><p>{{.Backup.RestoreMessage}}</p>{{if .Backup.RestoreRollback}}<p class="muted small mono">覆盖前的回退副本：{{.Backup.RestoreRollback}}</p>{{end}}</div>{{end}}
+  <dialog class="backup-dialog" id="backup-run-dialog" aria-labelledby="backup-run-title">
+    <h2 id="backup-run-title">备份</h2><p class="muted small">确认后生成加密备份，完成情况会显示在此页面。</p>
+    <form method="post" action="/admin/system/backup/run" data-backup-form>
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="backup-run-password">验证管理员密码</label><input id="backup-run-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
+      <div class="button-row"><button class="button secondary" type="button" data-backup-close>取消</button><button class="button primary" type="submit" {{if not .Backup.Configured}}disabled{{end}}>确认备份</button></div>
+    </form>
+    <details class="backup-settings" {{if not .Backup.Configured}}open{{end}}>
+      <summary>备份设置</summary>
+      <p class="field-help">设置 GitHub 私有仓库、访问令牌和每周自动备份计划。</p>
+      <form method="post" action="/admin/system/backup/settings" data-backup-form>
+        <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+        <label for="backup-repository">GitHub 私有仓库</label><input id="backup-repository" type="text" name="repository" value="{{.Backup.Repository}}" placeholder="owner/repo" autocomplete="off" maxlength="140" required>
+        <label for="backup-token">GitHub 访问令牌</label><input id="backup-token" type="password" name="github_token" placeholder="{{if .Backup.TokenReady}}已配置；留空保持不变{{else}}仅需目标仓库 Contents 读写权限{{end}}" autocomplete="new-password" maxlength="512" {{if not .Backup.TokenReady}}required{{end}}>
+        <p class="field-help">令牌仅用于访问仓库，不会回显或写入日志。仓库需提前创建并初始化。</p>
+        <label class="backup-confirm"><input type="checkbox" name="enabled" value="1" {{if .Backup.Automatic}}checked{{end}}>启用每周自动备份</label>
+        <div class="backup-schedule-fields">
+          <div><label for="backup-weekday">备份星期</label><select id="backup-weekday" name="weekday" aria-describedby="backup-schedule-help" required>
+            <option value="1" {{if eq .Backup.Weekday 1}}selected{{end}}>每周一</option><option value="2" {{if eq .Backup.Weekday 2}}selected{{end}}>每周二</option><option value="3" {{if eq .Backup.Weekday 3}}selected{{end}}>每周三</option><option value="4" {{if eq .Backup.Weekday 4}}selected{{end}}>每周四</option><option value="5" {{if eq .Backup.Weekday 5}}selected{{end}}>每周五</option><option value="6" {{if eq .Backup.Weekday 6}}selected{{end}}>每周六</option><option value="0" {{if eq .Backup.Weekday 0}}selected{{end}}>每周日</option>
+          </select></div>
+          <div><label for="backup-time">备份时间</label><input id="backup-time" type="time" name="backup_time" value="{{.Backup.Time}}" step="60" aria-describedby="backup-schedule-help" required></div>
+        </div>
+        <p class="field-help" id="backup-schedule-help">北京时间，每周执行一次。</p>
+        <label for="backup-settings-password">验证管理员密码</label><input id="backup-settings-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
+        <button class="button secondary" type="button" data-backup-download>下载备份恢复密钥</button>
+        <p class="field-help" role="status" data-backup-key-status>请另存到安全位置，下载不会更换现有密钥。</p>
+        <label class="backup-confirm"><input type="checkbox" name="key_saved" value="1" {{if .Backup.KeySaved}}checked{{end}} required>我已下载并另行保管备份恢复密钥</label>
+        <div class="button-row"><button class="button secondary" type="button" data-backup-close>取消</button><button class="button primary" type="submit">保存备份设置</button></div>
+      </form>
+    </details>
+  </dialog>
+  <dialog class="backup-dialog" id="backup-restore-dialog" aria-labelledby="backup-restore-title">
+    <h2 id="backup-restore-title">恢复备份</h2><p class="alert danger">恢复会覆盖所选范围，备份之后的相关修改将丢失。校验通过后会短暂停服，完成后需要重新登录。</p>
+    <form method="post" action="/admin/system/backup/restore" enctype="multipart/form-data" data-backup-form>
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <label for="backup-restore-password">验证管理员密码</label><input id="backup-restore-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
+      <label for="backup-restore-mode">恢复方式</label><select id="backup-restore-mode" name="restore_mode" required><option value="replace-portal-database">恢复：仅门户数据库</option><option value="rebuild-and-restore">重建并恢复：CPA、CPAMP 及完整数据</option></select>
+      <p class="muted small">“恢复”仅还原门户数据库，不变更上游服务配置。“重建并恢复”将下载备份中记录的指定版本镜像，依据部署参数重新部署 CPA 和 CPAMP、配置管理密钥，并还原门户数据库、CPA 的 config.yaml 与 auths，以及 CPAMP 数据库与 data.key。</p>
+      <label class="backup-confirm"><input type="checkbox" name="confirm" value="replace-current-data" required>我确认执行所选恢复方式，并了解覆盖范围内备份之后的相关修改将丢失</label>
+      {{if not .Backup.KeyReady}}<label for="backup-recovery-key">备份恢复密钥</label><input id="backup-recovery-key" type="password" name="recovery_key" autocomplete="off" minlength="64" maxlength="64" required>{{end}}
+      <label for="backup-restore-file">加密备份文件</label><input id="backup-restore-file" type="file" name="backup_file" accept=".cbackup" required>
+      <div class="button-row"><button class="button secondary" type="button" data-backup-close>取消</button><button class="button primary" type="submit">确认恢复</button></div>
+    </form>
+  </dialog>
+</div>
 </section>
 <section class="section" id="health">
   <div class="section-head system-section-head system-check-head"><div><h2>系统健康</h2><p class="muted small">查看模型网关、CPA 上游与 Key 对账状态。</p></div><form method="post" action="/admin/system/check#health">{{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="check_scope" value="health"><button class="button secondary" type="submit">立即检查</button></form></div>

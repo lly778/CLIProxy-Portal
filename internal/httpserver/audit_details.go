@@ -83,6 +83,16 @@ func auditActionDisplay(action string) string {
 		return "发布使用规则"
 	case "registration.toggle":
 		return "修改注册设置"
+	case "backup.key.download":
+		return "下载备份恢复密钥"
+	case "backup.settings.update":
+		return "修改备份设置"
+	case "backup.request":
+		return "请求备份"
+	case "backup.restore.request":
+		return "请求恢复门户数据库"
+	case "backup.rebuild.request":
+		return "请求重建并恢复"
 	default:
 		return "其他操作"
 	}
@@ -139,6 +149,9 @@ func auditTargetDisplay(action, id, label string) string {
 }
 
 func auditDetailDisplay(action, detail string) string {
+	if strings.HasPrefix(action, "backup.") {
+		detail = strings.ReplaceAll(detail, "轻量备份", "备份")
+	}
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
 		return "—"

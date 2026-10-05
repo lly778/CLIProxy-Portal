@@ -1,0 +1,17 @@
+[
+  {"path":"/root/cliproxy-portal/data/portal.db","name":"portal/data/portal.db","sqlite":true,"required":true},
+  {"path":"/root/cliproxy-portal/secrets/portal_app_secret","name":"portal/secrets/portal_app_secret","required":true},
+  {"path":"/root/cliproxy-portal/secrets/cpamp_admin_key","name":"portal/secrets/cpamp_admin_key","required":true},
+  {"path":"/root/cliproxy-portal/.env","name":"portal/.env","required":true},
+  {"path":"/root/cliproxy-portal/compose.prebuilt.yaml","name":"portal/compose.prebuilt.yaml","required":true},
+  {"path":"/root/cliproxy-portal/compose.gateway.yaml","name":"portal/compose.gateway.yaml","required":true},
+  {"path":"/root/cpa-manager-plus/compose.yaml","name":"upstream/compose.yaml","required":true},
+  {"path":"/root/cpa-manager-plus/.env","name":"upstream/.env","required":true},
+  {"path":"/root/cpa-manager-plus/secrets/cpamp-admin-key","name":"upstream/secrets/cpamp-admin-key","required":true},
+  {"path":"/root/cpa-manager-plus/secrets/cpa-management-key","name":"upstream/secrets/cpa-management-key","required":true},
+  {"path":"/root/cpa-manager-plus/cliproxyapi/config.yaml","name":"upstream/cliproxyapi/config.yaml","required":true},
+  {"path":"/root/cpa-manager-plus/cliproxyapi/auths","name":"upstream/cliproxyapi/auths","directory":true,"required":true},
+  {"path":"/var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data/usage.sqlite","name":"upstream/cpamp/usage.sqlite","sqlite":true,"required":true},
+  {"path":"/var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data/data.key","name":"upstream/cpamp/data.key","required":true},
+  {"path":"/root/cpa-manager-plus/versions.json","name":"upstream/versions.json","required":false}
+]

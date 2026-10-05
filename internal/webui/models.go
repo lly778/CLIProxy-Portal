@@ -410,13 +410,15 @@ type CountView struct {
 }
 
 type HealthCheckView struct {
-	Component   string
-	Status      string
-	StatusLabel string
-	Metric      string
-	Message     string
-	CheckedAt   string
-	Latency     string
+	StorageBytes     int64
+	StorageSizeKnown bool
+	Component        string
+	Status           string
+	StatusLabel      string
+	Metric           string
+	Message          string
+	CheckedAt        string
+	Latency          string
 }
 
 type UserUsageRankView struct {
@@ -636,6 +638,7 @@ type AdminPolicyView struct {
 
 type AdminSystemView struct {
 	LayoutView
+	Backup       BackupView
 	Storage      []HealthCheckView
 	Checks       []HealthCheckView
 	LastSyncAt   string
@@ -647,6 +650,27 @@ type AdminSystemView struct {
 	AuditError   string
 	Entries      []AuditView
 	Total        string
+}
+
+type BackupView struct {
+	Available       bool
+	Configured      bool
+	KeyReady        bool
+	Repository      string
+	TokenReady      bool
+	KeySaved        bool
+	Automatic       bool
+	Weekday         int
+	Time            string
+	Running         bool
+	Pending         bool
+	LastSuccess     string
+	NextRun         string
+	Message         string
+	Warning         string
+	Size            string
+	RestoreMessage  string
+	RestoreRollback string
 }
 
 type GlobalRequestView struct {

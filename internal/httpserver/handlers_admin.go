@@ -1091,6 +1091,7 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	now := time.Now().UTC()
 	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system")}
+	v.Backup = s.backupView()
 	var next systemCheckSnapshot
 	if scope != "health" {
 		next.storage = append(next.storage, s.databaseHealthView(r.Context()), s.cpampDatabaseHealthView(r.Context()), s.captureHealthView())
@@ -1107,9 +1108,9 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	snapshot := s.mergeSystemChecks(next)
 	if snapshot.storageReady {
-		v.Storage = snapshot.storage
+		v.Storage = compactStorageViews(snapshot.storage)
 	} else {
-		v.Storage = uncheckedSystemViews("门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志")
+		v.Storage = compactStorageViews(uncheckedSystemViews("门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志"))
 	}
 	if snapshot.healthReady {
 		v.Checks = snapshot.checks

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ type Config struct {
 	CPAMPBaseURL        string
 	CPAMPAdminKeyFile   string
 	AppSecretFile       string
+	BackupStateDir      string
 	CookieName          string
 	TimeZone            *time.Location
 	ReconcileInterval   time.Duration
@@ -57,6 +59,7 @@ func Load() (Config, error) {
 		TrustProxyHeaders:   boolEnv("PORTAL_TRUST_PROXY_HEADERS", false),
 		RegistrationDefault: boolEnv("PORTAL_REGISTRATION_OPEN", true),
 	}
+	cfg.BackupStateDir = env("PORTAL_BACKUP_STATE_DIR", filepath.Join(filepath.Dir(cfg.DatabasePath), "backup"))
 	if cfg.CPAMPBaseURL == "" || cfg.CPAAPIBaseURL == "" {
 		return Config{}, errors.New("CPAMP_BASE_URL and CPA_API_BASE_URL are required")
 	}

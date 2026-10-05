@@ -15,6 +15,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"cliproxy-portal/internal/backup"
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/gateway"
@@ -31,6 +32,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		return backupCommand(os.Args[2:])
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -47,6 +51,81 @@ func run() error {
 		return createAdmin(st, os.Args[2:])
 	}
 	return serve(cfg, st)
+}
+
+func backupCommand(args []string) error {
+	if len(args) == 0 {
+		return errors.New("用法: portal backup configure|key|tick|restore")
+	}
+	fs := flag.NewFlagSet("backup "+args[0], flag.ContinueOnError)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	switch args[0] {
+	case "configure":
+		dir := fs.String("state-dir", "", "门户共享备份状态目录")
+		repository := fs.String("repository", "", "专用私有仓库 owner/repo")
+		tokenFile := fs.String("token-file", "", "令牌文件；不指定则沿用已有令牌")
+		hour := fs.Int("hour", 3, "北京时间每周备份小时")
+		minute := fs.Int("minute", 0, "北京时间每周备份分钟（0–59）")
+		weekday := fs.Int("weekday", 1, "每周备份星期：0=周日，1=周一，...，6=周六")
+		retain := fs.Int("retain", 3, "保留最近成功备份份数")
+		enabled := fs.Bool("enabled", true, "启用每周定时备份")
+		keySaved := fs.Bool("key-saved", false, "确认已将恢复密钥保存到服务器之外")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *dir == "" || *repository == "" || fs.NArg() != 0 {
+			return errors.New("请指定 --state-dir 和 --repository")
+		}
+		c := backup.Config{Repository: *repository, Hour: *hour, Minute: *minute, Weekday: *weekday, Retain: *retain, Enabled: *enabled, KeySaved: *keySaved}
+		if err := backup.Configure(ctx, *dir, c, *tokenFile); err != nil {
+			return err
+		}
+		fmt.Println("备份后台配置已保存；未发起备份。")
+		return nil
+	case "key":
+		dir := fs.String("state-dir", "", "门户共享备份状态目录")
+		output := fs.String("output", "", "密钥导出路径；必须为新文件")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *dir == "" || *output == "" || fs.NArg() != 0 {
+			return errors.New("请指定 --state-dir 和 --output")
+		}
+		if err := backup.ExportKey(*dir, *output); err != nil {
+			return err
+		}
+		fmt.Println("恢复密钥已导出；请另行保管，不要仅留在原服务器。")
+		return nil
+	case "tick":
+		dir := fs.String("state-dir", "", "门户共享备份状态目录")
+		sources := fs.String("sources", "", "宿主机备份来源配置")
+		restorePolicy := fs.String("restore-config", "", "宿主机数据库恢复策略；默认来源配置同目录 restore.json")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *dir == "" || *sources == "" || fs.NArg() != 0 {
+			return errors.New("请指定 --state-dir 和 --sources")
+		}
+		return backup.Tick(ctx, *dir, *sources, *restorePolicy)
+	case "restore":
+		file := fs.String("file", "", "加密备份文件")
+		key := fs.String("key-file", "", "单独保管的恢复密钥文件")
+		output := fs.String("output", "", "全新的恢复目录，不覆盖现有文件")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *file == "" || *key == "" || *output == "" || fs.NArg() != 0 {
+			return errors.New("请指定 --file、--key-file 和 --output")
+		}
+		if err := backup.Restore(ctx, *file, *key, *output); err != nil {
+			return err
+		}
+		fmt.Println("备份校验通过，已恢复到新目录；尚未启动任何服务。")
+		return nil
+	default:
+		return errors.New("未知备份命令")
+	}
 }
 
 func createAdmin(st *store.Store, args []string) error {

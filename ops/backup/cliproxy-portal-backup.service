@@ -1,0 +1,19 @@
+[Unit]
+Description=CLIProxy Portal encrypted backup runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/root/cliproxy-portal/dist/portal-linux-amd64 backup tick --state-dir /root/cliproxy-portal/data/backup --sources /etc/cliproxy-portal-backup/sources.json --restore-config /etc/cliproxy-portal-backup/restore.json
+TimeoutStartSec=25min
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+CPUQuota=50%
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/root/cliproxy-portal/data /root/cliproxy-portal/secrets /root/cpa-manager-plus -/var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data

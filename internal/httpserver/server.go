@@ -37,6 +37,7 @@ type Server struct {
 	limit        *limiter
 	systemMu     sync.RWMutex
 	systemChecks systemCheckSnapshot
+	backupMu     sync.Mutex
 }
 
 func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *service.Keys, secret []byte, logger *slog.Logger) (*Server, error) {
@@ -106,6 +107,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/logs/dialogue/{id}", s.withAdmin(s.downloadDialogue))
 	mux.HandleFunc("GET /admin/system", s.withAdmin(s.adminSystem))
 	mux.HandleFunc("POST /admin/system/check", s.withAdmin(s.adminSystem))
+	mux.HandleFunc("POST /admin/system/backup/run", s.withAdmin(s.adminBackupRun))
+	mux.HandleFunc("POST /admin/system/backup/settings", s.withAdmin(s.adminBackupSettings))
+	mux.HandleFunc("POST /admin/system/backup/key", s.withAdmin(s.adminBackupKey))
+	mux.HandleFunc("POST /admin/system/backup/restore", s.withAdmin(s.adminBackupRestore))
 	return s.recover(s.headers(s.logRequests(mux)))
 }
 

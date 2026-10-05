@@ -440,13 +440,16 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "操作日志") {
 		t.Fatalf("admin system page did not merge health and operation logs: %s", adminSystemPage)
 	}
-	for _, label := range []string{"门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志", "模型网关", "CPA 上游", "health-card-metric", "Key 对账"} {
+	for _, label := range []string{"门户 SQLite", "CPAMP SQLite", "其他存储", "交互记录", "日志", "模型网关", "CPA 上游", "health-card-metric", "Key 对账"} {
 		if !strings.Contains(adminSystemPage, label) {
 			t.Fatalf("admin system page missing %q: %s", label, adminSystemPage)
 		}
 	}
-	if got := strings.Count(adminSystemPage, `class="card health-card system-health-card`); got != 9 {
-		t.Fatalf("admin system page rendered %d cards, want six storage and three health cards", got)
+	if got := strings.Count(adminSystemPage, `class="card health-card system-health-card`); got != 6 {
+		t.Fatalf("admin system page rendered %d storage/health cards, want two databases, one combined storage and three health cards", got)
+	}
+	if strings.Count(adminSystemPage, `class="card backup-section"`) != 1 {
+		t.Fatal("storage section must have one full-width backup card")
 	}
 	adminCSRF = extract(t, adminSystemPage, `name="csrf_token" value="([^"]+)"`)
 	mu.Lock()

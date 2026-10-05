@@ -25,6 +25,8 @@ func TestAuditActionDisplay(t *testing.T) {
 		"user.password.reset": "重置密码", "user.phone.change": "修改手机号", "user.suspend": "停用用户",
 		"user.suspend.pending": "等待停用用户", "user.unsuspend": "恢复用户", "user.delete": "删除用户",
 		"user.delete.pending": "等待删除用户", "policy.publish": "发布使用规则", "registration.toggle": "修改注册设置",
+		"backup.restore.request": "请求恢复门户数据库", "backup.rebuild.request": "请求重建并恢复",
+		"backup.request": "请求备份", "backup.settings.update": "修改备份设置",
 	}
 	for action, want := range cases {
 		if got := auditActionDisplay(action); got != want {
@@ -51,6 +53,8 @@ func TestAuditTargetAndDetailDisplay(t *testing.T) {
 		{"user.approve", "user-1", "小王(138****1234)", "", "小王(138****1234)", "—"},
 		{"oauth_model.reasoning_caps.update", "codex", "codex", "gpt-6-luna: high → max", "Codex 模型", "gpt-6-luna: 高 → 最高"},
 		{"oauth_preset.apply", "日常", "日常", "OAuth 模型、模型别名映射及思考强度上限", "调用预设（日常）", "OAuth 模型、模型别名映射及思考强度上限"},
+		{"backup.request", "backup", "backup", "请求一次加密轻量备份，由宿主机任务执行", "backup", "请求一次加密备份，由宿主机任务执行"},
+		{"backup.settings.update", "backup", "backup", "修改轻量备份设置；令牌和恢复密钥不记入日志", "backup", "修改备份设置；令牌和恢复密钥不记入日志"},
 	}
 	for _, tc := range cases {
 		if got := auditTargetDisplay(tc.action, tc.id, tc.label); got != tc.targetWant {
@@ -59,6 +63,15 @@ func TestAuditTargetAndDetailDisplay(t *testing.T) {
 		if got := auditDetailDisplay(tc.action, tc.detail); got != tc.detailWant {
 			t.Errorf("detail %q = %q, want %q", tc.action, got, tc.detailWant)
 		}
+	}
+}
+
+func TestLegacyBackupAuditDisplayDoesNotRewriteStoredEvents(t *testing.T) {
+	s := &Server{}
+	items := []domain.AuditEvent{{Action: "backup.request", Detail: "请求一次加密轻量备份，由宿主机任务执行"}}
+	views := s.auditViews(context.Background(), items)
+	if len(views) != 1 || views[0].Action != "请求备份" || strings.Contains(views[0].Details, "轻量") || !strings.Contains(items[0].Detail, "轻量") {
+		t.Fatal("legacy backup wording must change only in display, not the immutable audit record")
 	}
 }
 

@@ -90,6 +90,34 @@ code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas
 .system-check-head > div { min-width: 0; }
 .system-check-head > form { flex: 0 0 auto; }
 .section-gap { margin-top: 20px; }
+.backup-section { container: backup-card / inline-size; min-width: 0; margin-top: 24px; padding: 22px 24px; }
+.backup-overview { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 24px; }
+.backup-overview > .button-row { flex: 0 0 auto; margin-left: auto; }
+.backup-status.detail-grid { flex: 1 1 560px; min-width: 0; grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(0, 1fr)); gap: 18px 24px; margin: 0; }
+@container backup-card (max-width: 900px) {
+  .backup-overview { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; }
+  .backup-status.detail-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .backup-status.detail-grid > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: baseline; gap: 16px; }
+  .backup-status.detail-grid dt { margin-bottom: 0; }
+  .backup-overview > .button-row { flex-wrap: nowrap; margin-left: 0; }
+}
+.backup-restore-status { margin-top: 15px; }
+.backup-restore-status p { margin: 6px 0 0; overflow-wrap: anywhere; }
+.backup-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; border: 1px solid var(--line); border-radius: 18px; padding: 24px; color: var(--text); background: var(--surface); box-shadow: 0 24px 80px rgba(20, 30, 60, .18); }
+.backup-dialog::backdrop { background: rgba(20, 30, 60, .35); }
+.backup-dialog h2 { margin-top: 0; }
+.backup-dialog form { display: grid; gap: 12px; margin-top: 20px; }
+.backup-dialog input { min-width: 0; max-width: 100%; }
+.backup-dialog .button-row { justify-content: flex-end; margin-top: 8px; }
+.backup-dialog .backup-confirm { display: flex; align-items: flex-start; gap: 8px; font-weight: 400; }
+.backup-dialog .backup-confirm input { width: auto; flex: none; margin-top: 4px; }
+.backup-settings { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.backup-settings summary { color: var(--text); font-size: 15px; font-weight: 650; cursor: pointer; }
+.backup-settings > .field-help { margin: 12px 0 0; }
+.backup-settings form .field-help { margin: 0; }
+.backup-schedule-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.backup-schedule-fields > div { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.backup-schedule-fields select, .backup-schedule-fields input[type="time"] { height: 44px; min-height: 44px; }
 .section { margin-top: 34px; }
 .grid { display: grid; gap: 18px; }
 .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -293,7 +321,7 @@ td small, td .muted { display: block; margin-top: 2px; }
 .dot { color: #bcc4d0; }
 .stack-form { display: grid; gap: 14px; }
 .stack-form label, .stack-form legend { display: grid; gap: 6px; color: #344054; font-size: 13px; font-weight: 620; }
-input[type="text"], input[type="tel"], input[type="password"], input[type="search"], input[type="date"], select, textarea { width: 100%; min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; outline: 0; }
+input[type="text"], input[type="tel"], input[type="password"], input[type="search"], input[type="date"], .backup-schedule-fields input[type="time"], select, textarea { width: 100%; min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; outline: 0; }
 textarea { min-height: 120px; resize: vertical; }
 input::placeholder, textarea::placeholder { color: #a1acba; }
 input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0 0 0 3px rgba(40,88,216,.11); }
@@ -684,6 +712,7 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .request-detail-table .request-model-cell { width: 20%; }
 .request-status-cell { width: 1%; min-width: 90px; }
 .request-download-cell { width: 1%; min-width: 100px; }
+.request-log-table th.request-download-cell, .request-log-table td.request-download-cell, .request-detail-table th.request-download-cell, .request-detail-table td.request-download-cell { padding-left: 0; padding-right: 16px; }
 .request-status-download { color: var(--primary); font-weight: 600; }
 .request-status-download:hover { color: var(--primary-dark); text-decoration: underline; }
 .request-status-detail { display: -webkit-box; max-width: 210px; max-height: 7em; margin-top: 4px; overflow: hidden; line-height: 1.4; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 5; }
@@ -720,6 +749,7 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .error-card h1 { margin: 14px 0 8px; }
 
 @media (max-width: 1080px) {
+  #storage .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }
   .dashboard-summary-grid > .summary-card:last-child,
   #health .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }
 }
@@ -763,6 +793,13 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .oauth-preset-save .button { width: 100%; justify-self: stretch; }
 }
 @media (max-width: 760px) {
+  .backup-section { padding: 16px; }
+  .backup-overview { display: block; }
+  .backup-status.detail-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .backup-status.detail-grid > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: baseline; gap: 12px; }
+  .backup-status.detail-grid dt { margin: 0; }
+  .backup-overview > .button-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0 0; }
+  .backup-overview > .button-row > .button { min-width: 0; width: 100%; }
   /* Only the narrow, stacked overview uses adaptive operation tiles. Keep
      the original compact controls in the medium and wide two-column view. */
   .admin-action-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }

@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="light">
   <title>{{if .Title}}{{.Title}} · {{end}}{{if .Brand}}{{.Brand}}{{else}}CLIProxy 账号门户{{end}}</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/static/style.css?v=20261005-16">
+  <link rel="stylesheet" href="/static/style.css?v=20261006-7">
 </head>
 <body>
   <a class="skip-link" href="#main">跳到主要内容</a>
@@ -78,6 +78,7 @@
   <script src="/static/app.js?v=20261005-3" defer></script>
   <script src="/static/quota-carousel.js?v=20261005-2" defer></script>
   {{if eq .ActiveNav "admin-upstreams"}}<script src="/static/masonry-sort.js?v=20261005-2" defer></script><script src="/static/upstream-channels.js?v=20261005-4" defer></script>{{end}}
+  {{if eq .ActiveNav "admin-system"}}<script src="/static/backup-controls.js?v=20261006-1" defer></script>{{end}}
 </body>
 </html>
 {{end}}

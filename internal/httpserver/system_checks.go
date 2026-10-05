@@ -46,3 +46,44 @@ func uncheckedSystemViews(names ...string) []webui.HealthCheckView {
 	}
 	return views
 }
+
+// Combine non-database storage using raw bytes, never rounded display strings.
+// Keep the underlying check snapshot intact for independent refreshes.
+func compactStorageViews(items []webui.HealthCheckView) []webui.HealthCheckView {
+	var result []webui.HealthCheckView
+	other := webui.HealthCheckView{Component: "其他存储", Status: "healthy", StatusLabel: "正常", Message: "交互记录、CPA 与容器日志合计", Metric: "—"}
+	complete, count := true, 0
+	var total int64
+	for _, item := range items {
+		if item.Component == "门户 SQLite" || item.Component == "CPAMP SQLite" {
+			result = append(result, item)
+			continue
+		}
+		count++
+		if item.CheckedAt != "" && (other.CheckedAt == "" || item.CheckedAt < other.CheckedAt) {
+			other.CheckedAt = item.CheckedAt
+		}
+		if item.Status == "error" {
+			other.Status, other.StatusLabel = "error", "异常"
+		} else if item.Status != "healthy" && other.Status != "error" {
+			other.Status, other.StatusLabel = "warning", "需关注"
+		}
+		if !item.StorageSizeKnown || item.StorageBytes < 0 || total > (1<<63-1)-item.StorageBytes {
+			complete = false
+			continue
+		}
+		total += item.StorageBytes
+	}
+	if count == 0 {
+		return result
+	}
+	if complete {
+		other.StorageBytes, other.StorageSizeKnown, other.Metric = total, true, fileSizeLabel(total)
+	} else {
+		other.Message = "交互记录及日志占用暂未全部获取"
+		if other.Status == "healthy" {
+			other.Status, other.StatusLabel = "warning", "需关注"
+		}
+	}
+	return append(result, other)
+}
