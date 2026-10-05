@@ -26,11 +26,12 @@ function setup(initial = 'codex') {
     addEventListener: (name, fn) => { events[name] = fn; },
   };
   const status = { textContent: '' };
+  const preset = { name: '日常', returnFields: [{ value: initial }, { value: initial }, { value: initial }] };
   let channel = initial;
   const page = {
     getAttribute: () => channel, setAttribute: (_, value) => { channel = value; },
     querySelector: s => s === '.upstream-channel-form' ? form : status,
-    querySelectorAll: () => panels,
+    querySelectorAll: selector => selector.includes('data-global-oauth-presets') ? preset.returnFields : panels,
   };
   // Switching must work offline, without fetch, DOMParser, or confirmation.
   vm.runInNewContext(script, {
@@ -46,7 +47,7 @@ function setup(initial = 'codex') {
     },
   });
   return {
-    panels, page, select, button, status, history, location,
+    panels, page, select, button, status, history, location, preset,
     choose(value) { select.value = value; events.change(); },
     submit(value) { select.value = value; let prevented = false; events.submit({ preventDefault() { prevented = true; } }); return prevented; },
     back(url) { location.href = url; windowEvents.popstate(); },
@@ -106,4 +107,15 @@ test('keyboard form submission switches locally and same-channel selection adds 
   f.choose('antigravity');
   assert.equal(f.history.length, 1);
   assert.equal(f.page.getAttribute('data-channel'), 'antigravity');
+});
+
+test('one shared preset name survives switching and only return fields change', () => {
+  const f = setup();
+  f.preset.name = '全渠道配置';
+  f.choose('antigravity');
+  assert.equal(f.preset.name, '全渠道配置');
+  assert.deepEqual(f.preset.returnFields.map(input => input.value), ['antigravity', 'antigravity', 'antigravity']);
+  f.back('https://portal.test/admin/upstreams?channel=codex');
+  assert.deepEqual(f.preset.returnFields.map(input => input.value), ['codex', 'codex', 'codex']);
+  assert.equal(f.preset.name, '全渠道配置');
 });

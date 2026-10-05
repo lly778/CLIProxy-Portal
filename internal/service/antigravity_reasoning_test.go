@@ -161,11 +161,11 @@ func TestAntigravityReasoningPresetRoundTrip(t *testing.T) {
 	if err := k.SetOAuthReasoningCaps(t.Context(), inputs, revision, "antigravity"); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := k.OAuthPresetSnapshot(t.Context(), "antigravity")
+	snapshot, err := k.OAuthPresetSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.ReasoningCaps) != 2 {
+	if len(snapshot.Channels[1].ReasoningCaps) != 2 {
 		t.Fatalf("snapshot %#v", snapshot)
 	}
 	if err := k.SetOAuthModelEnabled(t.Context(), "claude-budget", false, "antigravity"); err != nil {
@@ -178,7 +178,7 @@ func TestAntigravityReasoningPresetRoundTrip(t *testing.T) {
 	if err := k.ApplyOAuthPreset(t.Context(), snapshot); err != nil {
 		t.Fatal(err)
 	}
-	after, err := k.OAuthPresetSnapshot(t.Context(), "antigravity")
+	after, err := k.OAuthPresetSnapshot(t.Context())
 	if err != nil || !OAuthPresetSnapshotsEqual(snapshot, after) {
 		t.Fatalf("after=%#v err=%v", after, err)
 	}

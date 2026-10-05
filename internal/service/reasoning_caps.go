@@ -71,6 +71,12 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[
 // fields. Portal-managed rules are appended last within override-raw, so they
 // win over ordinary overrides without replacing lower requested efforts.
 func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {
+	k.presetMu.Lock()
+	defer k.presetMu.Unlock()
+	return k.setOAuthReasoningCaps(ctx, inputs, revision, channels...)
+}
+
+func (k *Keys) setOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {
 	channel, err := selectedOAuthChannel(channels)
 	if err != nil {
 		return err

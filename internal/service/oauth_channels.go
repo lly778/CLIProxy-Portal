@@ -67,15 +67,22 @@ func OAuthChannelLabel(channel string) string {
 // OAuthChannels discovers installed credential providers and configured channels.
 // Do not expose credentials or list providers not present on this CPA instance.
 func (k *Keys) OAuthChannels(ctx context.Context) ([]string, error) {
+	return k.oauthChannels(ctx, false)
+}
+
+// Mutating routing settings must not silently omit configured channels when
+// discovery fails. The read-only channel picker retains its fallback behavior.
+func (k *Keys) oauthChannels(ctx context.Context, strict bool) ([]string, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
-	if !ok {
-		return []string{"codex"}, nil
-	}
-	files, err := typed.ListAuthFiles(ctx)
-	if err != nil {
-		return nil, err
+	var files []cpamp.AuthFile
+	if ok {
+		var err error
+		files, err = typed.ListAuthFiles(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	found := map[string]bool{"codex": true}
 	add := func(value string) {
@@ -93,6 +100,9 @@ func (k *Keys) OAuthChannels(ctx context.Context) ([]string, error) {
 		ListOAuthChannels(context.Context) ([]string, error)
 	}); ok {
 		channels, err := client.ListOAuthChannels(ctx)
+		if strict && err != nil {
+			return nil, err
+		}
 		// Credential discovery still works when a configuration endpoint is
 		// temporarily unavailable. Model/alias reads report their own errors.
 		if err == nil {

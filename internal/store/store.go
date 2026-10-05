@@ -36,7 +36,6 @@ type PasswordReset struct {
 }
 
 type OAuthPreset struct {
-	Channel   string
 	ID        string
 	Name      string
 	Payload   string

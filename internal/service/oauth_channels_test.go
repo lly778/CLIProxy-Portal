@@ -185,11 +185,11 @@ func TestOAuthChannelDisableAndRollbackNeverTouchCodex(t *testing.T) {
 	}
 }
 
-func TestOAuthChannelPresetSnapshotAndApplyAreIsolated(t *testing.T) {
+func TestOAuthPresetIncludesAndRestoresBothChannels(t *testing.T) {
 	f := newChannelCPAMP()
 	k := NewKeys(nil, f)
-	snapshot, err := k.OAuthPresetSnapshot(t.Context(), "antigravity")
-	if err != nil || snapshot.Channel != "antigravity" || len(snapshot.ReasoningCaps) != 0 {
+	snapshot, err := k.OAuthPresetSnapshot(t.Context())
+	if err != nil || len(snapshot.Channels) != 2 || snapshot.Channels[1].Channel != "antigravity" || len(snapshot.Channels[1].ReasoningCaps) != 0 {
 		t.Fatalf("snapshot=%+v err=%v", snapshot, err)
 	}
 	if err := k.SetOAuthModelEnabled(t.Context(), "shared", false, "antigravity"); err != nil {
@@ -198,32 +198,26 @@ func TestOAuthChannelPresetSnapshotAndApplyAreIsolated(t *testing.T) {
 	if err := k.ApplyOAuthPreset(t.Context(), snapshot); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := k.OAuthPresetSnapshot(t.Context(), "antigravity")
+	restored, err := k.OAuthPresetSnapshot(t.Context())
 	if err != nil || !OAuthPresetSnapshotsEqual(snapshot, restored) {
 		t.Fatalf("restored=%+v err=%v", restored, err)
 	}
 	if f.configWrites != 0 || len(f.aliases["codex"]) != 1 || !reflect.DeepEqual(f.excluded["codex"], []string{"codex-hidden"}) {
 		t.Fatal("Codex config changed")
 	}
-	foreign := snapshot
-	foreign.Channel = "codex"
-	if OAuthPresetSnapshotsEqual(snapshot, foreign) {
-		t.Fatal("presets from different channels matched")
-	}
 	legacy := OAuthPresetSnapshot{Version: 1}
-	modern := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channel: "codex"}
+	modern := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channels: []OAuthChannelPreset{{Channel: "codex"}}}
 	if OAuthPresetSnapshotsEqual(legacy, modern) {
 		t.Fatal("legacy preset treated as current format")
 	}
 	if err := k.ApplyOAuthPreset(t.Context(), legacy); err == nil {
 		t.Fatal("legacy preset accepted")
 	}
-	missingChannel := modern
-	missingChannel.Channel = ""
+	missingChannel := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channels: []OAuthChannelPreset{{}}}
 	if err := k.ApplyOAuthPreset(t.Context(), missingChannel); err == nil {
 		t.Fatal("missing channel accepted as Codex")
 	}
-	snapshot.ReasoningCaps = map[string]string{"shared": "high"}
+	snapshot.Channels[1].ReasoningCaps = map[string]string{"shared": "high"}
 	writes := len(f.writes)
 	if err := k.ApplyOAuthPreset(t.Context(), snapshot); err == nil || len(f.writes) != writes {
 		t.Fatal("unsupported reasoning preset was applied")

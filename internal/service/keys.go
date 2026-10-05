@@ -1159,6 +1159,12 @@ func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 // original ID alongside aliases; force-mapping keeps alias responses labelled
 // with the client-facing name.
 func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, channels ...string) error {
+	k.presetMu.Lock()
+	defer k.presetMu.Unlock()
+	return k.setOAuthModelAliases(ctx, inputs, revision, true, channels...)
+}
+
+func (k *Keys) setOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, checkCrossChannel bool, channels ...string) error {
 	channel, err := selectedOAuthChannel(channels)
 	if err != nil {
 		return err
@@ -1261,6 +1267,11 @@ func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAlia
 	if err := validateOAuthAliasNames(models, next); err != nil {
 		return err
 	}
+	if checkCrossChannel {
+		if err := k.validateCrossChannelAliases(ctx, channel, models, next); err != nil {
+			return err
+		}
+	}
 	if oauthAliasRevision(next) == oauthAliasRevision(current) {
 		return nil
 	}
@@ -1354,6 +1365,12 @@ func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthMo
 // SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
 // remain untouched because changing one would alter multiple model switches.
 func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool, channels ...string) error {
+	k.presetMu.Lock()
+	defer k.presetMu.Unlock()
+	return k.setOAuthModelEnabled(ctx, modelID, enabled, true, channels...)
+}
+
+func (k *Keys) setOAuthModelEnabled(ctx context.Context, modelID string, enabled, checkCrossChannel bool, channels ...string) error {
 	channel, err := selectedOAuthChannel(channels)
 	if err != nil {
 		return err
@@ -1409,6 +1426,11 @@ func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		}
 		if err := validateOAuthAliasNames(settings, aliases); err != nil {
 			return fmt.Errorf("无法启用模型：%w", err)
+		}
+		if checkCrossChannel {
+			if err := k.validateCrossChannelAliases(ctx, channel, settings, aliases); err != nil {
+				return fmt.Errorf("无法启用模型：%w", err)
+			}
 		}
 	}
 	next := make([]string, 0, len(rules)+1)

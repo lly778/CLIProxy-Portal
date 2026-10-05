@@ -24,24 +24,24 @@ func (f *presetCPAMP) PutConfigYAML(ctx context.Context, data []byte) error {
 }
 
 func TestOAuthPresetSnapshotsEqual(t *testing.T) {
-	left := OAuthPresetSnapshot{
+	leftChannel := OAuthChannelPreset{
 		Channel:       "codex",
-		Version:       OAuthPresetVersion,
 		Models:        []OAuthPresetModel{{ID: "gpt-b", Enabled: false}, {ID: "GPT-A", Enabled: true}},
 		Aliases:       []cpamp.OAuthModelAlias{{Name: "GPT-A", Alias: "client-a", Fork: true}},
 		ReasoningCaps: map[string]string{"GPT-A": "HIGH", "gpt-b": ""},
 	}
-	right := OAuthPresetSnapshot{
+	rightChannel := OAuthChannelPreset{
 		Channel:       "codex",
-		Version:       OAuthPresetVersion,
 		Models:        []OAuthPresetModel{{ID: "gpt-a", Enabled: true}, {ID: "GPT-B", Enabled: false}},
 		Aliases:       []cpamp.OAuthModelAlias{{Name: "gpt-a", Alias: "CLIENT-A", Fork: true}},
 		ReasoningCaps: map[string]string{"gpt-a": "high"},
 	}
+	left := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channels: []OAuthChannelPreset{leftChannel}}
+	right := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channels: []OAuthChannelPreset{rightChannel}}
 	if !OAuthPresetSnapshotsEqual(left, right) {
 		t.Fatal("equivalent snapshots should match")
 	}
-	right.ReasoningCaps["gpt-a"] = "medium"
+	right.Channels[0].ReasoningCaps["gpt-a"] = "medium"
 	if OAuthPresetSnapshotsEqual(left, right) {
 		t.Fatal("different reasoning caps should not match")
 	}
@@ -217,7 +217,7 @@ func TestOAuthPresetSnapshotAndApplyRestoresAllManagedAreas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Models) != 2 || len(snapshot.Aliases) != 1 || snapshot.ReasoningCaps["gpt-alpha"] != "high" {
+	if len(snapshot.Channels) != 1 || len(snapshot.Channels[0].Models) != 2 || len(snapshot.Channels[0].Aliases) != 1 || snapshot.Channels[0].ReasoningCaps["gpt-alpha"] != "high" {
 		t.Fatalf("snapshot=%#v", snapshot)
 	}
 

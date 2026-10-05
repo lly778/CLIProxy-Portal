@@ -2,9 +2,10 @@
 <div data-upstream-channel-page data-channel="{{.Channel}}">
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">按 OAuth 渠道管理上游凭证、模型启停及用户侧别名。更改会影响该渠道的后续请求调度。</p></div><form method="get" action="/admin/upstreams" class="inline-form upstream-channel-form"><label><span class="sr-only">OAuth 渠道</span><select name="channel" aria-label="OAuth 渠道">{{range .Channels}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="button secondary" type="submit">切换渠道</button></form></div>
 <p class="sr-only" data-channel-switch-status role="status" aria-live="polite"></p>
+{{template "upstream-presets" .}}
 {{if .ChannelPanels}}{{range .ChannelPanels}}
-<div data-upstream-channel-panel data-channel="{{.Channel}}" {{if ne .Channel $.Channel}}hidden{{end}}>{{template "upstream-channel-cards" .}}</div>
-{{end}}{{else}}<div data-upstream-channel-panel data-channel="{{.Channel}}">{{template "upstream-channel-cards" .}}</div>{{end}}
+<div class="section-gap" data-upstream-channel-panel data-channel="{{.Channel}}" {{if ne .Channel $.Channel}}hidden{{end}}>{{template "upstream-channel-cards" .}}</div>
+{{end}}{{else}}<div class="section-gap" data-upstream-channel-panel data-channel="{{.Channel}}">{{template "upstream-channel-cards" .}}</div>{{end}}
 </div>
 {{end}}
 
@@ -33,8 +34,12 @@
     {{end}}
   </div>
 </section>
-<section class="card upstream-card section-gap">
-  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复当前渠道的模型、别名{{if or (eq .Channel "") (eq .Channel "codex") (eq .Channel "antigravity")}}及思考强度上限{{end}}；每个渠道最多 20 个，同渠道同名保存会更新现有预设。</p></div><div class="oauth-preset-tools"><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
+{{template "upstream-model-cards" .}}
+{{end}}
+
+{{define "upstream-presets"}}
+<section class="card upstream-card" data-global-oauth-presets>
+  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复所有渠道的模型、别名及支持渠道的思考强度上限；共用最多 20 个预设，同名保存会更新现有预设。</p></div><div class="oauth-preset-tools"><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{.Channel}}">
     <label><span class="sr-only">预设名称</span><input type="text" name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required></label>
     <button class="button primary" type="submit">保存当前配置</button>
@@ -45,19 +50,21 @@
       <div class="oauth-preset-main"><div class="oauth-preset-card-head"><div class="oauth-preset-title"><strong>{{.Name}}</strong><span class="muted small">{{.Summary}}</span></div>
         <div class="oauth-preset-actions">
           {{if .Applied}}<span class="badge success">已应用</span>{{end}}
-          <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？当前渠道的模型、别名{{if or (eq $.Channel "") (eq $.Channel "codex") (eq $.Channel "antigravity")}}及思考强度上限{{end}}将被替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button secondary" type="submit">应用</button></form>
+          <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？预设记录的所有渠道模型、别名及思考强度上限将一起替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button secondary" type="submit">应用</button></form>
           <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button danger-outline" type="submit">删除</button></form>
         </div>
       </div><div class="oauth-preset-details">
         <div><span class="oauth-preset-detail-label">启用模型</span><div class="oauth-preset-values">{{range .EnabledModels}}<code class="oauth-preset-value success">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
-        <div><span class="oauth-preset-detail-label">停用模型</span><div class="oauth-preset-values">{{range .DisabledModels}}<code class="oauth-preset-value neutral">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
         <div><span class="oauth-preset-detail-label">别名映射</span><div class="oauth-preset-values">{{range .AliasMappings}}<code class="oauth-preset-value alias">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
         <div><span class="oauth-preset-detail-label">保留原名</span><div class="oauth-preset-values">{{range .OriginalModels}}<code class="oauth-preset-value success">{{.}}</code>{{else}}<span class="muted small">无</span>{{end}}</div></div>
-        {{if or (eq $.Channel "") (eq $.Channel "codex") (eq $.Channel "antigravity")}}<div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>{{end}}
+        <div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>
       </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
     </article>{{end}}
-  </div>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存当前渠道的调用配置。</p></div>{{end}}{{end}}
+  </div>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存所有渠道的调用配置。</p></div>{{end}}{{end}}
 </section>
+{{end}}
+
+{{define "upstream-model-cards"}}
 <section class="card upstream-card section-gap">
   <div class="section-head compact"><div><h2>OAuth 模型</h2><p class="muted small">控制 {{.ChannelLabel}} OAuth 路由是否使用某个模型。</p></div></div>
   {{if .ModelError}}<div class="alert danger" role="alert">{{.ModelError}}</div>{{end}}
@@ -113,7 +120,7 @@
     <input type="hidden" name="reasoning_revision" value="{{.ReasoningRevision}}">
     <div class="reasoning-cap-list">
       {{range $index, $model := .ReasoningModels}}
-      <label class="reasoning-cap-row"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></label>
+      <label class="reasoning-cap-row"><span class="reasoning-cap-fields"><span class="mono">{{$model.ID}}</span><span class="sr-only">{{$model.ID}} 的最高思考强度</span><select name="cap_{{$index}}">{{range $model.Options}}<option value="{{.Value}}" {{if .Selected}}selected{{end}}>{{.Label}}</option>{{end}}</select><input type="hidden" name="model" value="{{$model.ID}}"></span></label>
       {{end}}
     </div>
   </form>

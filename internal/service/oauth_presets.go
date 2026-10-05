@@ -10,13 +10,17 @@ import (
 	"cliproxy-portal/internal/cpamp"
 )
 
-const OAuthPresetVersion = 2
+const OAuthPresetVersion = 3
 
-// OAuthPresetSnapshot is the portable, credential-free part of channel-scoped OAuth routing
-// managed by the portal. It deliberately excludes OAuth credentials.
+// OAuthPresetSnapshot stores portal-managed routing across OAuth channels,
+// deliberately excluding credentials and all non-portal CPA configuration.
 type OAuthPresetSnapshot struct {
+	Version  int                  `json:"version"`
+	Channels []OAuthChannelPreset `json:"channels"`
+}
+
+type OAuthChannelPreset struct {
 	Channel       string                  `json:"channel"`
-	Version       int                     `json:"version"`
 	Models        []OAuthPresetModel      `json:"models"`
 	Aliases       []cpamp.OAuthModelAlias `json:"aliases,omitempty"`
 	ReasoningCaps map[string]string       `json:"reasoning_caps,omitempty"`
@@ -28,12 +32,7 @@ type OAuthPresetModel struct {
 	WildcardRule string `json:"wildcard_rule,omitempty"`
 }
 
-// OAuthPresetChannel accepts only the current, explicitly channel-scoped format.
-// Legacy data is upgraded once by the store migration, not interpreted here.
-func OAuthPresetChannel(snapshot OAuthPresetSnapshot) (string, error) {
-	if snapshot.Version != OAuthPresetVersion {
-		return "", errors.New("预设版本不受支持，请重新保存")
-	}
+func oauthPresetChannel(snapshot OAuthChannelPreset) (string, error) {
 	if strings.TrimSpace(snapshot.Channel) == "" {
 		return "", errors.New("预设缺少 OAuth 渠道，请重新保存")
 	}
@@ -42,28 +41,28 @@ func OAuthPresetChannel(snapshot OAuthPresetSnapshot) (string, error) {
 
 // OAuthPresetSnapshot reads a consistent-enough configuration snapshot. Every
 // subsequent apply is validated again against the current CPA model catalog.
-func (k *Keys) OAuthPresetSnapshot(ctx context.Context, channels ...string) (OAuthPresetSnapshot, error) {
-	channel, err := selectedOAuthChannel(channels)
+func (k *Keys) oauthChannelPresetSnapshot(ctx context.Context, channel string) (OAuthChannelPreset, error) {
+	channel, err := NormalizeOAuthChannel(channel)
 	if err != nil {
-		return OAuthPresetSnapshot{}, err
+		return OAuthChannelPreset{}, err
 	}
 	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {
-		return OAuthPresetSnapshot{}, err
+		return OAuthChannelPreset{}, err
 	}
 	aliases, _, err := k.OAuthModelAliases(ctx, channel)
 	if err != nil {
-		return OAuthPresetSnapshot{}, err
+		return OAuthChannelPreset{}, err
 	}
 	caps := map[string]string{}
 	if channel == "codex" || channel == "antigravity" {
 		caps, _, err = k.OAuthReasoningCaps(ctx, channel)
 		if err != nil {
-			return OAuthPresetSnapshot{}, err
+			return OAuthChannelPreset{}, err
 		}
 	}
 	known := make(map[string]OAuthModelSetting, len(models))
-	snapshot := OAuthPresetSnapshot{Channel: channel, Version: OAuthPresetVersion, ReasoningCaps: make(map[string]string)}
+	snapshot := OAuthChannelPreset{Channel: channel, ReasoningCaps: make(map[string]string)}
 	for _, model := range models {
 		key := strings.ToLower(strings.TrimSpace(model.ID))
 		known[key] = model
@@ -83,7 +82,7 @@ func (k *Keys) OAuthPresetSnapshot(ctx context.Context, channels ...string) (OAu
 	return snapshot, nil
 }
 
-func canonicalizeOAuthPreset(snapshot *OAuthPresetSnapshot) {
+func canonicalizeOAuthPreset(snapshot *OAuthChannelPreset) {
 	sort.Slice(snapshot.Models, func(i, j int) bool {
 		return strings.ToLower(snapshot.Models[i].ID) < strings.ToLower(snapshot.Models[j].ID)
 	})
@@ -99,15 +98,15 @@ func canonicalizeOAuthPreset(snapshot *OAuthPresetSnapshot) {
 // OAuthPresetSnapshotsEqual reports whether two snapshots describe the same
 // portal-managed routing configuration. It intentionally ignores ordering and
 // harmless casing differences in model and alias names.
-func OAuthPresetSnapshotsEqual(left, right OAuthPresetSnapshot) bool {
-	leftChannel, leftErr := OAuthPresetChannel(left)
-	rightChannel, rightErr := OAuthPresetChannel(right)
+func oauthChannelPresetsEqual(left, right OAuthChannelPreset) bool {
+	leftChannel, leftErr := oauthPresetChannel(left)
+	rightChannel, rightErr := oauthPresetChannel(right)
 	if leftErr != nil || rightErr != nil || leftChannel != rightChannel {
 		return false
 	}
 	canonicalizeOAuthPreset(&left)
 	canonicalizeOAuthPreset(&right)
-	if left.Version != right.Version || len(left.Models) != len(right.Models) || len(left.Aliases) != len(right.Aliases) {
+	if len(left.Models) != len(right.Models) || len(left.Aliases) != len(right.Aliases) {
 		return false
 	}
 	for i := range left.Models {
@@ -149,35 +148,8 @@ func normalizedReasoningCaps(caps map[string]string) map[string]string {
 	return normalized
 }
 
-// ApplyOAuthPreset replaces the three portal-managed routing areas together.
-// If an operation fails, it makes a best-effort rollback to the snapshot read
-// immediately before applying the preset.
-func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
-	k.presetMu.Lock()
-	defer k.presetMu.Unlock()
-
-	channel, err := OAuthPresetChannel(requested)
-	if err != nil {
-		return err
-	}
-	current, err := k.OAuthPresetSnapshot(ctx, channel)
-	if err != nil {
-		return fmt.Errorf("读取当前调用配置失败：%w", err)
-	}
-	if err := k.validateOAuthPreset(ctx, requested); err != nil {
-		return err
-	}
-	if err := k.applyOAuthPreset(ctx, requested); err != nil {
-		if rollbackErr := k.applyOAuthPreset(ctx, current); rollbackErr != nil {
-			return fmt.Errorf("应用预设失败：%v；恢复原配置也失败：%w", err, rollbackErr)
-		}
-		return fmt.Errorf("应用预设失败，已恢复原配置：%w", err)
-	}
-	return nil
-}
-
-func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapshot) error {
-	channel, err := OAuthPresetChannel(snapshot)
+func (k *Keys) validateOAuthChannelPreset(ctx context.Context, snapshot OAuthChannelPreset) error {
+	channel, err := oauthPresetChannel(snapshot)
 	if err != nil {
 		return err
 	}
@@ -204,12 +176,21 @@ func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnap
 		}
 		target[key] = model
 	}
+	seenAliases := map[string]bool{}
+	aliasCounts := map[string]int{}
 	for _, alias := range snapshot.Aliases {
 		owner := strings.ToLower(strings.TrimSpace(alias.Name))
 		model, exists := target[owner]
 		if !exists || !model.Enabled {
 			return fmt.Errorf("预设中的别名 %s 所属模型不可用", strings.TrimSpace(alias.Alias))
 		}
+		name := strings.TrimSpace(alias.Alias)
+		key := owner + "\x00" + strings.ToLower(name)
+		aliasCounts[owner]++
+		if len(name) > 128 || !oauthAliasIDPattern.MatchString(name) || seenAliases[key] || aliasCounts[owner] > 32 {
+			return fmt.Errorf("预设中的模型 %s 别名无效或重复", alias.Name)
+		}
+		seenAliases[key] = true
 	}
 	settings := make([]OAuthModelSetting, 0, len(models))
 	for _, live := range models {
@@ -232,8 +213,8 @@ func (k *Keys) validateOAuthPreset(ctx context.Context, snapshot OAuthPresetSnap
 	return nil
 }
 
-func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapshot) error {
-	channel, err := OAuthPresetChannel(snapshot)
+func (k *Keys) applyOAuthChannelPreset(ctx context.Context, snapshot OAuthChannelPreset) error {
+	channel, err := oauthPresetChannel(snapshot)
 	if err != nil {
 		return err
 	}
@@ -253,7 +234,10 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 			clearInputs = append(clearInputs, OAuthModelAliasInput{Model: model.ID, KeepOriginal: true})
 		}
 	}
-	if err := k.SetOAuthModelAliases(ctx, clearInputs, aliasRevision, channel); err != nil {
+	// ApplyOAuthPreset holds presetMu and has checked the final target state.
+	// Intermediate clear/enable steps and rollback may temporarily expose names
+	// that the final alias settings hide; do not validate those transient states.
+	if err := k.setOAuthModelAliases(ctx, clearInputs, aliasRevision, false, channel); err != nil {
 		return err
 	}
 
@@ -263,7 +247,7 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 	}
 	for _, model := range models {
 		if model.Enabled && !target[strings.ToLower(model.ID)].Enabled {
-			if err := k.SetOAuthModelEnabled(ctx, model.ID, false, channel); err != nil {
+			if err := k.setOAuthModelEnabled(ctx, model.ID, false, false, channel); err != nil {
 				return err
 			}
 		}
@@ -274,7 +258,7 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 	}
 	for _, model := range models {
 		if !model.Enabled && target[strings.ToLower(model.ID)].Enabled {
-			if err := k.SetOAuthModelEnabled(ctx, model.ID, true, channel); err != nil {
+			if err := k.setOAuthModelEnabled(ctx, model.ID, true, false, channel); err != nil {
 				return err
 			}
 		}
@@ -310,7 +294,7 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 	if err != nil {
 		return err
 	}
-	if err := k.SetOAuthModelAliases(ctx, inputs, aliasRevision, channel); err != nil {
+	if err := k.setOAuthModelAliases(ctx, inputs, aliasRevision, false, channel); err != nil {
 		return err
 	}
 
@@ -327,5 +311,5 @@ func (k *Keys) applyOAuthPreset(ctx context.Context, snapshot OAuthPresetSnapsho
 			reasoningInputs = append(reasoningInputs, ReasoningCapInput{Model: model.ID, Cap: snapshot.ReasoningCaps[strings.ToLower(model.ID)]})
 		}
 	}
-	return k.SetOAuthReasoningCaps(ctx, reasoningInputs, reasoningRevision, channel)
+	return k.setOAuthReasoningCaps(ctx, reasoningInputs, reasoningRevision, channel)
 }

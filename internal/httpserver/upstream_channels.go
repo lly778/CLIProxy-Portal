@@ -49,10 +49,3 @@ func upstreamRedirectURL(channel, key, message string) string {
 	}
 	return target
 }
-
-func reasoningPresetAuditSuffix(channel string) string {
-	if channel == "codex" || channel == "antigravity" {
-		return "及思考强度上限"
-	}
-	return ""
-}

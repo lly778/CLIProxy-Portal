@@ -54,9 +54,6 @@ func (f *upstreamChannelAPI) ListOAuthExcludedModels(_ context.Context, channel 
 	return f.excluded[channel], nil
 }
 func (f *upstreamChannelAPI) SetOAuthExcludedModels(_ context.Context, channel string, values []string) error {
-	if channel != "antigravity" {
-		panic("foreign model write")
-	}
 	f.excluded[channel] = values
 	return nil
 }
@@ -64,9 +61,6 @@ func (f *upstreamChannelAPI) ListOAuthModelAliases(_ context.Context, channel st
 	return f.aliases[channel], nil
 }
 func (f *upstreamChannelAPI) SetOAuthModelAliases(_ context.Context, channel string, values []cpamp.OAuthModelAlias) error {
-	if channel != "antigravity" {
-		panic("foreign alias write")
-	}
 	f.aliases[channel] = values
 	return nil
 }
@@ -165,29 +159,38 @@ func TestAdminUpstreamChannelFormsAndIsolation(t *testing.T) {
 	if len(fake.aliases["antigravity"]) != 1 {
 		t.Fatal("alias was not saved")
 	}
-	// Both channels may save the same preset name.
-	codexPayload, _ := json.Marshal(service.OAuthPresetSnapshot{Version: service.OAuthPresetVersion, Channel: "codex", Models: []service.OAuthPresetModel{{ID: "codex-model", Enabled: true}}})
+	// All channel screens use one shared preset name and snapshot.
+	codexSnapshot, err := keys.OAuthPresetSnapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	codexPayload, _ := json.Marshal(codexSnapshot)
 	if _, err := st.SaveOAuthPreset(t.Context(), store.OAuthPreset{ID: "codex-preset", Name: "日常", Payload: string(codexPayload)}); err != nil {
 		t.Fatal(err)
 	}
 	post("/admin/upstreams/presets/save", url.Values{"name": {"日常"}})
-	antiPresets, err := st.ListOAuthPresets(t.Context(), "antigravity")
-	if err != nil || len(antiPresets) != 1 {
+	antiPresets, err := st.ListOAuthPresets(t.Context())
+	if err != nil || len(antiPresets) != 1 || antiPresets[0].ID != "codex-preset" {
 		t.Fatalf("presets=%v err=%v", antiPresets, err)
 	}
-	// A forged foreign preset ID must not delete or apply its configuration.
-	for _, action := range []string{"delete", "apply"} {
-		post("/admin/upstreams/presets/codex-preset/"+action, url.Values{})
-		if _, err := st.OAuthPreset(t.Context(), "codex-preset"); err != nil {
-			t.Fatal("foreign preset deleted")
-		}
+	var saved service.OAuthPresetSnapshot
+	if json.Unmarshal([]byte(antiPresets[0].Payload), &saved) != nil || len(saved.Channels) != 2 {
+		t.Fatal("save omitted a channel")
 	}
+	page = getBody(t, client, portal.URL+"/admin/upstreams?channel=codex", http.StatusOK)
+	if strings.Count(page, `action="/admin/upstreams/presets/save"`) != 1 || !strings.Contains(page, "日常") || !strings.Contains(page, "Codex · codex-model") || !strings.Contains(page, "Antigravity · antigravity-model") {
+		t.Fatal("global preset must appear once with channel-qualified details")
+	}
+	fake.excluded["codex"] = []string{"codex-model"}
 	post("/admin/upstreams/models/status", url.Values{"model": {"antigravity-model"}, "enabled": {"false"}})
 	post("/admin/upstreams/presets/"+antiPresets[0].ID+"/apply", url.Values{})
-	if len(fake.excluded["antigravity"]) != 0 || len(fake.aliases["antigravity"]) != 1 {
-		t.Fatal("selected-channel preset not restored")
+	if len(fake.excluded["antigravity"]) != 0 || len(fake.aliases["antigravity"]) != 1 || len(fake.excluded["codex"]) != 0 {
+		t.Fatal("global preset did not restore both channels")
 	}
 	post("/admin/upstreams/presets/"+antiPresets[0].ID+"/delete", url.Values{})
+	if list, err := st.ListOAuthPresets(t.Context()); err != nil || len(list) != 0 {
+		t.Fatal("global preset was not deleted")
+	}
 	page = getBody(t, client, portal.URL+"/admin/upstreams?channel=antigravity", http.StatusOK)
 	reasoningRevision := extract(t, panelBody(page, "antigravity"), `name="reasoning_revision" value="([^"]+)"`)
 	post("/admin/upstreams/models/reasoning", url.Values{"model": {"antigravity-model"}, "cap_0": {"low"}, "reasoning_revision": {reasoningRevision}})

@@ -610,6 +610,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 	layout := s.layout(currentUser(r), currentToken(r), "上游管理", "admin-upstreams")
 	v := s.adminUpstreamChannelView(r, channel, layout, true)
+	s.loadOAuthPresetViews(r, &v)
 	if r.Header.Get("X-Upstream-Channel-Only") == "true" {
 		_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
 		return
@@ -644,64 +645,6 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {
 	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity"}
-	currentPreset, currentPresetErr := s.Keys.OAuthPresetSnapshot(r.Context(), channel)
-	presets, presetErr := s.Store.ListOAuthPresets(r.Context(), channel)
-	if presetErr != nil {
-		v.PresetError = "调用预设暂时不可用"
-		s.Logger.Error("list OAuth presets", "error", presetErr)
-	} else {
-		for _, preset := range presets {
-			var snapshot service.OAuthPresetSnapshot
-			summary := "预设内容无法解析"
-			row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt)}
-			if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil && snapshot.Version == service.OAuthPresetVersion && snapshot.Channel == channel {
-				row.Applied = currentPresetErr == nil && service.OAuthPresetSnapshotsEqual(currentPreset, snapshot)
-				enabled := 0
-				canonical := make(map[string]string, len(snapshot.Models))
-				for _, model := range snapshot.Models {
-					canonical[strings.ToLower(model.ID)] = model.ID
-					if model.Enabled {
-						enabled++
-						row.EnabledModels = append(row.EnabledModels, model.ID)
-					} else {
-						row.DisabledModels = append(row.DisabledModels, model.ID)
-					}
-				}
-				aliasCount := make(map[string]int, len(snapshot.Aliases))
-				keepOriginal := make(map[string]bool, len(snapshot.Aliases))
-				for _, alias := range snapshot.Aliases {
-					row.AliasMappings = append(row.AliasMappings, alias.Alias+" → "+alias.Name)
-					modelID := strings.ToLower(alias.Name)
-					aliasCount[modelID]++
-					keepOriginal[modelID] = keepOriginal[modelID] || alias.Fork
-				}
-				for _, model := range snapshot.Models {
-					modelID := strings.ToLower(model.ID)
-					if model.Enabled && (aliasCount[modelID] == 0 || keepOriginal[modelID]) {
-						row.OriginalModels = append(row.OriginalModels, model.ID)
-					}
-				}
-				capModels := make([]string, 0, len(snapshot.ReasoningCaps))
-				for model := range snapshot.ReasoningCaps {
-					capModels = append(capModels, model)
-				}
-				sort.Strings(capModels)
-				for _, model := range capModels {
-					name := canonical[strings.ToLower(model)]
-					if name == "" {
-						name = model
-					}
-					row.ReasoningCaps = append(row.ReasoningCaps, name+" · "+reasoningEffortLabel(snapshot.ReasoningCaps[model]))
-				}
-				summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", enabled, len(snapshot.Models), len(snapshot.Aliases), len(snapshot.ReasoningCaps))
-				if !v.SupportsReasoning {
-					summary = fmt.Sprintf("启用 %d/%d 个模型 · %d 条别名", enabled, len(snapshot.Models), len(snapshot.Aliases))
-				}
-			}
-			row.Summary = summary
-			v.Presets = append(v.Presets, row)
-		}
-	}
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil && v.SupportsQuota {
@@ -868,7 +811,7 @@ func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "预设名称须为 1 至 40 个字符"), http.StatusSeeOther)
 		return
 	}
-	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context(), channel)
+	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context())
 	if err != nil {
 		s.Logger.Error("capture OAuth preset", "error", err)
 		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "读取当前调用配置失败："+err.Error()), http.StatusSeeOther)
@@ -885,7 +828,7 @@ func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := currentUser(r)
-	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Channel: channel, Name: name, Payload: string(payload), UpdatedBy: u.Name})
+	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Name: name, Payload: string(payload), UpdatedBy: u.Name})
 	if err != nil {
 		message := "保存调用预设失败"
 		if strings.Contains(err.Error(), "limit") {
@@ -894,7 +837,7 @@ func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", message), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, u, "oauth_preset.save", saved.Name, service.OAuthChannelLabel(channel)+"；OAuth 模型、模型别名映射"+reasoningPresetAuditSuffix(channel))
+	s.audit(r, u, "oauth_preset.save", saved.Name, "跨渠道；OAuth 模型、模型别名映射及思考强度上限")
 	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已保存"), http.StatusSeeOther)
 }
 
@@ -908,8 +851,8 @@ func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
-	if err != nil || preset.Channel != channel {
-		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在或不属于当前渠道"), http.StatusSeeOther)
+	if err != nil {
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在"), http.StatusSeeOther)
 		return
 	}
 	var snapshot service.OAuthPresetSnapshot
@@ -917,9 +860,8 @@ func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设内容无效"), http.StatusSeeOther)
 		return
 	}
-	snapshotChannel, channelErr := service.OAuthPresetChannel(snapshot)
-	if channelErr != nil || snapshotChannel != channel {
-		s.errorPage(w, r, http.StatusBadRequest, "预设渠道不匹配", nil)
+	if err := service.ValidateOAuthPresetFormat(snapshot); err != nil {
+		s.errorPage(w, r, http.StatusBadRequest, "调用预设内容无效", err)
 		return
 	}
 	if err := s.Keys.ApplyOAuthPreset(r.Context(), snapshot); err != nil {
@@ -927,7 +869,7 @@ func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", err.Error()), http.StatusSeeOther)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_preset.apply", preset.Name, service.OAuthChannelLabel(channel)+"；OAuth 模型、模型别名映射"+reasoningPresetAuditSuffix(channel))
+	s.audit(r, currentUser(r), "oauth_preset.apply", preset.Name, "跨渠道；OAuth 模型、模型别名映射及思考强度上限")
 	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已应用"), http.StatusSeeOther)
 }
 
@@ -941,15 +883,15 @@ func (s *Server) adminOAuthPresetDelete(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	preset, err := s.Store.OAuthPreset(r.Context(), r.PathValue("id"))
-	if err != nil || preset.Channel != channel {
-		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在或不属于当前渠道"), http.StatusSeeOther)
+	if err != nil {
+		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "调用预设不存在"), http.StatusSeeOther)
 		return
 	}
 	if err := s.Store.DeleteOAuthPreset(r.Context(), preset.ID); err != nil {
 		s.errorPage(w, r, http.StatusInternalServerError, "删除调用预设失败", err)
 		return
 	}
-	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, service.OAuthChannelLabel(channel)+"；已删除预设，不影响当前调用配置")
+	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, "跨渠道；已删除预设，不影响当前调用配置")
 	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已删除"), http.StatusSeeOther)
 }
 

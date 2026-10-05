@@ -35,7 +35,7 @@ func TestUpstreamChannelsHavePreloadedContentsAndNoScriptFallback(t *testing.T) 
 		}
 		for _, want := range []string{
 			`data-upstream-channel-page data-channel="` + channel + `"`,
-			`/static/upstream-channels.js?v=20261004-6`,
+			`/static/upstream-channels.js?v=20261005-1`,
 			`data-upstream-channel-panel data-channel="` + channel + `"`,
 			`method="get" action="/admin/upstreams"`,
 			`name="channel" value="` + channel + `"`,
@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-10`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-11`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -1120,6 +1120,8 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 	for _, rule := range []string{
 		`.dashboard-summary-grid, #storage .system-health-grid, #health .system-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }`,
 		`.oauth-model-list, .oauth-alias-list, .reasoning-cap-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }`,
+		`.oauth-alias-row { display: flex; flex-direction: column; min-width: 0; padding: 17px 18px 15px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 3px 12px rgba(24,34,48,.035); }`,
+		`.oauth-alias-entries { display: grid; min-width: 0; gap: 8px; }`,
 		`.key-actions { display: grid; width: 100%; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }`,
 		`.dashboard-summary-grid > .summary-card:last-child,`,
 		`#health .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }`,
@@ -1127,8 +1129,9 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 		`.dashboard-summary-grid .key-mask { padding: 5px 6px; font-size: 13px; letter-spacing: .04em; }`,
 		`.oauth-model-row .upstream-main { grid-column: 1 / -1; }`,
 		`.oauth-model-row form { grid-column: 2; grid-row: 2; justify-self: end; }`,
-		`.reasoning-cap-row { grid-template-columns: minmax(0, 1fr); padding: 12px; }`,
-		`.reasoning-cap-row { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start;`,
+		`.reasoning-cap-row { padding: 12px; }`,
+		`.reasoning-cap-row { container: reasoning-cap / inline-size; display: block; min-width: 0; padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }`,
+		`.reasoning-cap-fields { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; }`,
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing available-width card layout policy: %s", rule)
@@ -1142,6 +1145,61 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 	}
 	if bytes.Contains(css, []byte("grid-template-columns: minmax(0, 1fr) minmax(145px, 180px)")) {
 		t.Fatal("reasoning selects must not squeeze model IDs into a vertical column")
+	}
+}
+
+func TestAliasAndReasoningRestylePreservesFormsAndCardColumns(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := "claude-opus-4-6-thinking"
+	view := AdminUpstreamsView{
+		LayoutView: LayoutView{CSRFToken: "style-csrf"}, Channel: "antigravity",
+		AliasReady: true, AliasRevision: "alias-revision",
+		AliasModels:    []OAuthModelView{{ID: model, AliasList: []string{"claude-main", "claude-tools"}, KeepOriginal: true}},
+		ReasoningReady: true, ReasoningRevision: "reasoning-revision",
+		ReasoningModels: []ReasoningCapModelView{{ID: model, Options: []ReasoningCapOptionView{{Value: "medium", Label: "Medium", Selected: true}}}},
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`action="/admin/upstreams/models/aliases"`, `action="/admin/upstreams/models/reasoning"`,
+		`name="csrf_token" value="style-csrf"`, `name="channel" value="antigravity"`,
+		`name="revision" value="alias-revision"`, `name="reasoning_revision" value="reasoning-revision"`,
+		`name="alias_0" value="claude-main"`, `name="alias_0" value="claude-tools"`,
+		`name="keep_original" value="` + model + `" checked`,
+		`data-alias-add`, `data-alias-remove`, `data-alias-template`,
+		`<label class="reasoning-cap-row"><span class="reasoning-cap-fields"><span class="mono">` + model + `</span>`,
+		`<select name="cap_0"><option value="medium" selected>Medium</option></select>`,
+		`name="model" value="` + model + `"`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("restyling must preserve form data and interactions: %s", want)
+		}
+	}
+	asset, err := fs.ReadFile(Assets(), "style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	css := string(asset)
+	for _, rule := range []string{
+		`.oauth-alias-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; }`,
+		`.reasoning-cap-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }`,
+		`.oauth-alias-entries { display: grid; min-width: 0; gap: 8px; }`,
+		`@container reasoning-cap (min-width: 400px) {`,
+		`.reasoning-cap-fields { grid-template-columns: minmax(220px, 1fr) 160px; }`,
+	} {
+		if !strings.Contains(css, rule) {
+			t.Fatalf("alias entries stay vertical, card columns stay unchanged and reasoning adapts to actual width: %s", rule)
+		}
+	}
+	_, roomy, found := strings.Cut(css, "@container reasoning-cap (min-width: 400px) {")
+	roomy, _, _ = strings.Cut(roomy, "\n}")
+	if !found || !strings.Contains(roomy, `.reasoning-cap-fields { grid-template-columns: minmax(220px, 1fr) 160px; }`) {
+		t.Fatal("side-by-side reasoning fields must require sufficient card width")
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -12,16 +14,40 @@ const MaxOAuthPresets = 20
 
 func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthPreset, error) {
 	preset.Name = strings.TrimSpace(preset.Name)
-	preset.Channel = presetChannel(preset.Channel)
 	if preset.ID == "" || preset.Name == "" || preset.Payload == "" {
 		return OAuthPreset{}, errors.New("invalid OAuth preset")
 	}
+	var format struct {
+		Version  int `json:"version"`
+		Channels []struct {
+			Channel string `json:"channel"`
+		} `json:"channels"`
+	}
+	if json.Unmarshal([]byte(preset.Payload), &format) != nil || format.Version != 3 || len(format.Channels) == 0 {
+		return OAuthPreset{}, errors.New("invalid OAuth preset format")
+	}
+	seen := map[string]bool{}
+	for _, entry := range format.Channels {
+		channel := strings.ToLower(strings.TrimSpace(entry.Channel))
+		if channel == "" || seen[channel] {
+			return OAuthPreset{}, errors.New("invalid OAuth preset channels")
+		}
+		seen[channel] = true
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return OAuthPreset{}, err
+	}
+	defer tx.Rollback()
 	now := time.Now().UTC()
 	var existingID string
-	err := s.db.QueryRowContext(ctx, `SELECT id FROM oauth_presets WHERE channel=? AND name=? COLLATE NOCASE`, preset.Channel, preset.Name).Scan(&existingID)
+	err = tx.QueryRowContext(ctx, `SELECT id FROM oauth_presets WHERE name=? COLLATE NOCASE`, preset.Name).Scan(&existingID)
 	if err == nil {
-		_, err = s.db.ExecContext(ctx, `UPDATE oauth_presets SET name=?,payload=?,updated_by=?,updated_at_ms=? WHERE id=?`, preset.Name, preset.Payload, preset.UpdatedBy, timeMS(now), existingID)
+		_, err = tx.ExecContext(ctx, `UPDATE oauth_presets SET name=?,payload=?,updated_by=?,updated_at_ms=? WHERE id=?`, preset.Name, preset.Payload, preset.UpdatedBy, timeMS(now), existingID)
 		if err != nil {
+			return OAuthPreset{}, err
+		}
+		if err := tx.Commit(); err != nil {
 			return OAuthPreset{}, err
 		}
 		return s.OAuthPreset(ctx, existingID)
@@ -30,7 +56,7 @@ func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthP
 		return OAuthPreset{}, err
 	}
 	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_presets WHERE channel=?`, preset.Channel).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_presets`).Scan(&count); err != nil {
 		return OAuthPreset{}, err
 	}
 	if count >= MaxOAuthPresets {
@@ -40,27 +66,23 @@ func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthP
 		preset.CreatedAt = now
 	}
 	preset.UpdatedAt = now
-	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_presets(id,channel,name,payload,updated_by,created_at_ms,updated_at_ms) VALUES(?,?,?,?,?,?,?)`, preset.ID, preset.Channel, preset.Name, preset.Payload, preset.UpdatedBy, timeMS(preset.CreatedAt), timeMS(preset.UpdatedAt))
+	_, err = tx.ExecContext(ctx, `INSERT INTO oauth_presets(id,channel,name,payload,updated_by,created_at_ms,updated_at_ms) VALUES(?,'all',?,?,?,?,?)`, preset.ID, preset.Name, preset.Payload, preset.UpdatedBy, timeMS(preset.CreatedAt), timeMS(preset.UpdatedAt))
 	if err != nil {
 		return OAuthPreset{}, err
 	}
-	return preset, nil
+	return preset, tx.Commit()
 }
 
 func (s *Store) OAuthPreset(ctx context.Context, id string) (OAuthPreset, error) {
 	var preset OAuthPreset
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id,channel,name,payload,updated_by,created_at_ms,updated_at_ms FROM oauth_presets WHERE id=?`, id).Scan(&preset.ID, &preset.Channel, &preset.Name, &preset.Payload, &preset.UpdatedBy, &created, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT id,name,payload,updated_by,created_at_ms,updated_at_ms FROM oauth_presets WHERE id=?`, id).Scan(&preset.ID, &preset.Name, &preset.Payload, &preset.UpdatedBy, &created, &updated)
 	preset.CreatedAt, preset.UpdatedAt = fromMS(created), fromMS(updated)
 	return preset, err
 }
 
-func (s *Store) ListOAuthPresets(ctx context.Context, channels ...string) ([]OAuthPreset, error) {
-	channel := "codex"
-	if len(channels) > 0 {
-		channel = presetChannel(channels[0])
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,channel,name,payload,updated_by,created_at_ms,updated_at_ms FROM oauth_presets WHERE channel=? ORDER BY updated_at_ms DESC,name COLLATE NOCASE`, channel)
+func (s *Store) ListOAuthPresets(ctx context.Context) ([]OAuthPreset, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id,name,payload,updated_by,created_at_ms,updated_at_ms FROM oauth_presets ORDER BY updated_at_ms DESC,name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +91,7 @@ func (s *Store) ListOAuthPresets(ctx context.Context, channels ...string) ([]OAu
 	for rows.Next() {
 		var preset OAuthPreset
 		var created, updated int64
-		if err := rows.Scan(&preset.ID, &preset.Channel, &preset.Name, &preset.Payload, &preset.UpdatedBy, &created, &updated); err != nil {
+		if err := rows.Scan(&preset.ID, &preset.Name, &preset.Payload, &preset.UpdatedBy, &created, &updated); err != nil {
 			return nil, err
 		}
 		preset.CreatedAt, preset.UpdatedAt = fromMS(created), fromMS(updated)
@@ -88,14 +110,6 @@ func (s *Store) DeleteOAuthPreset(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-func presetChannel(channel string) string {
-	channel = strings.ToLower(strings.TrimSpace(channel))
-	if channel == "" {
-		return "codex"
-	}
-	return channel
 }
 
 // Preserve legacy presets as Codex and replace the old global name uniqueness
@@ -137,55 +151,101 @@ func (s *Store) migrateOAuthPresetChannels(ctx context.Context) error {
 	return tx.Commit()
 }
 
-// Upgrade version-1 preset data to the explicit channel-scoped version-2 format.
-// Retain all existing fields and metadata; unknown or malformed formats are not
-// silently reinterpreted. Only the migration understands the old representation.
+// Upgrade all stored presets once to the global version-3 envelope. Same-name
+// channel presets are combined without inventing missing channel settings.
+// Unsupported/malformed payloads abort the transaction instead of losing data.
 func (s *Store) migrateOAuthPresetPayloads(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.QueryContext(ctx, `SELECT id,channel,payload FROM oauth_presets`)
+	rows, err := tx.QueryContext(ctx, `SELECT id,channel,name,payload,updated_at_ms FROM oauth_presets ORDER BY updated_at_ms DESC,id`)
 	if err != nil {
 		return err
 	}
-	type update struct{ id, payload string }
-	var updates []update
+	type group struct {
+		id, name string
+		channels map[string]json.RawMessage
+		fields   map[string]json.RawMessage
+		deleted  []string
+	}
+	groups := map[string]*group{}
 	for rows.Next() {
-		var id, channel, payload string
-		if err := rows.Scan(&id, &channel, &payload); err != nil {
+		var id, channel, name, payload string
+		var updated int64
+		if err := rows.Scan(&id, &channel, &name, &payload, &updated); err != nil {
 			rows.Close()
 			return err
 		}
 		var fields map[string]json.RawMessage
+		invalid := func() error { rows.Close(); return fmt.Errorf("调用预设 %s 内容无效，迁移已取消", name) }
 		if json.Unmarshal([]byte(payload), &fields) != nil || fields == nil {
-			continue
+			return invalid()
 		}
 		var version int
-		if json.Unmarshal(fields["version"], &version) != nil || version != 1 {
-			continue
+		if json.Unmarshal(fields["version"], &version) != nil {
+			return invalid()
 		}
-		var storedChannel string
-		if raw, ok := fields["channel"]; ok && json.Unmarshal(raw, &storedChannel) != nil {
-			continue
+		var entries []json.RawMessage
+		switch version {
+		case 1, 2:
+			var storedChannel string
+			if raw, ok := fields["channel"]; ok && json.Unmarshal(raw, &storedChannel) != nil {
+				return invalid()
+			}
+			if storedChannel == "" && version == 1 && channel == "codex" {
+				storedChannel = channel
+			}
+			if !strings.EqualFold(strings.TrimSpace(storedChannel), channel) || storedChannel == "" {
+				return invalid()
+			}
+			delete(fields, "version")
+			fields["channel"], _ = json.Marshal(channel)
+			entry, err := json.Marshal(fields)
+			if err != nil {
+				return invalid()
+			}
+			entries = []json.RawMessage{entry}
+			fields = map[string]json.RawMessage{}
+		case 3:
+			if json.Unmarshal(fields["channels"], &entries) != nil || len(entries) == 0 {
+				return invalid()
+			}
+		default:
+			return invalid()
 		}
-		// A pre-channel preset may only belong to Codex. Never relabel a
-		// mismatched explicit channel or assign incomplete data elsewhere.
-		if storedChannel == "" && channel != "codex" {
-			continue
+		// Match SQLite COLLATE NOCASE (ASCII folding), not Unicode case folding.
+		key := strings.Map(func(r rune) rune {
+			if r >= 'A' && r <= 'Z' {
+				return r + 'a' - 'A'
+			}
+			return r
+		}, name)
+		g := groups[key]
+		if g == nil {
+			g = &group{id: id, name: name, channels: map[string]json.RawMessage{}, fields: fields}
+			groups[key] = g
+		} else {
+			g.deleted = append(g.deleted, id)
 		}
-		if storedChannel != "" && !strings.EqualFold(strings.TrimSpace(storedChannel), channel) {
-			continue
+		local := map[string]bool{}
+		for _, entry := range entries {
+			var channelFields map[string]json.RawMessage
+			var value string
+			if json.Unmarshal(entry, &channelFields) != nil || json.Unmarshal(channelFields["channel"], &value) != nil {
+				return invalid()
+			}
+			value = strings.ToLower(strings.TrimSpace(value))
+			if value == "" || local[value] {
+				return invalid()
+			}
+			local[value] = true
+			// Newest saved data wins if duplicate legacy entries exist.
+			if _, exists := g.channels[value]; !exists {
+				g.channels[value] = entry
+			}
 		}
-		fields["channel"], _ = json.Marshal(channel)
-		fields["version"] = json.RawMessage("2")
-		data, err := json.Marshal(fields)
-		if err != nil {
-			rows.Close()
-			return err
-		}
-		updates = append(updates, update{id: id, payload: string(data)})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -194,10 +254,37 @@ func (s *Store) migrateOAuthPresetPayloads(ctx context.Context) error {
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, item := range updates {
-		if _, err := tx.ExecContext(ctx, `UPDATE oauth_presets SET payload=? WHERE id=?`, item.payload, item.id); err != nil {
+	// Remove redundant rows before assigning the shared namespace to avoid the
+	// old UNIQUE(channel,name) constraint during a same-name merge.
+	for _, g := range groups {
+		for _, id := range g.deleted {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_presets WHERE id=?`, id); err != nil {
+				return err
+			}
+		}
+	}
+	for _, g := range groups {
+		keys := make([]string, 0, len(g.channels))
+		for channel := range g.channels {
+			keys = append(keys, channel)
+		}
+		sort.Strings(keys)
+		entries := make([]json.RawMessage, 0, len(keys))
+		for _, channel := range keys {
+			entries = append(entries, g.channels[channel])
+		}
+		g.fields["version"] = json.RawMessage("3")
+		g.fields["channels"], _ = json.Marshal(entries)
+		data, err := json.Marshal(g.fields)
+		if err != nil {
 			return err
 		}
+		if _, err := tx.ExecContext(ctx, `UPDATE oauth_presets SET channel='all',payload=? WHERE id=?`, string(data), g.id); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_presets_global_name ON oauth_presets(name COLLATE NOCASE)`); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
