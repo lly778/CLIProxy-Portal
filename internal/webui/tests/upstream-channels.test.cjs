@@ -35,7 +35,7 @@ function setup(initial = 'codex') {
   };
   // Switching must work offline, without fetch, DOMParser, or confirmation.
   vm.runInNewContext(script, {
-    document: { querySelector: selector => selector === '[data-upstream-channel-page]' ? page : null }, URL,
+    document: { querySelector: selector => selector === '[data-upstream-channel-page]' ? page : null, querySelectorAll: () => [] }, URL,
     fetch() { throw new Error('switch made a network request'); },
     window: {
       location, confirm() { throw new Error('switch discarded edits'); },

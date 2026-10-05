@@ -35,7 +35,7 @@ func TestUpstreamChannelsHavePreloadedContentsAndNoScriptFallback(t *testing.T) 
 		}
 		for _, want := range []string{
 			`data-upstream-channel-page data-channel="` + channel + `"`,
-			`/static/upstream-channels.js?v=20261005-2`,
+			`/static/upstream-channels.js?v=20261005-3`,
 			`data-upstream-channel-panel data-channel="` + channel + `"`,
 			`method="get" action="/admin/upstreams"`,
 			`name="channel" value="` + channel + `"`,
@@ -102,7 +102,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-13`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261005-14`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -1187,6 +1187,8 @@ func TestAliasAndReasoningRestylePreservesFormsAndCardColumns(t *testing.T) {
 	css := string(asset)
 	for _, rule := range []string{
 		`.oauth-alias-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; }`,
+		`.oauth-alias-list.is-masonry { position: relative; display: block; }`,
+		`.oauth-alias-list.is-masonry > .oauth-alias-row { position: absolute; }`,
 		`.reasoning-cap-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }`,
 		`.oauth-alias-entries { display: grid; min-width: 0; gap: 8px; }`,
 		`@container reasoning-cap (min-width: 400px) {`,

@@ -2,44 +2,67 @@
   "use strict";
 
   // Keep DOM/keyboard order intact; place each next card in the shorter column.
-  var presets = document.querySelector("[data-global-oauth-presets] .oauth-preset-list");
-  if (presets && window.matchMedia && window.requestAnimationFrame) {
-    var cards = Array.prototype.slice.call(presets.querySelectorAll(".oauth-preset-row"));
-    var narrowPresets = window.matchMedia("(max-width: 760px)");
+  var masonryLayouts = [];
+  function initMasonry(list, cardSelector, options) {
+    if (!list || !window.matchMedia || !window.requestAnimationFrame) return;
+    var cards = Array.prototype.slice.call(list.querySelectorAll(cardSelector));
     var pendingLayout = false;
-    function layoutPresets() {
+    function layoutCards() {
       pendingLayout = false;
-      var width = presets.getBoundingClientRect().width;
+      var width = list.getBoundingClientRect().width;
       if (!width || !cards.length) return;
-      var columns = narrowPresets.matches ? 1 : 2;
-      var gap = 10;
+      var config = options(width, cards.length);
+      var columns = config.columns;
+      var gap = config.gap;
       var cardWidth = (width - gap * (columns - 1)) / columns;
-      var heights = [0, 0];
+      var heights = Array(columns).fill(0);
       cards.forEach(function (card) { card.style.width = cardWidth + "px"; });
-      presets.classList.add("is-masonry");
+      list.classList.add("is-masonry");
       cards.forEach(function (card) {
-        var column = columns === 2 && heights[1] < heights[0] ? 1 : 0;
+        var column = 0;
+        for (var index = 1; index < columns; index++) {
+          if (heights[index] < heights[column]) column = index;
+        }
         card.style.left = column * (cardWidth + gap) + "px";
         card.style.top = heights[column] + "px";
         heights[column] += card.getBoundingClientRect().height + gap;
       });
-      presets.style.height = Math.max(0, Math.max.apply(null, heights) - gap) + "px";
+      list.style.height = Math.max(0, Math.max.apply(null, heights) - gap) + "px";
     }
-    function schedulePresetLayout() {
+    function scheduleLayout() {
       if (pendingLayout) return;
       pendingLayout = true;
-      window.requestAnimationFrame(layoutPresets);
+      window.requestAnimationFrame(layoutCards);
     }
-    layoutPresets();
-    window.addEventListener("resize", schedulePresetLayout);
-    if (narrowPresets.addEventListener) narrowPresets.addEventListener("change", schedulePresetLayout);
+    layoutCards();
+    masonryLayouts.push(scheduleLayout);
+    window.addEventListener("resize", scheduleLayout);
+    // Alias buttons modify their card later in this event's bubbling phase.
+    if (list.addEventListener) list.addEventListener("click", scheduleLayout);
     if (window.ResizeObserver) {
-      var presetObserver = new window.ResizeObserver(schedulePresetLayout);
-      presetObserver.observe(presets);
-      cards.forEach(function (card) { presetObserver.observe(card); });
+      var observer = new window.ResizeObserver(scheduleLayout);
+      observer.observe(list);
+      cards.forEach(function (card) { observer.observe(card); });
     }
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedulePresetLayout);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleLayout);
   }
+
+  var narrowCards = window.matchMedia && window.matchMedia("(max-width: 760px)");
+  var compactCards = window.matchMedia && window.matchMedia("(max-width: 1080px)");
+  function scheduleMasonryLayouts() { masonryLayouts.forEach(function (layout) { layout(); }); }
+  if (narrowCards && narrowCards.addEventListener) narrowCards.addEventListener("change", scheduleMasonryLayouts);
+  if (compactCards && compactCards.addEventListener) compactCards.addEventListener("change", scheduleMasonryLayouts);
+  initMasonry(document.querySelector("[data-global-oauth-presets] .oauth-preset-list"), ".oauth-preset-row", function () {
+    return { columns: narrowCards.matches ? 1 : 2, gap: 10 };
+  });
+  document.querySelectorAll(".oauth-alias-list").forEach(function (list) {
+    initMasonry(list, ".oauth-alias-row", function (width, count) {
+      var gap = narrowCards.matches ? 10 : 14;
+      // Match the existing auto-fit/minimum-260px policy, including one-card expansion.
+      var columns = compactCards.matches ? Math.min(count, Math.max(1, Math.floor((width + gap) / (260 + gap)))) : 2;
+      return { columns: columns, gap: gap };
+    });
+  });
 
   var page = document.querySelector("[data-upstream-channel-page]");
   if (!page || !window.history) return;
@@ -63,6 +86,7 @@
       return;
     }
     panels.forEach(function (panel) { panel.hidden = panel !== next; });
+    scheduleMasonryLayouts();
     var changed = channel !== page.getAttribute("data-channel");
     page.setAttribute("data-channel", channel);
     // The hidden field controls only the return location, never preset scope.

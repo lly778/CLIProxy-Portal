@@ -18,7 +18,7 @@ function setup(heights, initialWidth = 810, initialNarrow = false) {
     classList: { add(name) { list.classes.add(name); } },
   };
   vm.runInNewContext(script, {
-    document: { querySelector: selector => selector.includes('.oauth-preset-list') ? list : null },
+    document: { querySelector: selector => selector.includes('.oauth-preset-list') ? list : null, querySelectorAll: () => [] },
     window: {
       matchMedia: () => media,
       requestAnimationFrame: fn => frames.push(fn),
