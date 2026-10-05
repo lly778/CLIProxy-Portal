@@ -91,6 +91,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/approvals", s.withAdmin(s.adminApprovals))
 	mux.HandleFunc("GET /admin/admins", s.withAdmin(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
 	mux.HandleFunc("GET /admin/upstreams", s.withAdmin(s.adminUpstreams))
+	mux.HandleFunc("POST /admin/upstreams/layout", s.withAdmin(s.adminUpstreamLayoutSave))
 	mux.HandleFunc("POST /admin/upstreams/{id}/status", s.withAdmin(s.adminUpstreamStatus))
 	mux.HandleFunc("POST /admin/upstreams/models/status", s.withAdmin(s.adminOAuthModelStatus))
 	mux.HandleFunc("POST /admin/upstreams/models/aliases", s.withAdmin(s.adminOAuthModelAliases))

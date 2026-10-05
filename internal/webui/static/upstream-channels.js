@@ -3,6 +3,7 @@
 
   // Keep DOM/keyboard order intact; place each next card in the shorter column.
   var masonryLayouts = [];
+  var masonrySorters = [];
   function initMasonry(list, cardSelector, options) {
     if (!list || !window.matchMedia || !window.requestAnimationFrame) return;
     var cards = Array.prototype.slice.call(list.querySelectorAll(cardSelector));
@@ -33,6 +34,12 @@
       if (pendingLayout) return;
       pendingLayout = true;
       window.requestAnimationFrame(layoutCards);
+    }
+    if (window.PortalMasonrySort) {
+      masonrySorters.push(window.PortalMasonrySort.init({
+        list: list, cards: cards,
+        applyOrder: function (order) { cards = order.slice(); layoutCards(); }
+      }));
     }
     layoutCards();
     masonryLayouts.push(scheduleLayout);
@@ -85,6 +92,7 @@
       if (fromHistory) window.history.replaceState(null, "", shownURL);
       return;
     }
+    masonrySorters.forEach(function (sorter) { sorter.cancel(); });
     panels.forEach(function (panel) { panel.hidden = panel !== next; });
     scheduleMasonryLayouts();
     var changed = channel !== page.getAttribute("data-channel");

@@ -611,6 +611,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	layout := s.layout(currentUser(r), currentToken(r), "上游管理", "admin-upstreams")
 	v := s.adminUpstreamChannelView(r, channel, layout, true)
 	s.loadOAuthPresetViews(r, &v)
+	v.PresetCardOrder, v.PresetLayoutError = s.upstreamCardOrder(r.Context(), "presets")
 	if r.Header.Get("X-Upstream-Channel-Only") == "true" {
 		_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
 		return
@@ -645,6 +646,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {
 	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity"}
+	v.AliasCardOrder, v.AliasLayoutError = s.upstreamCardOrder(r.Context(), "aliases:"+channel)
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil && v.SupportsQuota {

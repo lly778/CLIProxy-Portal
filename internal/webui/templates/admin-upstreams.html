@@ -45,10 +45,11 @@
     <button class="button primary" type="submit">保存当前配置</button>
   </form></div></div>
   {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
-  {{if .Presets}}<div class="oauth-preset-list">
-    {{range .Presets}}<article class="oauth-preset-row">
+  {{if .Presets}}<div class="oauth-preset-list" data-masonry-key="presets" data-masonry-order="{{.PresetCardOrder}}" data-masonry-csrf="{{.CSRFToken}}">
+    {{range .Presets}}<article class="oauth-preset-row" data-masonry-card="{{.ID}}">
       <div class="oauth-preset-main"><div class="oauth-preset-card-head"><div class="oauth-preset-title"><strong>{{.Name}}</strong><span class="muted small">{{.Summary}}</span></div>
         <div class="oauth-preset-actions">
+          <button class="masonry-drag-handle" type="button" data-masonry-handle hidden title="按住拖动；方向键可调整顺序" aria-label="移动预设 {{.Name}}">{{template "masonry-grip" .}}</button>
           {{if .Applied}}<span class="badge success">已应用</span>{{end}}
           <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？预设记录的所有渠道模型、别名及思考强度上限将一起替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button secondary" type="submit">应用</button></form>
           <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button danger-outline" type="submit">删除</button></form>
@@ -60,7 +61,7 @@
         <div><span class="oauth-preset-detail-label">思考上限</span><div class="oauth-preset-values">{{range .ReasoningCaps}}<code class="oauth-preset-value reasoning">{{.}}</code>{{else}}<span class="muted small">不限制</span>{{end}}</div></div>
       </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
     </article>{{end}}
-  </div>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存所有渠道的调用配置。</p></div>{{end}}{{end}}
+  </div><p class="masonry-layout-status muted small" data-masonry-status aria-live="polite">{{.PresetLayoutError}}</p>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存所有渠道的调用配置。</p></div>{{end}}{{end}}
 </section>
 {{end}}
 
@@ -92,10 +93,10 @@
   <form id="oauth-alias-form-{{.Channel}}" method="post" action="/admin/upstreams/models/aliases" class="oauth-alias-form" data-confirm="确定保存所有 {{.ChannelLabel}} 模型别名吗？保存后将影响所有用户的新请求。">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{.Channel}}">
     <input type="hidden" name="revision" value="{{.AliasRevision}}">
-    <div class="oauth-alias-list">
+    <div class="oauth-alias-list" data-masonry-key="aliases:{{.Channel}}" data-masonry-order="{{.AliasCardOrder}}" data-masonry-csrf="{{.CSRFToken}}">
       {{range $index, $model := .AliasModels}}
-      <div class="oauth-alias-row">
-        <div class="oauth-alias-model"><div><span class="muted small">实际模型</span><strong class="mono" title="实际模型：{{$model.ID}}">{{$model.ID}}</strong></div></div>
+      <div class="oauth-alias-row" data-masonry-card="{{$model.ID}}">
+        <div class="oauth-alias-model"><div><span class="muted small">实际模型</span><strong class="mono" title="实际模型：{{$model.ID}}">{{$model.ID}}</strong></div><button class="masonry-drag-handle" type="button" data-masonry-handle hidden title="按住拖动；方向键可调整顺序" aria-label="移动模型 {{$model.ID}}">{{template "masonry-grip" .}}</button></div>
         <div class="oauth-alias-controls">
           <span class="oauth-alias-caption">用户侧别名</span>
           <div class="oauth-alias-entries" data-alias-entries>{{range $model.AliasList}}<div class="oauth-alias-entry"><label class="oauth-alias-field"><span class="sr-only">{{$model.ID}} 的用户侧别名</span><input type="text" name="alias_{{$index}}" value="{{.}}" maxlength="128" placeholder="用户侧模型名" autocomplete="off"></label><button class="oauth-alias-icon-button" type="button" data-alias-remove aria-label="删除 {{$model.ID}} 的这个别名" title="删除别名">−</button></div>{{end}}</div>
@@ -107,6 +108,7 @@
       </div>
       {{end}}
     </div>
+    <p class="masonry-layout-status muted small" data-masonry-status aria-live="polite">{{.AliasLayoutError}}</p>
   </form>
   {{else}}<div class="empty-state compact"><strong>暂无已启用的可映射模型</strong></div>{{end}}{{end}}
 </section>

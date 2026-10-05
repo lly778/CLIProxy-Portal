@@ -5,7 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const script = fs.readFileSync(path.join(__dirname, '../static/upstream-channels.js'), 'utf8');
 
-function setup(heights, initialWidth = 810, initialNarrow = false) {
+function setup(heights, initialWidth = 810, initialNarrow = false, restoredOrder = null) {
   let width = initialWidth, observer;
   const frames = [], events = {}, mediaEvents = {}, observed = [];
   const media = { matches: initialNarrow, addEventListener: (name, fn) => { mediaEvents[name] = fn; } };
@@ -24,6 +24,12 @@ function setup(heights, initialWidth = 810, initialNarrow = false) {
       requestAnimationFrame: fn => frames.push(fn),
       addEventListener: (name, fn) => { events[name] = fn; },
       ResizeObserver: class { constructor(fn) { observer = fn; } observe(target) { observed.push(target); } },
+      PortalMasonrySort: restoredOrder && {
+        init(config) {
+          config.applyOrder(restoredOrder.map(index => cards[index]));
+          return { cancel() {} };
+        },
+      },
     },
   });
   return {
@@ -92,4 +98,15 @@ test('empty, single and initially hidden preset lists remain safe', () => {
   hidden.resize(810, false);
   hidden.flush();
   assert.equal(hidden.cards[1].style.left, '410px');
+});
+
+test('sorter order drives actual masonry positions and survives responsive relayout without DOM changes', () => {
+  const f = setup([420, 300, 120], 810, false, [2, 0, 1]);
+  assert.deepEqual(f.cards.map(card => [card.style.left, card.style.top]), [
+    ['410px', '0px'], ['0px', '130px'], ['0px', '0px'],
+  ]);
+  f.resize(350, true);
+  f.flush();
+  assert.deepEqual(f.cards.map(card => card.style.top), ['130px', '560px', '0px']);
+  assert.deepEqual(f.cards.map(card => card.id), [0, 1, 2]);
 });

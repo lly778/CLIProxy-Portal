@@ -554,6 +554,10 @@ type AdminUpstreamsView struct {
 	Accounts          []UpstreamAccountView
 	Presets           []OAuthPresetView
 	PresetError       string
+	PresetCardOrder   string
+	PresetLayoutError string
+	AliasCardOrder    string
+	AliasLayoutError  string
 	Models            []OAuthModelView
 	AliasModels       []OAuthModelView
 	ReasoningModels   []ReasoningCapModelView

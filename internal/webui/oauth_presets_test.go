@@ -33,6 +33,11 @@ func TestOAuthPresetIsGlobalAndOutsideChannelPanels(t *testing.T) {
 			t.Fatalf("global preset UI missing %s", want)
 		}
 	}
+	for _, want := range []string{`data-masonry-key="presets"`, `data-masonry-card="daily"`, `type="button" data-masonry-handle hidden`, `data-masonry-status aria-live="polite"`} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("preset sorting markup missing %s", want)
+		}
+	}
 	for _, unwanted := range []string{"未记录的渠道保持当前配置", `oauth-preset-detail-label">停用模型`, "disabled-test-model"} {
 		if strings.Contains(html, unwanted) {
 			t.Fatalf("global preset UI contains removed content %s", unwanted)
@@ -62,5 +67,35 @@ func TestOAuthPresetCardsUseIndependentColumns(t *testing.T) {
 	}
 	if strings.Contains(css, `.oauth-preset-list { column-count:`) {
 		t.Fatal("preset cards must not depend on browser column balancing")
+	}
+}
+
+func TestAliasSortingScopesPreserveOriginalModelFieldBindings(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{"codex", "antigravity"} {
+		view := AdminUpstreamsView{Channel: channel, AliasReady: true, AliasModels: []OAuthModelView{
+			{ID: "model-a", AliasList: []string{"public-a"}, KeepOriginal: true},
+			{ID: "model-b", AliasList: []string{"public-b"}},
+		}}
+		var out bytes.Buffer
+		if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
+			t.Fatal(err)
+		}
+		html := out.String()
+		for _, want := range []string{
+			`data-masonry-key="aliases:` + channel + `"`,
+			`data-masonry-card="model-a"`, `data-masonry-card="model-b"`,
+			`name="alias_0" value="public-a"`, `name="alias_1" value="public-b"`,
+			`name="model" value="model-a"`, `name="model" value="model-b"`,
+			`name="keep_original" value="model-a" checked`,
+			`type="button" data-masonry-handle hidden`,
+		} {
+			if !strings.Contains(html, want) {
+				t.Fatalf("sorting controls must preserve %s", want)
+			}
+		}
 	}
 }
