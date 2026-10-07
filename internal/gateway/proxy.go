@@ -457,7 +457,7 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 		if json.Unmarshal(item, &model) != nil || model.ID == "" {
 			return errors.New("invalid upstream model entry")
 		}
-		if !hidden[strings.ToLower(model.ID)] {
+		if !hidden[strings.ToLower(strings.TrimSpace(model.ID))] {
 			filtered = append(filtered, item)
 		}
 		catalog = append(catalog, cpamp.Model{ID: model.ID})
@@ -465,7 +465,7 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 	// Preserve original entries and their extension fields; only append models
 	// verified against CPA's current credential/registration snapshot.
 	for _, model := range g.keys.RestoreSchedulableModels(resp.Request.Context(), catalog)[len(catalog):] {
-		if hidden[strings.ToLower(model.ID)] {
+		if hidden[strings.ToLower(strings.TrimSpace(model.ID))] {
 			continue
 		}
 		item, err := json.Marshal(model)

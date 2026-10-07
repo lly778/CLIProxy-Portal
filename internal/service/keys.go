@@ -1095,30 +1095,41 @@ func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpa
 }
 
 // HiddenModelAliases returns client-visible alias IDs that should not appear
-// in model catalogs. An alias that is also an enabled real model stays visible.
+// in model catalogs, across every discovered/configured OAuth channel. An
+// alias that is also an enabled real model in any channel stays visible.
 func (k *Keys) HiddenModelAliases(ctx context.Context) (map[string]bool, error) {
-	aliases, _, err := k.OAuthModelAliases(ctx)
+	channels, err := k.oauthChannels(ctx, true)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("读取模型目录渠道失败：%w", err)
 	}
-	if len(aliases) == 0 {
-		return map[string]bool{}, nil
-	}
-	models, _, err := k.OAuthModelSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
-	visibleReal := make(map[string]bool, len(models))
-	for _, model := range models {
-		if model.Enabled {
-			visibleReal[strings.ToLower(model.ID)] = true
+	// Collect all alias candidates before resolving real-name exceptions. A
+	// channel without aliases can still supply an enabled real model whose ID
+	// is used as an alias elsewhere, so its definitions must also be considered.
+	hidden := make(map[string]bool)
+	for _, channel := range channels {
+		aliases, _, err := k.OAuthModelAliases(ctx, channel)
+		if err != nil {
+			return nil, fmt.Errorf("读取 %s 模型目录别名失败：%w", OAuthChannelLabel(channel), err)
+		}
+		for _, alias := range aliases {
+			name := strings.TrimSpace(alias.Alias)
+			if name != "" && !strings.EqualFold(name, strings.TrimSpace(alias.Name)) {
+				hidden[strings.ToLower(name)] = true
+			}
 		}
 	}
-	hidden := make(map[string]bool, len(aliases))
-	for _, alias := range aliases {
-		name := strings.TrimSpace(alias.Alias)
-		if name != "" && !strings.EqualFold(name, strings.TrimSpace(alias.Name)) && !visibleReal[strings.ToLower(name)] {
-			hidden[strings.ToLower(name)] = true
+	if len(hidden) == 0 {
+		return hidden, nil
+	}
+	for _, channel := range channels {
+		models, _, err := k.OAuthModelSettings(ctx, channel)
+		if err != nil {
+			return nil, fmt.Errorf("读取 %s 模型目录启用状态失败：%w", OAuthChannelLabel(channel), err)
+		}
+		for _, model := range models {
+			if model.Enabled {
+				delete(hidden, strings.ToLower(strings.TrimSpace(model.ID)))
+			}
 		}
 	}
 	return hidden, nil
@@ -1134,7 +1145,7 @@ func (k *Keys) VisibleModels(ctx context.Context, models []cpamp.Model) ([]cpamp
 	}
 	visible := make([]cpamp.Model, 0, len(models))
 	for _, model := range models {
-		if !hidden[strings.ToLower(model.ID)] {
+		if !hidden[strings.ToLower(strings.TrimSpace(model.ID))] {
 			visible = append(visible, model)
 		}
 	}

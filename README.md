@@ -172,7 +172,7 @@ docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml \
 
 ### 模型目录与交互记录
 
-- `GET /v1/models` 隐藏仅作为 Codex 别名的名称，别名调用仍由 CPA 路由；与真实已启用模型重名的名称保留。
+- 门户模型目录与 `GET /v1/models` 动态发现凭证及配置中的 OAuth 渠道，隐藏仅作为别名的名称，不限于 Codex；与任一渠道真实已启用模型重名的名称保留。渠道、别名或必要的模型启用状态读取失败时，不返回未过滤列表。别名调用仍由 CPA 路由，不改写请求模型名称。
 - Antigravity 目录缺项仅依据 CPA 明确可调度的凭证和已注册模型恢复，不猜测模型、不重置冷却、不发起生成请求。
 - 支持 Responses、Chat Completions、Messages 和 Gemini 的用户/助手文本，以及实际工具调用、参数和结果；不持久化系统/开发者指令、推理、工具定义或图片等非文本内容。
 - 正文加密存储，同一用户的重复事件去重。用户只可下载自己的记录，管理员可下载全局记录；默认 JSON，增加 `?format=txt` 可下载文本。
