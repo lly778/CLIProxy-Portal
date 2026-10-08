@@ -97,6 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/upstreams/models/status", s.withAdmin(s.adminOAuthModelStatus))
 	mux.HandleFunc("POST /admin/upstreams/models/aliases", s.withAdmin(s.adminOAuthModelAliases))
 	mux.HandleFunc("POST /admin/upstreams/models/reasoning", s.withAdmin(s.adminReasoningCaps))
+	mux.HandleFunc("POST /admin/upstreams/codex-identity", s.withAdmin(s.adminCodexIdentityCompatibility))
 	mux.HandleFunc("POST /admin/upstreams/presets/save", s.withAdmin(s.adminOAuthPresetSave))
 	mux.HandleFunc("POST /admin/upstreams/presets/{id}/apply", s.withAdmin(s.adminOAuthPresetApply))
 	mux.HandleFunc("POST /admin/upstreams/presets/{id}/delete", s.withAdmin(s.adminOAuthPresetDelete))

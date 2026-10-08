@@ -10,6 +10,7 @@
 - **API Key 管理**：每位批准用户最多一个有效 Key；领取、撤销需要验证登录密码。完整 Key 仅领取时展示，门户数据库保存哈希和末四位。
 - **用量与交互记录**：个人及全局请求数、Token、成功率、模型排行和趋势；可选网关提供加密交互记录与分段耗时。
 - **上游配置**：按 OAuth 渠道管理已有凭证、模型启用状态、别名和支持渠道的思考强度上限；Codex、Antigravity 展示共享额度池。
+- **Codex 指令兼容**：非 Codex 渠道可通过模型卡片右上角的“兼容”开关，删除身份介绍中的 `based on GPT-5`，支持前缀、大小写和空白变体；默认关闭，仅对经过门户网关的请求生效。
 - **调用预设与共享布局**：跨渠道预设最多 20 个，同名保存更新；预设和别名卡片采用瀑布流，可拖动或用键盘排序。布局保存在门户数据库，由所有管理员共享。
 - **系统管理**：注册开关、版本化使用规则、Key 对账、操作审计、系统健康和存储占用检查。
 - **加密备份与恢复**：手动或每周自动备份到 GitHub 私有仓库 Releases；支持仅恢复门户数据库，或重建 CPA/CPAMP 并恢复配套数据。
@@ -142,15 +143,45 @@ rm -- secrets/initial_admin_password
 
 - 别名指向所选渠道的实际模型，可同时保留原名；别名与原名共用实际模型的思考上限。
 - 思考上限只降低明确超出上限的请求，不提高较低值，也不改未指定或自动预算。
+- 非 Codex 渠道可按渠道开启 [Codex 指令兼容](#codex-指令兼容)，作用于该渠道的模型及别名。
 - 停用模型会移除对应别名和思考上限。预设保存模型配置，不包含 OAuth 凭证。
 - 保存别名、启用模型、保留原名及应用预设时，会检查跨 OAuth 渠道的别名冲突，包括与其他渠道可见原名重名；不区分大小写。无法读取所需渠道配置时阻止变更。
 - 上述检查仅约束门户操作，不能阻止 CPA/CPAMP 外部直接修改。避免多个管理端同时写入同一配置。
 - 门户保留已有手工 Key，不将其自动绑定到用户。CPAMP 中手动删除的 Key 不会自动补回。
 - 默认每 5 分钟对账，待处理撤销任务每 30 秒重试。CPAMP 故障时不会误报撤销成功。
 
+### Codex 指令兼容
+
+用于处理 Codex 的 GPT-5 身份描述在部分非 Codex 上游触发错误的情况。配置默认关闭，由管理员按渠道开启，对所有经过门户网关的该渠道请求生效。
+
+1. 确认已启用 [模型网关](#可选模型网关)，且客户端 API 地址指向网关入口。
+2. 在“上游管理”选择 Antigravity 等非 Codex 渠道，点击 **OAuth 模型卡片右上角的“兼容”开关**。开关与标题及其下方说明区域垂直居中，点击后直接保存，无需另点保存按钮。
+
+保存结果在开关下方提示；保存失败时恢复上次保存的显示状态。Codex 渠道不提供此选项；未启用门户网关时开关不可用。设置持久化到门户数据库，开关即时生效并记录管理操作审计；随数据库备份及恢复保留，不随调用预设切换。
+
+**匹配范围**：仅在指令开头的身份介绍句中删除 `based on GPT-5`，保留句号和其余内容。支持 `You are`、`You're`、`I am`、`I'm`、`This assistant is` 等介绍前缀，以及大小写、前导空白、连续空格、制表符和换行差异。
+
+| 原始身份介绍 | 处理结果 |
+| --- | --- |
+| `You are Codex, a coding agent based on GPT-5.` | `You are Codex, a coding agent.` |
+| `You are Codex, an assistant based on GPT-5.` | `You are Codex, an assistant.` |
+| `I am an assistant BASED ON gpt-5.` | `I am an assistant.` |
+| `You are an assistant based on GPT-5.1.` | 保留原样，其他型号不参与处理 |
+
+| 接口 | 可处理的指令位置 |
+| --- | --- |
+| Responses | `instructions`，以及 `input` 中 `system` / `developer` 消息的文本 |
+| Chat Completions | `messages` 中 `system` / `developer` 消息的文本 |
+| Anthropic Messages | `system` 字符串或文本块 |
+| Gemini 原生接口 | `systemInstruction.parts` 中的文本 |
+
+用户消息、助手消息、工具结果、后续说明和引用示例不参与处理；GPT-5.1、GPT-5-mini 等其他型号保留原样。网关根据当前模型启用状态和别名配置判断渠道，名称包含 Codex 路由时保留原指令；多个非 Codex 渠道共用同一名称时，只有所有候选渠道均开启此选项才处理。
+
+未知路由、渠道查询失败、原始或解压后的请求体超过 2 MiB、不支持的压缩格式及无法解码的请求均原样转发。该开关只处理身份描述兼容问题，不能保证消除所有上游 429；直连 CPA 的请求不受影响。
+
 ## 可选模型网关
 
-不开启网关时，客户端直接调用 CPA，门户仍可查询 CPAMP 提供的用量数据。要生成门户交互记录与总耗时样本，客户端请求必须经过网关。
+不开启网关时，客户端直接调用 CPA，门户仍可查询 CPAMP 提供的用量数据。要启用 Codex 指令兼容，或生成门户交互记录与总耗时样本，客户端请求必须经过网关。
 
 网关至少需要以下配置，并映射监听端口：
 
@@ -232,7 +263,7 @@ docker compose -f compose.prebuilt.yaml -f compose.gateway.yaml \
 
 | 内容 | 保留的信息 |
 | --- | --- |
-| 门户 `portal.db` | 用户及密码哈希、Key 元数据、使用规则、调用预设、共享布局、审计和门户计时数据 |
+| 门户 `portal.db` | 用户及密码哈希、Key 元数据、使用规则、调用预设、渠道兼容开关、共享布局、审计和门户计时数据 |
 | CPA `config.yaml`、`auths/` | 原始 API Key、模型别名、思考上限、启用状态及上游授权文件 |
 | CPAMP `usage.sqlite`、`data.key` | 数据库内在线请求/用量统计、设置及其配套解密密钥 |
 | 部署参数与秘密文件 | 配置来源中列出的 Compose、`.env`、管理密钥、门户应用密钥；清单记录上游固定镜像摘要 |
@@ -383,14 +414,15 @@ node --test internal/webui/tests/*.test.cjs
 python -B -m unittest discover -s ops -p 'test_optimize_cpamp_request_indexes.py'
 ```
 
-前端测试使用 Node.js 内置测试运行器，不需要 `npm install` 或 `node_modules`，覆盖备份弹窗、私密下载、瀑布流排序、渠道切换、额度轮播、导航和图表手势。模拟测试不能替代真实浏览器的视觉与交互验证。
+前端测试使用 Node.js 内置测试运行器，不需要 `npm install` 或 `node_modules`，覆盖兼容开关自动保存与失败恢复、备份弹窗、私密下载、瀑布流排序、渠道切换、额度轮播、导航和图表手势。模拟测试不能替代真实浏览器的视觉与交互验证。
 
 Windows PowerShell 枚举前端测试：
 
 ```powershell
 $portalTests = Get-ChildItem internal/webui/tests -Filter "*.test.cjs" |
   ForEach-Object { $_.FullName }
-node --test $portalTests
+Push-Location $env:TEMP
+try { node --test $portalTests } finally { Pop-Location }
 ```
 
 项目位于 OneDrive 时，不在同步目录创建、安装或链接 `node_modules`。第三方 Node 依赖处理应放在同步目录外的独立临时工作区，仅复制最终产物回项目。

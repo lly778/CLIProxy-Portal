@@ -67,7 +67,14 @@
 
 {{define "upstream-model-cards"}}
 <section class="card upstream-card section-gap">
-  <div class="section-head compact"><div><h2>OAuth 模型</h2><p class="muted small">控制 {{.ChannelLabel}} OAuth 路由是否使用某个模型。</p></div></div>
+  <div class="section-head compact"><div><h2>OAuth 模型</h2><p class="muted small">控制 {{.ChannelLabel}} OAuth 路由是否使用某个模型。</p></div>
+    {{if .SupportsIdentityCompatibility}}<form method="post" action="/admin/upstreams/codex-identity" class="codex-identity-toggle" data-codex-identity-toggle>
+      {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{.Channel}}">
+      <label class="codex-identity-switch" title="移除指令身份介绍中的 based on GPT-5，兼容不同前缀、空格和换行；仅对经过门户网关的 {{.ChannelLabel}} 请求生效。"><span>兼容</span><input type="checkbox" role="switch" aria-label="Codex 指令兼容" aria-describedby="identity-status-{{.Channel}}" name="enabled" value="true" {{if .IdentityCompatibilityEnabled}}checked{{end}} {{if not .IdentityCompatibilityReady}}disabled{{end}}></label>
+      <span id="identity-status-{{.Channel}}" class="codex-identity-status muted small" data-identity-toggle-status role="status" aria-live="polite">{{if .IdentityCompatibilityError}}暂不可用{{else if not .IdentityCompatibilityReady}}需启用网关{{end}}</span>
+      <noscript><button class="button secondary" type="submit" {{if not .IdentityCompatibilityReady}}disabled{{end}}>保存</button></noscript>
+    </form>{{end}}
+  </div>
   {{if .ModelError}}<div class="alert danger" role="alert">{{.ModelError}}</div>{{end}}
   {{if .WildcardRules}}<div class="oauth-rule-note"><span class="muted small">保留的通配禁用规则</span><div>{{range .WildcardRules}}<span class="badge warning mono">{{.}}</span>{{end}}</div></div>{{end}}
   <div class="oauth-model-list">

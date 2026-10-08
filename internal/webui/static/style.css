@@ -309,6 +309,16 @@ td small, td .muted { display: block; margin-top: 2px; }
 .admin-action-form.delete-form { grid-template-columns: minmax(0, 1fr) auto; }
 .admin-action-form.delete-form .button { grid-column: auto; }
 .inline-form { display: inline-flex; }
+.codex-identity-toggle { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; align-self: center; gap: 8px; margin-left: auto; }
+.codex-identity-switch { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; font-weight: 600; cursor: pointer; }
+.codex-identity-switch input { appearance: none; position: relative; flex: 0 0 36px; width: 36px; min-height: 22px; height: 22px; margin: 0; padding: 0; border: 1px solid transparent; border-radius: 999px; background: #cbd5e1; cursor: pointer; transition: background .15s; }
+.codex-identity-switch input::before { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(16,24,40,.16); transition: transform .15s; }
+.codex-identity-switch input:checked { background: var(--primary); }
+.codex-identity-switch input:checked::before { transform: translateX(14px); }
+.codex-identity-switch input:focus-visible { outline: 3px solid #c7d7fe; outline-offset: 3px; }
+.codex-identity-switch input:disabled { opacity: .5; cursor: not-allowed; }
+.codex-identity-status { position: absolute; top: calc(100% + 6px); right: 0; white-space: nowrap; font-size: 10px; }
+.codex-identity-status[data-error="true"] { color: var(--danger); }
 .grow-form { display: flex; flex: 1; gap: 7px; align-items: center; }
 .grow-form input { flex: 1; min-width: 100px; }
 

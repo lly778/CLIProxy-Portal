@@ -547,37 +547,41 @@ type OAuthChannelView struct {
 
 type AdminUpstreamsView struct {
 	LayoutView
-	Channel           string
-	ChannelLabel      string
-	Channels          []OAuthChannelView
-	ChannelPanels     []AdminUpstreamsView
-	SupportsQuota     bool
-	SupportsReasoning bool
-	Accounts          []UpstreamAccountView
-	Presets           []OAuthPresetView
-	PresetError       string
-	PresetCardOrder   string
-	PresetLayoutError string
-	AliasCardOrder    string
-	AliasLayoutError  string
-	Models            []OAuthModelView
-	AliasModels       []OAuthModelView
-	ReasoningModels   []ReasoningCapModelView
-	WildcardRules     []string
-	ModelError        string
-	AliasError        string
-	AliasRevision     string
-	AliasReady        bool
-	ReasoningError    string
-	ReasoningRevision string
-	ReasoningReady    bool
-	QuotaError        string
-	RefreshLabel      string
-	RefreshCompleted  bool
-	RefreshDisabled   bool
-	RefreshRunning    bool
-	Enabled           int
-	Disabled          int
+	Channel                       string
+	ChannelLabel                  string
+	Channels                      []OAuthChannelView
+	ChannelPanels                 []AdminUpstreamsView
+	SupportsQuota                 bool
+	SupportsReasoning             bool
+	SupportsIdentityCompatibility bool
+	IdentityCompatibilityEnabled  bool
+	IdentityCompatibilityReady    bool
+	IdentityCompatibilityError    string
+	Accounts                      []UpstreamAccountView
+	Presets                       []OAuthPresetView
+	PresetError                   string
+	PresetCardOrder               string
+	PresetLayoutError             string
+	AliasCardOrder                string
+	AliasLayoutError              string
+	Models                        []OAuthModelView
+	AliasModels                   []OAuthModelView
+	ReasoningModels               []ReasoningCapModelView
+	WildcardRules                 []string
+	ModelError                    string
+	AliasError                    string
+	AliasRevision                 string
+	AliasReady                    bool
+	ReasoningError                string
+	ReasoningRevision             string
+	ReasoningReady                bool
+	QuotaError                    string
+	RefreshLabel                  string
+	RefreshCompleted              bool
+	RefreshDisabled               bool
+	RefreshRunning                bool
+	Enabled                       int
+	Disabled                      int
 }
 
 type OAuthPresetView struct {

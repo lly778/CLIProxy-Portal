@@ -646,6 +646,17 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {
 	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity"}
+	v.SupportsIdentityCompatibility = channel != "" && channel != "codex"
+	if v.SupportsIdentityCompatibility {
+		enabled, err := s.Store.EnabledCodexIdentityChannels(r.Context())
+		if err != nil {
+			v.IdentityCompatibilityError = "指令兼容设置暂时不可用"
+			s.Logger.Error("read Codex identity compatibility", "error", err)
+		} else {
+			v.IdentityCompatibilityEnabled = enabled[channel]
+			v.IdentityCompatibilityReady = s.Cfg.GatewayListenAddr != ""
+		}
+	}
 	v.AliasCardOrder, v.AliasLayoutError = s.upstreamCardOrder(r.Context(), "aliases:"+channel)
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}

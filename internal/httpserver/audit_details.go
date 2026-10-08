@@ -53,6 +53,8 @@ func auditActionDisplay(action string) string {
 		return "启用上游账号"
 	case "upstream.disable":
 		return "停用上游账号"
+	case "upstream.codex_identity.update":
+		return "修改 Codex 指令兼容"
 	case "user.register":
 		return "提交注册申请"
 	case "user.resubmit":

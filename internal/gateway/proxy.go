@@ -104,6 +104,7 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	g.applyCodexIdentityCompatibility(r)
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(out *httputil.ProxyRequest) {
 			out.SetURL(g.upstream)
