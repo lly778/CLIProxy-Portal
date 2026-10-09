@@ -104,7 +104,20 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	g.applyCodexIdentityCompatibility(r)
+	identityCleanup, identityErr := g.applyCodexIdentityCompatibility(r)
+	if identityCleanup != nil {
+		defer identityCleanup()
+	}
+	if identityErr != nil {
+		g.logger.Warn("gateway identity buffering failed", "path", r.URL.Path, "error_type", fmt.Sprintf("%T", identityErr))
+		if capture != nil {
+			capture.status = http.StatusBadGateway
+			capture.responseContentType = "text/plain; charset=utf-8"
+			_, _ = capture.response.Write([]byte("Bad Gateway\n"))
+		}
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		return
+	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(out *httputil.ProxyRequest) {
 			out.SetURL(g.upstream)

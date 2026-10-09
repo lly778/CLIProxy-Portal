@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,7 +94,7 @@ func TestIdentityPayloadRewritesOnlyInstructionContent(t *testing.T) {
 		{"native-gemini", "/v1beta/models/gemini-real:streamGenerateContent", `{"systemInstruction":{"parts":[{"text":"` + oldIdentity + `"}]},"contents":[{"role":"user","parts":[{"text":"` + oldIdentity + `"}]}]}`, "You are Codex, a coding agent.", "gemini-real"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, model, changed := rewriteIdentityPayload([]byte(tc.body), tc.path)
+			got, model, changed := rewriteIdentityPayloadForTest(t, []byte(tc.body), tc.path)
 			if !changed || model != tc.model || !bytes.Contains(got, []byte(tc.expected)) {
 				t.Fatalf("rewrite = %s, %q, %v", got, model, changed)
 			}
@@ -122,7 +124,7 @@ func TestIdentityPayloadRewritesOnlyInstructionContent(t *testing.T) {
 		})
 	}
 	for _, raw := range []string{`not-json`, `{"input":"` + oldIdentity + `"}`, `{"instructions":"Quoted: ` + oldIdentity + `"}`, `{"instructions":"You are Codex, an agent based on GPT-6."}`, `{"input":[{"type":"function_call_output","role":"developer","content":"` + oldIdentity + `"}]}`} {
-		got, _, changed := rewriteIdentityPayload([]byte(raw), "/v1/responses")
+		got, _, changed := rewriteIdentityPayloadForTest(t, []byte(raw), "/v1/responses")
 		if changed || string(got) != raw {
 			t.Fatalf("non-target payload was changed: %s", got)
 		}
@@ -191,27 +193,53 @@ func TestGatewayIdentityCompatibilityRoutingCompressionAndPassthrough(t *testing
 	}
 }
 
-func TestGatewayIdentityCompatibilityReplaysOversizedChunkedBodies(t *testing.T) {
-	wire := []byte(`{"model":"gemini-real","instructions":"` + oldIdentity + `","input":"` + strings.Repeat("a", identityRewriteLimit) + `"}`)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got, _ := io.ReadAll(r.Body)
-		if !bytes.Equal(got, wire) {
-			t.Error("oversized request lost bytes")
-		}
-		w.WriteHeader(204)
-	}))
-	defer upstream.Close()
-	g, st, key := captureGatewayForTest(t, upstream.URL)
-	g.keys.CPAMP = &identityCPAMP{}
-	if err := st.SetCodexIdentityCompatibility(t.Context(), "antigravity", true); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(wire))
-	req.ContentLength = -1
-	req.Header.Set("Authorization", "Bearer "+key)
-	response := httptest.NewRecorder()
-	g.Handler().ServeHTTP(response, req)
-	if response.Code != 204 {
-		t.Fatalf("status %d", response.Code)
+func TestGatewayIdentityCompatibilityHandlesLargeAndCompressedBodies(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		size          int
+		gzip, chunked bool
+	}{
+		{"plain-over-2MiB", 3 << 20, false, false},
+		{"chunked-over-2MiB", 3 << 20, false, true},
+		{"gzip-over-capture-limit", 17 << 20, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plain := []byte(`{"model":"gemini-real","instructions":"` + oldIdentity + `","input":"` + strings.Repeat("a", tc.size) + `"}`)
+			want := bytes.Replace(plain, []byte(" based on GPT-5"), nil, 1)
+			wire := plain
+			if tc.gzip {
+				wire = gzipForTest(t, plain)
+			}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got, _ := io.ReadAll(r.Body)
+				if !bytes.Equal(got, want) || r.ContentLength != int64(len(want)) || r.Header.Get("Content-Encoding") != "" {
+					t.Error("large request was skipped, truncated, or had inconsistent headers")
+				}
+				w.WriteHeader(204)
+			}))
+			defer upstream.Close()
+			g, st, _ := captureGatewayForTest(t, upstream.URL)
+			g.keys.CPAMP = &identityCPAMP{}
+			if err := st.SetCodexIdentityCompatibility(t.Context(), "antigravity", true); err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(wire))
+			req.Header.Set("Authorization", "Bearer manual-test-key")
+			if tc.chunked {
+				req.ContentLength = -1
+			}
+			if tc.gzip {
+				req.Header.Set("Content-Encoding", "gzip")
+			}
+			response := httptest.NewRecorder()
+			g.Handler().ServeHTTP(response, req)
+			if response.Code != 204 {
+				t.Fatalf("status %d", response.Code)
+			}
+			files, err := os.ReadDir(filepath.Join(g.vault.dir, ".identity-buffer"))
+			if err != nil || len(files) != 0 {
+				t.Fatalf("temporary request files not removed: %v %v", files, err)
+			}
+		})
 	}
 }
