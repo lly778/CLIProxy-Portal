@@ -241,6 +241,23 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 	if err := s.migrateOAuthPresetPayloads(ctx); err != nil {
 		return fmt.Errorf("upgrade OAuth preset format: %w", err)
 	}
+	for column, definition := range map[string]string{"status_code": "INTEGER NOT NULL DEFAULT 0", "failure_reason": "TEXT NOT NULL DEFAULT ''"} {
+		var present int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gateway_request_timings') WHERE name=?`, column).Scan(&present); err != nil {
+			return err
+		}
+		if present == 0 {
+			if _, err := s.db.ExecContext(ctx, `ALTER TABLE gateway_request_timings ADD COLUMN `+column+` `+definition); err != nil {
+				return fmt.Errorf("migrate timing failure %s: %w", column, err)
+			}
+		}
+	}
+	// Historical receive interruptions are identifiable without guessing model
+	// calls: no upload boundary, no upstream response/trace, incomplete request.
+	if _, err := s.db.ExecContext(ctx, `UPDATE gateway_request_timings SET failure_reason='upload_interrupted_legacy'
+		WHERE failure_reason='' AND completed=0 AND TRIM(cpa_request_id)='' AND request_read_ms IS NULL AND upstream_headers_ms IS NULL AND response_started_ms IS NOT NULL`); err != nil {
+		return err
+	}
 	for _, column := range []string{"request_read_ms", "response_started_ms"} {
 		var present int
 		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gateway_timing_samples') WHERE name=?`, column).Scan(&present); err != nil {
@@ -266,6 +283,14 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		AND sample.id IN (SELECT id FROM gateway_request_timings
 		WHERE request_read_ms>=0 AND response_started_ms>=request_read_ms AND total_ms>=response_started_ms)`); err != nil {
 		return fmt.Errorf("backfill gateway timing stages: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE gateway_timing_samples AS sample
+		SET request_read_ms=(SELECT COALESCE(response_started_ms,total_ms) FROM gateway_request_timings WHERE id=sample.id),
+		response_started_ms=(SELECT COALESCE(response_started_ms,total_ms) FROM gateway_request_timings WHERE id=sample.id)
+		WHERE sample.request_read_ms IS NULL AND sample.id IN (SELECT id FROM gateway_request_timings
+		WHERE failure_reason IN ('upload_interrupted','upload_interrupted_legacy') AND request_read_ms IS NULL AND upstream_headers_ms IS NULL
+		AND COALESCE(response_started_ms,total_ms)>=0 AND total_ms>=COALESCE(response_started_ms,total_ms))`); err != nil {
+		return fmt.Errorf("backfill interrupted upload stages: %w", err)
 	}
 	var rememberColumn int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name='remember'`).Scan(&rememberColumn); err != nil {

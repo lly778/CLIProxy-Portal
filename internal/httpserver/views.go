@@ -155,6 +155,13 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 	view := webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: requestModelLabel(e), Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
 	view.TotalLatency = "—"
 	view.LatencyDetail = "模型调用耗时：" + latency + "\n此请求未记录服务器耗时"
+	if s.Store != nil && e.PortalTimingID != "" {
+		if timing, err := s.Store.GatewayTimingByID(contextBackground(), e.PortalTimingID, e.APIKeyHash); err == nil {
+			view.TotalLatency, view.LatencyDetail = requestTimingDisplay(timing, e)
+			view.InputTokens, view.OutputTokens, view.CacheTokens = "—", "—", "—"
+			view.ReasoningTokens, view.TotalTokens, view.ReasoningEffort = "—", "—", "—"
+		}
+	}
 	if s.Store != nil && e.RequestID != "" && e.APIKeyHash != "" {
 		if timing, err := s.Store.GatewayTimingByCPARequest(contextBackground(), strings.ToLower(e.RequestID), strings.ToLower(e.APIKeyHash)); err == nil {
 			eventAt := time.UnixMilli(e.TimestampMS)

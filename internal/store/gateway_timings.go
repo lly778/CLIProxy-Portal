@@ -21,6 +21,28 @@ type GatewayRequestTiming struct {
 	ResponseStartedMS *int64
 	TotalMS           int64
 	Completed         bool
+	StatusCode        int
+	FailureReason     string
+}
+
+// Interrupted uploads never have a successful request-read boundary. Use the
+// first error-response write as the cutoff for reception/error handling, without
+// changing the raw NULL boundary. With no response, reception lasted to closure.
+func GatewayTimingStages(row GatewayRequestTiming) GatewayRequestTiming {
+	if row.RequestReadMS == nil && row.UpstreamHeadersMS == nil &&
+		(row.FailureReason == "upload_interrupted" || row.FailureReason == "upload_interrupted_legacy") {
+		end := row.TotalMS
+		if row.ResponseStartedMS != nil {
+			end = *row.ResponseStartedMS
+			if end < 0 || end > row.TotalMS {
+				return row
+			}
+		} else {
+			row.ResponseStartedMS = &end
+		}
+		row.RequestReadMS = &end
+	}
+	return row
 }
 
 func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequestTiming) error {
@@ -30,15 +52,16 @@ func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequest
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO gateway_request_timings
-		(id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.UserID, row.APIKeyHash, row.CPARequestID, row.StartedAt.UnixMilli(), row.EndedAt.UnixMilli(), row.StartSource, row.RequestReadMS, row.UpstreamHeadersMS, row.ResponseStartedMS, row.TotalMS, row.Completed)
+		(id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed,status_code,failure_reason)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.UserID, row.APIKeyHash, row.CPARequestID, row.StartedAt.UnixMilli(), row.EndedAt.UnixMilli(), row.StartSource, row.RequestReadMS, row.UpstreamHeadersMS, row.ResponseStartedMS, row.TotalMS, row.Completed, row.StatusCode, row.FailureReason)
 	if err != nil {
 		return err
 	}
 	// Keep compact trend samples independently of the bounded detail rows. They
 	// contain neither conversation content nor API keys/request identifiers.
+	stages := GatewayTimingStages(row)
 	if _, err = tx.ExecContext(ctx, `INSERT INTO gateway_timing_samples(id,user_id,started_at_ms,total_ms,request_read_ms,response_started_ms)
-		VALUES(?,?,?,?,?,?)`, row.ID, row.UserID, row.StartedAt.UnixMilli(), row.TotalMS, row.RequestReadMS, row.ResponseStartedMS); err != nil {
+		VALUES(?,?,?,?,?,?)`, row.ID, row.UserID, row.StartedAt.UnixMilli(), row.TotalMS, stages.RequestReadMS, stages.ResponseStartedMS); err != nil {
 		return err
 	}
 	// Match dialogue retention: unidentified requests (e.g. an upstream 429
@@ -59,11 +82,54 @@ func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequest
 func (s *Store) GatewayTimingByCPARequest(ctx context.Context, requestID, apiKeyHash string) (GatewayRequestTiming, error) {
 	var row GatewayRequestTiming
 	var start, end int64
-	err := s.db.QueryRowContext(ctx, `SELECT id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed
+	err := s.db.QueryRowContext(ctx, `SELECT id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed,status_code,failure_reason
 		FROM gateway_request_timings WHERE cpa_request_id=? AND api_key_hash=? ORDER BY started_at_ms DESC LIMIT 1`, requestID, apiKeyHash).
-		Scan(&row.ID, &row.UserID, &row.APIKeyHash, &row.CPARequestID, &start, &end, &row.StartSource, &row.RequestReadMS, &row.UpstreamHeadersMS, &row.ResponseStartedMS, &row.TotalMS, &row.Completed)
+		Scan(&row.ID, &row.UserID, &row.APIKeyHash, &row.CPARequestID, &start, &end, &row.StartSource, &row.RequestReadMS, &row.UpstreamHeadersMS, &row.ResponseStartedMS, &row.TotalMS, &row.Completed, &row.StatusCode, &row.FailureReason)
 	row.StartedAt, row.EndedAt = time.UnixMilli(start).UTC(), time.UnixMilli(end).UTC()
 	return row, err
+}
+
+func (s *Store) GatewayTimingByID(ctx context.Context, id, keyHash string) (GatewayRequestTiming, error) {
+	var row GatewayRequestTiming
+	var start, end int64
+	err := s.db.QueryRowContext(ctx, `SELECT id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed,status_code,failure_reason
+		FROM gateway_request_timings WHERE id=? AND api_key_hash=?`, id, keyHash).
+		Scan(&row.ID, &row.UserID, &row.APIKeyHash, &row.CPARequestID, &start, &end, &row.StartSource, &row.RequestReadMS, &row.UpstreamHeadersMS, &row.ResponseStartedMS, &row.TotalMS, &row.Completed, &row.StatusCode, &row.FailureReason)
+	row.StartedAt, row.EndedAt = time.UnixMilli(start).UTC(), time.UnixMilli(end).UTC()
+	return row, err
+}
+
+// Classified gateway failures without a CPA trace cannot be joined to upstream
+// model metadata by ID. User/range filters apply before ordering and limiting.
+func (s *Store) GatewayUntracedFailures(ctx context.Context, from, to time.Time, userID string, limit int) ([]GatewayRequestTiming, int64, error) {
+	where := ` WHERE TRIM(cpa_request_id)='' AND failure_reason<>'' AND started_at_ms>=? AND started_at_ms<?`
+	args := []any{from.UnixMilli(), to.UnixMilli()}
+	if userID != "" {
+		where += ` AND user_id=?`
+		args = append(args, userID)
+	}
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_request_timings`+where, args...).Scan(&count); err != nil {
+		return nil, 0, err
+	}
+	query := `SELECT id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed,status_code,failure_reason FROM gateway_request_timings` + where + ` ORDER BY started_at_ms DESC,id DESC LIMIT ?`
+	args = append(args, max(1, min(limit, 100)))
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var result []GatewayRequestTiming
+	for rows.Next() {
+		var row GatewayRequestTiming
+		var start, end int64
+		if err := rows.Scan(&row.ID, &row.UserID, &row.APIKeyHash, &row.CPARequestID, &start, &end, &row.StartSource, &row.RequestReadMS, &row.UpstreamHeadersMS, &row.ResponseStartedMS, &row.TotalMS, &row.Completed, &row.StatusCode, &row.FailureReason); err != nil {
+			return nil, 0, err
+		}
+		row.StartedAt, row.EndedAt = time.UnixMilli(start).UTC(), time.UnixMilli(end).UTC()
+		result = append(result, row)
+	}
+	return result, count, rows.Err()
 }
 
 type GatewayTimingTotal struct {

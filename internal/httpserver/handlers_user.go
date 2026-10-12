@@ -34,6 +34,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
 	analytics, err := s.Keys.Usage(r.Context(), u.ID, from, to, 10)
+	analytics = s.usageWithGatewayFailures(r.Context(), analytics, from, to, u.ID, 10)
 	summary, _, _, requests := s.usageViews(analytics, from, to)
 	v := webui.DashboardView{LayoutView: s.layout(u, currentToken(r), "账户概览", "dashboard"), Greeting: u.Name + "，你好", StatusCard: s.statusCard(u), Key: s.keyView(u), Usage: summary, RecentUsage: requests}
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
@@ -281,14 +282,14 @@ func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := s.Keys.UserRequests(r.Context(), u.ID, u.CreatedAt, 100)
+	page = s.supplementGatewayFailures(r.Context(), page, u.CreatedAt, time.Now().UTC(), u.ID, 100)
 	v := webui.ActivityView{LayoutView: s.layout(u, currentToken(r), "模型请求日志", "activity")}
 	if err != nil {
 		s.Logger.Warn("list user request metadata", "error", err)
 		v.Error = "模型请求日志暂时不可用"
-	} else {
-		for _, event := range page.Items {
-			v.Requests = append(v.Requests, s.requestView(event))
-		}
+	}
+	for _, event := range page.Items {
+		v.Requests = append(v.Requests, s.requestView(event))
 	}
 	_ = s.UI.Render(w, webui.PageActivity, v)
 }

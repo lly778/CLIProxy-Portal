@@ -109,6 +109,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		defer identityCleanup()
 	}
 	if identityErr != nil {
+		if measurement != nil {
+			measurement.failure("preparation_failed", http.StatusBadGateway)
+		}
 		g.logger.Warn("gateway identity buffering failed", "path", r.URL.Path, "error_type", fmt.Sprintf("%T", identityErr))
 		if capture != nil {
 			capture.status = http.StatusBadGateway
@@ -155,6 +158,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if measurement != nil {
+				measurement.failure("upstream_request_failed", http.StatusBadGateway)
+			}
 			// Transport errors may embed full URLs (including query credentials).
 			g.logger.Warn("gateway upstream request failed", "path", r.URL.Path, "error_type", fmt.Sprintf("%T", err))
 			if capture != nil {

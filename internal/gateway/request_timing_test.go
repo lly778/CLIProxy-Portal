@@ -176,3 +176,55 @@ func TestCancelledStreamTimingIsMarkedIncomplete(t *testing.T) {
 		t.Fatalf("cancelled stream timing = %+v", row)
 	}
 }
+
+func TestInterruptedUploadIsLoggedWithoutCallingUpstream(t *testing.T) {
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); w.WriteHeader(http.StatusOK) }))
+	defer upstream.Close()
+	g, st, key := captureGatewayForTest(t, upstream.URL)
+	if err := st.SetCodexIdentityCompatibility(t.Context(), "antigravity", true); err != nil {
+		t.Fatal(err)
+	}
+	address := timingServerForTest(t, g)
+	conn, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	start := time.Now().Add(-time.Second)
+	_, _ = fmt.Fprintf(conn, "POST /v1/responses HTTP/1.1\r\nHost: example\r\nAuthorization: Bearer %s\r\nContent-Length: 200\r\n\r\n{\"model\":", key)
+	time.Sleep(80 * time.Millisecond)
+	if err := conn.(*net.TCPConn).CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodPost})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 502 {
+		t.Fatalf("error status %d", resp.StatusCode)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	var row store.GatewayRequestTiming
+	for time.Now().Before(deadline) {
+		rows, _, err := st.GatewayUntracedFailures(t.Context(), start, time.Now().Add(time.Second), "capture-owner", 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) > 0 {
+			row = rows[0]
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if row.ID == "" || row.FailureReason != "upload_interrupted" || row.StatusCode != 502 || row.Completed || row.RequestReadMS != nil || row.CPARequestID != "" || row.ResponseStartedMS == nil || row.TotalMS < 70 || calls.Load() != 0 {
+		t.Fatalf("interrupted upload lost/misclassified: %+v, upstream calls %d", row, calls.Load())
+	}
+	totals, err := st.GatewayTimingTotals(t.Context(), start, time.Now().Add(time.Second), "capture-owner", start, time.Hour)
+	if err != nil || len(totals) != 1 || totals[0].StageSamples != 1 || totals[0].WaitMS != 0 || totals[0].UploadMS+totals[0].ResponseMS != row.TotalMS {
+		t.Fatalf("interrupted stages: %+v %v", totals, err)
+	}
+}

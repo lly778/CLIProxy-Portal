@@ -9,14 +9,20 @@ import (
 )
 
 func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) (string, string) {
+	interruptedUpload := row.RequestReadMS == nil && row.UpstreamHeadersMS == nil && (row.FailureReason == "upload_interrupted" || row.FailureReason == "upload_interrupted_legacy")
+	row = store.GatewayTimingStages(row)
 	total := fmt.Sprintf("%d ms", row.TotalMS)
 	lines := []string{"服务器耗时：" + total}
-	if !row.Completed {
+	if row.FailureReason != "" {
+		lines = append(lines, "请求未完整完成；耗时包含失败处理及连接收尾")
+	} else if !row.Completed {
 		lines = append(lines, "连接中断或回复未完整写出；耗时为中断前已耗时间")
 	}
 	model := "—"
 	if event.LatencyMS != nil {
 		model = fmt.Sprintf("%d ms", *event.LatencyMS)
+	} else if row.FailureReason == "upload_interrupted_legacy" || row.FailureReason == "preparation_failed" || (row.FailureReason == "upload_interrupted" && row.UpstreamHeadersMS == nil) {
+		model = "未进入"
 	}
 	lines = append(lines, "", "各阶段耗时（完整记录时，三段相加为总耗时）")
 	stage := func(label string, from, to *int64) {
@@ -28,8 +34,14 @@ func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) 
 	}
 	zero := int64(0)
 	stage("接入及请求上传", &zero, row.RequestReadMS)
-	stage("请求收齐到开始写出回复", row.RequestReadMS, row.ResponseStartedMS)
-	stage("持续生成及发送回复", row.ResponseStartedMS, &row.TotalMS)
+	if interruptedUpload {
+		lines = append(lines, "请求收齐到开始写出回复：未进入（0 ms）")
+		stage("错误回复及连接收尾", row.ResponseStartedMS, &row.TotalMS)
+		lines = append(lines, "请求上传未完成")
+	} else {
+		stage("请求收齐到开始写出回复", row.RequestReadMS, row.ResponseStartedMS)
+		stage("持续生成及发送回复", row.ResponseStartedMS, &row.TotalMS)
+	}
 	lines = append(lines, "", "模型耗时指标（与上述阶段重合，不参与累加）", "模型调用耗时："+model)
 	if event.TTFTMS != nil {
 		lines = append(lines, fmt.Sprintf("其中：首 token 等待 %d ms", *event.TTFTMS))

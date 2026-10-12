@@ -361,6 +361,7 @@ func (s *Server) renderAdminUser(w http.ResponseWriter, r *http.Request, target 
 	to := time.Now().UTC()
 	from := to.AddDate(0, 0, -7)
 	a, _ := s.Keys.Usage(r.Context(), target.ID, from, to, 100)
+	a = s.usageWithGatewayFailures(r.Context(), a, from, to, target.ID, 100)
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	v := webui.AdminUserDetailView{LayoutView: s.layout(actor, currentToken(r), target.Name, "admin-users"), Target: s.userView(target), Key: s.keyView(target), StatusCard: s.adminStatusCard(target), Usage: summary, Daily: daily, Trend: usageTrend(daily), ByModel: models, Requests: requests, CanApprove: target.Status == domain.StatusPending || target.Status == domain.StatusRejected, CanReject: target.Status == domain.StatusPending, CanSuspend: target.Status == domain.StatusApproved, CanUnsuspend: target.Status == domain.StatusSuspended, CanDelete: target.ID != actor.ID, CanReset: target.Status != domain.StatusDeleted, CanChangePhone: target.Status != domain.StatusDeleted, DeleteWarning: "将先撤销 API Key，再永久匿名化账号。此操作不可恢复。"}
 	if target.IsAdmin() {
@@ -1048,6 +1049,11 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	events, err := s.Keys.GlobalRequests(r.Context(), 100)
+	if events.TotalCount == 0 {
+		events.TotalCount = int64(len(events.Items))
+	}
+	now := time.Now().UTC()
+	events = s.supplementGatewayFailures(r.Context(), events, now.AddDate(-10, 0, 0), now, "", 100)
 	v := webui.AdminRequestsView{LayoutView: s.layout(u, currentToken(r), "全局日志", "admin-requests"), Shown: strconv.Itoa(len(events.Items)), Total: compactNumber(events.TotalCount)}
 	if err != nil {
 		v.Error = "全局调用元数据暂时不可用"
