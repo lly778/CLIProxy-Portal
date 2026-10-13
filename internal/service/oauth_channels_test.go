@@ -35,6 +35,28 @@ func newChannelCPAMP() *channelCPAMP {
 func (f *channelCPAMP) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {
 	return append([]cpamp.AuthFile(nil), f.files...), nil
 }
+func (f *channelCPAMP) ListAuthFileModels(_ context.Context, file cpamp.AuthFile) ([]cpamp.Model, error) {
+	models := []cpamp.Model{}
+	if file.Disabled {
+		return models, nil
+	}
+	for _, definition := range f.models[file.Provider] {
+		if rule, _ := excludedModelRule(definition.ID, f.excluded[file.Provider]); rule != "" {
+			continue
+		}
+		mapped, keep := false, false
+		for _, alias := range f.aliases[file.Provider] {
+			if alias.Name == definition.ID {
+				models = append(models, cpamp.Model{ID: alias.Alias})
+				mapped, keep = true, keep || alias.Fork
+			}
+		}
+		if !mapped || keep {
+			models = append(models, cpamp.Model{ID: definition.ID})
+		}
+	}
+	return models, nil
+}
 func (f *channelCPAMP) SetAuthFileDisabled(_ context.Context, file cpamp.AuthFile, disabled bool) error {
 	for i := range f.files {
 		if f.files[i].Name == file.Name && f.files[i].Provider == file.Provider {

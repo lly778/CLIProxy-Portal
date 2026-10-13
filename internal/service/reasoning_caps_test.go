@@ -17,6 +17,10 @@ type reasoningCPAMP struct {
 	puts     int
 }
 
+func (*reasoningCPAMP) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {
+	return nil, nil
+}
+
 func (f *reasoningCPAMP) GetConfigYAML(context.Context) ([]byte, error) {
 	return append([]byte(nil), f.config...), nil
 }

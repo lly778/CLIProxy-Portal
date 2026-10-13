@@ -73,7 +73,14 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[
 func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
-	return k.setOAuthReasoningCaps(ctx, inputs, revision, channels...)
+	if err := k.setOAuthReasoningCaps(ctx, inputs, revision, channels...); err != nil {
+		return err
+	}
+	channel, _ := selectedOAuthChannel(channels)
+	if err := k.refreshOAuthRegistrations(ctx, channel); err != nil {
+		return fmt.Errorf("设置已保存，但 CPA 注册刷新失败：%w", err)
+	}
+	return nil
 }
 
 func (k *Keys) setOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {

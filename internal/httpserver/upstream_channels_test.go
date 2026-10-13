@@ -33,11 +33,34 @@ func (f *upstreamChannelAPI) ListAuthFiles(context.Context) ([]cpamp.AuthFile, e
 	return []cpamp.AuthFile{{Name: "codex.json", Provider: "codex", AccountSnapshot: "codex@example.com"}, {Name: "anti.json", Provider: "antigravity", AccountSnapshot: "anti@example.com", Disabled: f.antiDisabled}}, nil
 }
 func (f *upstreamChannelAPI) SetAuthFileDisabled(_ context.Context, file cpamp.AuthFile, disabled bool) error {
+	if file.Provider == "codex" && !disabled {
+		return nil // An enabled account can have its model registration refreshed.
+	}
 	if file.Provider != "antigravity" {
 		panic("foreign account write")
 	}
 	f.antiDisabled = disabled
 	return nil
+}
+func (f *upstreamChannelAPI) ListAuthFileModels(_ context.Context, file cpamp.AuthFile) ([]cpamp.Model, error) {
+	name := file.Provider + "-model"
+	for _, excluded := range f.excluded[file.Provider] {
+		if excluded == name {
+			return nil, nil
+		}
+	}
+	models := []cpamp.Model{}
+	mapped, keep := false, false
+	for _, alias := range f.aliases[file.Provider] {
+		if alias.Name == name {
+			models = append(models, cpamp.Model{ID: alias.Alias})
+			mapped, keep = true, keep || alias.Fork
+		}
+	}
+	if !mapped || keep {
+		models = append(models, cpamp.Model{ID: name})
+	}
+	return models, nil
 }
 func (f *upstreamChannelAPI) ListOAuthModelDefinitions(_ context.Context, channel string) ([]cpamp.OAuthModelDefinition, error) {
 	return []cpamp.OAuthModelDefinition{{ID: channel + "-model", ThinkingLevels: []string{"low", "medium", "high"}}}, nil

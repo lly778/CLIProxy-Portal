@@ -969,6 +969,8 @@ func (k *Keys) UpstreamAccountQuotas(ctx context.Context, channels ...string) (m
 // SetUpstreamAccountDisabled re-resolves the submitted opaque ID immediately
 // before mutating CPAMP, then verifies that the requested state was applied.
 func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabled bool, channels ...string) (UpstreamAccount, error) {
+	k.presetMu.Lock()
+	defer k.presetMu.Unlock()
 	channel, err := selectedOAuthChannel(channels)
 	if err != nil {
 		return UpstreamAccount{}, err
@@ -1172,7 +1174,14 @@ func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, channels ...string) error {
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
-	return k.setOAuthModelAliases(ctx, inputs, revision, true, channels...)
+	if err := k.setOAuthModelAliases(ctx, inputs, revision, true, channels...); err != nil {
+		return err
+	}
+	channel, _ := selectedOAuthChannel(channels)
+	if err := k.refreshOAuthRegistrations(ctx, channel); err != nil {
+		return fmt.Errorf("设置已保存，但 CPA 注册刷新失败：%w", err)
+	}
+	return nil
 }
 
 func (k *Keys) setOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, checkCrossChannel bool, channels ...string) error {
@@ -1378,7 +1387,14 @@ func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthMo
 func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool, channels ...string) error {
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
-	return k.setOAuthModelEnabled(ctx, modelID, enabled, true, channels...)
+	if err := k.setOAuthModelEnabled(ctx, modelID, enabled, true, channels...); err != nil {
+		return err
+	}
+	channel, _ := selectedOAuthChannel(channels)
+	if err := k.refreshOAuthRegistrations(ctx, channel); err != nil {
+		return fmt.Errorf("设置已保存，但 CPA 注册刷新失败：%w", err)
+	}
+	return nil
 }
 
 func (k *Keys) setOAuthModelEnabled(ctx context.Context, modelID string, enabled, checkCrossChannel bool, channels ...string) error {

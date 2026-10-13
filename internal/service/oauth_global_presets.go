@@ -173,28 +173,41 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 		indices[entry.Channel] = i
 	}
 	attempted := []OAuthChannelPreset{}
+	channels := []string{}
+	var applyErr error
 	for _, entry := range target.Channels {
 		// Do not rewrite channels absent from the stored preset.
 		if !included[entry.Channel] {
 			continue
 		}
 		attempted = append(attempted, current.Channels[indices[entry.Channel]])
-		if err := k.applyOAuthChannelPreset(ctx, entry); err != nil {
-			// Cancellation must not prevent a best-effort rollback across every
-			// already-touched channel, including the one that failed halfway through.
-			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
-			defer cancel()
-			rollbackErrors := []error{}
-			for i := len(attempted) - 1; i >= 0; i-- {
-				if restoreErr := k.applyOAuthChannelPreset(rollbackCtx, attempted[i]); restoreErr != nil {
-					rollbackErrors = append(rollbackErrors, fmt.Errorf("%s：%w", attempted[i].Channel, restoreErr))
-				}
-			}
-			if len(rollbackErrors) > 0 {
-				return fmt.Errorf("应用预设失败：%v；恢复原配置也失败：%w", err, errors.Join(rollbackErrors...))
-			}
-			return fmt.Errorf("应用预设失败，已恢复所有受影响渠道：%w", err)
+		channels = append(channels, entry.Channel)
+		if applyErr = k.applyOAuthChannelPreset(ctx, entry); applyErr != nil {
+			break
 		}
 	}
-	return nil
+	// Refresh only after all channels reach their final settings, not during
+	// the intermediate alias-clear and model-toggle steps.
+	if applyErr == nil {
+		applyErr = k.refreshOAuthRegistrations(ctx, channels...)
+	}
+	if applyErr == nil {
+		return nil
+	}
+	// Cancellation must not prevent rollback of configuration and registration.
+	rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+	defer cancel()
+	rollbackErrors := []error{}
+	for i := len(attempted) - 1; i >= 0; i-- {
+		if restoreErr := k.applyOAuthChannelPreset(rollbackCtx, attempted[i]); restoreErr != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("%s：%w", attempted[i].Channel, restoreErr))
+		}
+	}
+	if restoreErr := k.refreshOAuthRegistrations(rollbackCtx, channels...); restoreErr != nil {
+		rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复 CPA 注册失败：%w", restoreErr))
+	}
+	if len(rollbackErrors) > 0 {
+		return fmt.Errorf("应用预设失败：%v；恢复原配置也失败：%w", applyErr, errors.Join(rollbackErrors...))
+	}
+	return fmt.Errorf("应用预设失败，已恢复所有受影响渠道：%w", applyErr)
 }
