@@ -12,27 +12,73 @@ import (
 
 const MaxOAuthPresets = 20
 
-func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthPreset, error) {
+var ErrOAuthPresetChanged = errors.New("OAuth preset changed")
+var ErrOAuthPresetNameExists = errors.New("OAuth preset name exists")
+
+// Update by stable ID rather than the create/upsert-by-name path. Renaming a
+// preset must never overwrite another preset or reset its creation/order key.
+func (s *Store) UpdateOAuthPreset(ctx context.Context, preset OAuthPreset, expected time.Time) (OAuthPreset, error) {
 	preset.Name = strings.TrimSpace(preset.Name)
-	if preset.ID == "" || preset.Name == "" || preset.Payload == "" {
+	if preset.ID == "" || len([]rune(preset.Name)) == 0 || len([]rune(preset.Name)) > 40 || !json.Valid([]byte(preset.Payload)) {
 		return OAuthPreset{}, errors.New("invalid OAuth preset")
 	}
+	if err := validateOAuthPresetPayload(preset.Payload); err != nil {
+		return OAuthPreset{}, err
+	}
+	updated := max(time.Now().UTC().UnixMilli(), expected.UnixMilli()+1)
+	result, err := s.db.ExecContext(ctx, `UPDATE oauth_presets SET name=?,payload=?,updated_by=?,updated_at_ms=? WHERE id=? AND updated_at_ms=?`, preset.Name, preset.Payload, preset.UpdatedBy, updated, preset.ID, expected.UnixMilli())
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			return OAuthPreset{}, ErrOAuthPresetNameExists
+		}
+		return OAuthPreset{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return OAuthPreset{}, err
+	}
+	if count == 0 {
+		return OAuthPreset{}, ErrOAuthPresetChanged
+	}
+	return s.OAuthPreset(ctx, preset.ID)
+}
+
+func validateOAuthPresetPayload(payload string) error {
 	var format struct {
 		Version  int `json:"version"`
 		Channels []struct {
 			Channel string `json:"channel"`
 		} `json:"channels"`
 	}
-	if json.Unmarshal([]byte(preset.Payload), &format) != nil || format.Version != 3 || len(format.Channels) == 0 {
-		return OAuthPreset{}, errors.New("invalid OAuth preset format")
+	if json.Unmarshal([]byte(payload), &format) != nil || format.Version != 3 || len(format.Channels) == 0 {
+		return errors.New("invalid OAuth preset format")
 	}
 	seen := map[string]bool{}
 	for _, entry := range format.Channels {
 		channel := strings.ToLower(strings.TrimSpace(entry.Channel))
 		if channel == "" || seen[channel] {
-			return OAuthPreset{}, errors.New("invalid OAuth preset channels")
+			return errors.New("invalid OAuth preset channels")
 		}
 		seen[channel] = true
+	}
+	return nil
+}
+
+func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthPreset, error) {
+	return s.saveOAuthPreset(ctx, preset, true)
+}
+
+func (s *Store) CreateOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthPreset, error) {
+	return s.saveOAuthPreset(ctx, preset, false)
+}
+
+func (s *Store) saveOAuthPreset(ctx context.Context, preset OAuthPreset, overwrite bool) (OAuthPreset, error) {
+	preset.Name = strings.TrimSpace(preset.Name)
+	if preset.ID == "" || preset.Name == "" || preset.Payload == "" {
+		return OAuthPreset{}, errors.New("invalid OAuth preset")
+	}
+	if err := validateOAuthPresetPayload(preset.Payload); err != nil {
+		return OAuthPreset{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -43,6 +89,9 @@ func (s *Store) SaveOAuthPreset(ctx context.Context, preset OAuthPreset) (OAuthP
 	var existingID string
 	err = tx.QueryRowContext(ctx, `SELECT id FROM oauth_presets WHERE name=? COLLATE NOCASE`, preset.Name).Scan(&existingID)
 	if err == nil {
+		if !overwrite {
+			return OAuthPreset{}, ErrOAuthPresetNameExists
+		}
 		_, err = tx.ExecContext(ctx, `UPDATE oauth_presets SET name=?,payload=?,updated_by=?,updated_at_ms=? WHERE id=?`, preset.Name, preset.Payload, preset.UpdatedBy, timeMS(now), existingID)
 		if err != nil {
 			return OAuthPreset{}, err

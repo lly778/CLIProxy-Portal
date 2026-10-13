@@ -97,15 +97,21 @@ func validatePresetChannelNames(snapshot OAuthPresetSnapshot) error {
 	return nil
 }
 
-func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
+// ValidateOAuthPreset performs the same read-only preflight as apply.
+func (k *Keys) ValidateOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
+	_, _, _, err := k.prepareOAuthPreset(ctx, requested)
+	return err
+}
+
+func (k *Keys) prepareOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) (OAuthPresetSnapshot, OAuthPresetSnapshot, map[string]bool, error) {
 	if err := ValidateOAuthPresetFormat(requested); err != nil {
-		return err
+		return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, err
 	}
 	current, err := k.oauthPresetSnapshot(ctx)
 	if err != nil {
-		return fmt.Errorf("读取当前调用配置失败：%w", err)
+		return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, fmt.Errorf("读取当前调用配置失败：%w", err)
 	}
 	target := OAuthPresetSnapshot{Version: OAuthPresetVersion, Channels: append([]OAuthChannelPreset(nil), current.Channels...)}
 	indices := map[string]int{}
@@ -117,7 +123,7 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 		channel, _ := oauthPresetChannel(entry)
 		index, ok := indices[channel]
 		if !ok {
-			return fmt.Errorf("预设中的 %s 渠道已不存在，请重新保存", OAuthChannelLabel(channel))
+			return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, fmt.Errorf("预设中的 %s 渠道已不存在，请重新保存", OAuthChannelLabel(channel))
 		}
 		entry.Channel = channel
 		target.Channels[index] = entry
@@ -127,7 +133,7 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 	// unchanged, but still participate in the final cross-channel collision check.
 	for _, entry := range target.Channels {
 		if err := k.validateOAuthChannelPreset(ctx, entry); err != nil {
-			return fmt.Errorf("%s：%w", OAuthChannelLabel(entry.Channel), err)
+			return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, fmt.Errorf("%s：%w", OAuthChannelLabel(entry.Channel), err)
 		}
 	}
 	// Unknown/static-catalog-lagging aliases are preserved by the setters and
@@ -140,7 +146,7 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 		}
 		liveAliases, _, err := k.OAuthModelAliases(ctx, entry.Channel)
 		if err != nil {
-			return err
+			return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, err
 		}
 		routingTarget.Channels[i].Aliases = append([]cpamp.OAuthModelAlias(nil), entry.Aliases...)
 		for _, alias := range liveAliases {
@@ -150,7 +156,21 @@ func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapsh
 		}
 	}
 	if err := validatePresetChannelNames(routingTarget); err != nil {
+		return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, err
+	}
+	return current, target, included, nil
+}
+
+func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
+	k.presetMu.Lock()
+	defer k.presetMu.Unlock()
+	current, target, included, err := k.prepareOAuthPreset(ctx, requested)
+	if err != nil {
 		return err
+	}
+	indices := map[string]int{}
+	for i, entry := range current.Channels {
+		indices[entry.Channel] = i
 	}
 	attempted := []OAuthChannelPreset{}
 	for _, entry := range target.Channels {

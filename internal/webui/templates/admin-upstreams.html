@@ -39,11 +39,11 @@
 
 {{define "upstream-presets"}}
 <section class="card upstream-card" data-global-oauth-presets>
-  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复所有渠道的模型、别名及支持渠道的思考强度上限；共用最多 20 个预设，同名保存会更新现有预设。</p></div><div class="oauth-preset-tools"><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
+  <div class="section-head compact oauth-preset-head"><div><h2>调用预设</h2><p class="muted small">保存并一键恢复所有渠道的模型、别名及支持渠道的思考强度上限；共用最多 20 个预设，“保存当前配置”同名时更新现有预设。</p></div><div class="oauth-preset-tools"><form method="post" action="/admin/upstreams/presets/save" class="oauth-preset-save">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{.Channel}}">
     <label><span class="sr-only">预设名称</span><input type="text" name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required></label>
     <button class="button primary" type="submit">保存当前配置</button>
-  </form></div></div>
+  </form><button class="button secondary oauth-preset-create" type="button" data-preset-edit="/admin/upstreams/presets/new/edit" data-preset-create>新增预设</button></div></div>
   {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
   {{if .Presets}}<div class="oauth-preset-list" data-masonry-key="presets" data-masonry-order="{{.PresetCardOrder}}" data-masonry-csrf="{{.CSRFToken}}">
     {{range .Presets}}<article class="oauth-preset-row" data-masonry-card="{{.ID}}">
@@ -51,6 +51,7 @@
         <div class="oauth-preset-actions">
           <button class="masonry-drag-handle" type="button" data-masonry-handle hidden title="按住拖动；方向键可调整顺序" aria-label="移动预设 {{.Name}}">{{template "masonry-grip" .}}</button>
           {{if .Applied}}<span class="badge success">已应用</span>{{end}}
+          <button class="button secondary" type="button" data-preset-edit="/admin/upstreams/presets/{{.ID}}/edit">编辑</button>
           <form method="post" action="/admin/upstreams/presets/{{.ID}}/apply" data-confirm="确定应用预设“{{.Name}}”吗？预设记录的所有渠道模型、别名及思考强度上限将一起替换。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button secondary" type="submit">应用</button></form>
           <form method="post" action="/admin/upstreams/presets/{{.ID}}/delete" data-confirm="确定删除预设“{{.Name}}”吗？当前调用配置不会改变。">{{if $.CSRFToken}}<input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">{{end}}<input type="hidden" name="channel" value="{{$.Channel}}"><button class="button danger-outline" type="submit">删除</button></form>
         </div>
@@ -62,6 +63,17 @@
       </div><small class="muted">更新于 {{.UpdatedAt}}</small></div>
     </article>{{end}}
   </div><p class="masonry-layout-status muted small" data-masonry-status aria-live="polite">{{.PresetLayoutError}}</p>{{else}}{{if not .PresetError}}<div class="empty-state compact oauth-preset-empty"><strong>尚未保存调用预设</strong><p>填写名称即可保存所有渠道的调用配置。</p></div>{{end}}{{end}}
+  <dialog class="oauth-preset-dialog" data-preset-editor aria-labelledby="preset-editor-title">
+    <header class="preset-editor-head"><div><h2 id="preset-editor-title">编辑调用预设</h2><p class="muted small">调整模型和别名，保存后可直接应用。</p></div><button class="preset-editor-dismiss" type="button" data-preset-editor-close aria-label="关闭预设编辑">×</button></header>
+    <form method="post" data-preset-editor-form>
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="channel" value="{{.Channel}}">
+      <div class="preset-editor-toolbar"><label>预设名称<input type="text" name="name" maxlength="40" autocomplete="off" required></label><label class="preset-editor-search-label"><span>搜索模型</span><input type="search" aria-label="搜索模型" placeholder="输入模型名称" data-preset-editor-search autocomplete="off"></label></div>
+      <div class="preset-editor-status muted small" data-preset-editor-status role="status" aria-live="polite" tabindex="-1"></div>
+      <div class="preset-editor-tabs" data-preset-editor-tabs role="tablist" aria-label="预设渠道"></div>
+      <div class="preset-editor-channels" data-preset-editor-channels></div>
+      <footer class="preset-editor-footer"><button class="button secondary" type="button" data-preset-editor-close>取消</button><button class="button secondary" type="submit" name="action" value="save">保存预设</button><button class="button primary" type="submit" name="action" value="apply">保存并应用</button></footer>
+    </form>
+  </dialog>
 </section>
 {{end}}
 

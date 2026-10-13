@@ -35,8 +35,8 @@ func TestUpstreamChannelsHavePreloadedContentsAndNoScriptFallback(t *testing.T) 
 		}
 		for _, want := range []string{
 			`data-upstream-channel-page data-channel="` + channel + `"`,
-			`/static/masonry-sort.js?v=20261005-2`,
-			`/static/upstream-channels.js?v=20261005-4`,
+			`/static/masonry-sort.js?v=`,
+			`/static/upstream-channels.js?v=`,
 			`data-upstream-channel-panel data-channel="` + channel + `"`,
 			`method="get" action="/admin/upstreams"`,
 			`name="channel" value="` + channel + `"`,
@@ -103,7 +103,7 @@ func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=20261008-identity-4`} {
+	for _, want := range []string{`class="upstream-row upstream-row-codex"`, `<span class="badge neutral">5H</span><strong>0%</strong><small class="muted">PLUS</small>`, `<span class="badge neutral">7D</span><strong>68%</strong><small class="muted">PLUS</small>`, `aria-valuenow="0"`, `aria-valuenow="68"`, `重置 2026-10-07 17:33`, `/static/style.css?v=`} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("missing compact quota row markup: %s", want)
 		}
@@ -972,7 +972,7 @@ func TestQuotaPoolsRenderOneChannelCarouselWithPreloadedProviders(t *testing.T) 
 			t.Fatal(err)
 		}
 		html := out.String()
-		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=20261005-2`} {
+		for _, want := range []string{`class="quota-carousel"`, `data-quota-viewport`, `data-quota-track`, `data-quota-provider="Codex"`, `data-quota-provider="Antigravity"`, `data-quota-controls hidden`, `aria-label="下一张额度卡片"`, `/static/quota-carousel.js?v=`} {
 			if !strings.Contains(html, want) {
 				t.Fatalf("%s missing carousel markup: %s", page, want)
 			}

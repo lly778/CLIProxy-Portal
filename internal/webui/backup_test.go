@@ -52,7 +52,7 @@ func TestBackupSectionHasTwoActionsAndSettingsInsideDialog(t *testing.T) {
 				t.Fatalf("settings escaped backup dialog %q", hidden)
 			}
 		}
-		for _, want := range []string{`enctype="multipart/form-data"`, `name="confirm" value="replace-current-data"`, `name="backup_file"`, `name="restore_mode"`, `value="replace-portal-database"`, `value="rebuild-and-restore"`, "仅门户数据库", "需要重新登录", `class="card backup-section"`, `/static/backup-controls.js?v=20261006-1`, `name="repository"`, `name="github_token"`, `action="/admin/system/backup/settings"`, `data-backup-download`, `name="key_saved"`, "下载备份恢复密钥", `name="enabled"`, `name="weekday"`, `name="backup_time"`, `type="time"`, `step="60"`, "启用每周自动备份"} {
+		for _, want := range []string{`enctype="multipart/form-data"`, `name="confirm" value="replace-current-data"`, `name="backup_file"`, `name="restore_mode"`, `value="replace-portal-database"`, `value="rebuild-and-restore"`, "仅门户数据库", "需要重新登录", `class="card backup-section"`, `/static/backup-controls.js?v=`, `name="repository"`, `name="github_token"`, `action="/admin/system/backup/settings"`, `data-backup-download`, `name="key_saved"`, "下载备份恢复密钥", `name="enabled"`, `name="weekday"`, `name="backup_time"`, `type="time"`, `step="60"`, "启用每周自动备份"} {
 			if !strings.Contains(html, want) {
 				t.Fatalf("missing restore workflow %q", want)
 			}

@@ -5,6 +5,7 @@
 package webui
 
 import (
+	"crypto/sha256"
 	"embed"
 	"fmt"
 	"html/template"
@@ -64,9 +65,26 @@ type Renderer struct {
 // NewRenderer parses all embedded templates and returns a renderer ready for
 // concurrent use.
 func NewRenderer() (*Renderer, error) {
+	versions := make(map[string]string)
+	files, err := assets.ReadDir("static")
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		data, err := assets.ReadFile("static/" + file.Name())
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256(data)
+		versions[file.Name()] = fmt.Sprintf("%x", digest[:8])
+	}
 	r := &Renderer{templates: make(map[string]*template.Template, len(pageNames))}
 	for _, page := range pageNames {
 		t, err := template.New("base").Funcs(template.FuncMap{
+			"assetVersion": func(name string) string { return versions[name] },
 			"dec": func(n int) int {
 				if n > 0 {
 					return n - 1
