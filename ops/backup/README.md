@@ -87,6 +87,8 @@ sudo systemctl enable --now cliproxy-portal-backup.timer
 
 低配置主机默认使用 gzip 快速等级 1，压缩与加密直接串流执行；AES 帧缓冲区复用，不按帧反复分配大块内存。本地验证与恢复采用解密 → 解压 → 文件校验的流式处理，不落盘中间 `archive.tar.gz`。同一轮中已做完整性检查的快照只追加 CPAMP 表结构与配套 `data.key` 校验，避免重复扫描；解压后的数据库仍单独检查。末尾认证帧、gzip 校验、文件 SHA256、SQLite 完整性和远端下载校验均保留。
 
+磁盘空间采用分阶段检查。备份预检要求一份源数据（数据库包含 WAL）的快照空间加 128 MiB 余量，并在每个快照文件生成前重查；压缩加密的每次输出写入都检查实际余量，解压验证按待写入文件检查空间，不预设压缩率，也不再以三份完整数据作为启动门槛。快照在验证前清理，验证文件在上传前清理，下载校验不保存副本。空间不足会中止并清理本次临时工作目录，保留现有数据库和旧成功备份；运行时错误会显示所需和可用 MiB。数据库覆盖恢复仍按新数据及回退副本预留空间，未降低回退保障。
+
 快照继续采用 `VACUUM INTO`，不使用在线备份 API 实验方案。完整数据的单次性能对比及计时边界见 [主 README 的低配置主机性能](../../README.md#低配置主机性能)；网络上传下载未计入该测试，不能把本地节省比例直接当作实际定时任务的总提速。
 
 任务状态 `status.json` 的 `phase` 表示当前阶段，`stage_duration_ms` 记录 `preflight`、`snapshot`、`compress_encrypt`、`local_verify`、`upload`、`download_verify`、`publish`、`retention` 的毫秒耗时，`total_duration_ms` 记录当前尝试总耗时。失败保留失败阶段和已有耗时，不覆盖上次成功备份链接；下一次真实任务开始时重置阶段耗时。宿主机日志也记录 `backup stage=... duration_ms=...`，不包含密钥或文件正文。通过 `journalctl -u cliproxy-portal-backup.service` 可判断瓶颈；不要将每分钟空闲检查的耗时当成实际备份耗时。

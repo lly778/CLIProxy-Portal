@@ -135,24 +135,33 @@ func dataSize(file string) (int64, error) {
 }
 
 func backupSpace(sources []Source, dir string) error {
+	required, err := backupSpaceRequired(sources)
+	if err != nil {
+		return err
+	}
+	return requireSpace(dir, required)
+}
+
+func backupSpaceRequired(sources []Source) (int64, error) {
 	var size int64
 	for _, source := range sources {
 		n, err := dataSize(source.Path)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		size += n
 		if source.SQLite {
 			n, err = dataSize(source.Path + "-wal")
 			if err != nil {
-				return err
+				return 0, err
 			}
 			size += n
 		}
 	}
-	// Peak staging, compressed input and local restore verification; compression
-	// streams to encryption and snapshots are removed before verification.
-	return requireSpace(dir, 3*size+(128<<20))
+	// Reserve one snapshot, including committed WAL, before pausing CPAMP.
+	// Compression guards its output writes against the same free-space floor;
+	// snapshots are removed before Restore checks each extracted file's space.
+	return size + backupSpaceReserve, nil
 }
 
 func restoreSpace(targets []restoreTarget, restored, state string) error {

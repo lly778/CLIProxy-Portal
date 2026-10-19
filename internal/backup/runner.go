@@ -224,11 +224,19 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		}
 		// Prove decryption, hashes and SQLite integrity before uploading.
 		finishVerify := stages.start("local_verify")
-		e = Restore(ctx, archive, filepath.Join(dir, "recovery.key"), filepath.Join(work, "verified"))
-		finishVerify()
+		verified := filepath.Join(work, "verified")
+		e = Restore(ctx, archive, filepath.Join(dir, "recovery.key"), verified)
 		if e != nil {
+			finishVerify()
 			return fmt.Errorf("本地恢复验证失败: %w", e)
 		}
+		// Validation is complete; network upload/download hashing needs only the
+		// encrypted archive, not another full plaintext database copy on disk.
+		if e = os.RemoveAll(verified); e != nil {
+			finishVerify()
+			return errors.New("无法清理已验证的临时恢复数据")
+		}
+		finishVerify()
 		random := make([]byte, 4)
 		if _, e = rand.Read(random); e != nil {
 			return e

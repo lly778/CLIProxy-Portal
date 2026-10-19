@@ -157,6 +157,11 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		if err = ctx.Err(); err != nil {
 			return err
 		}
+		// Recheck the next file after earlier snapshots have consumed space.
+		// Source sizes (and WAL) can also grow after the runner's preflight.
+		if err = backupSpace([]Source{{Path: src, SQLite: sqlite}}, stage); err != nil {
+			return err
+		}
 		dst := filepath.Join(stage, filepath.FromSlash(name))
 		if err = os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 			return err
@@ -259,7 +264,10 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		_ = writer.CloseWithError(e)
 		done <- e
 	}()
-	err = Encrypt(&limitedWriter{writer: out, remaining: MaxEncryptedSize}, reader, key)
+	output := &spaceCheckedWriter{writer: out, check: func(required int64) error {
+		return requireSpace(dir, required)
+	}}
+	err = Encrypt(&limitedWriter{writer: output, remaining: MaxEncryptedSize}, reader, key)
 	_ = reader.CloseWithError(err)
 	if e := <-done; err == nil {
 		err = e
@@ -447,7 +455,7 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > MaxEncryptedSize {
 		return errors.New("加密备份文件类型或大小无效")
 	}
-	if err = requireSpace(work, 128<<20); err != nil {
+	if err = requireSpace(work, backupSpaceReserve); err != nil {
 		return err
 	}
 	decrypted := newDecryptedStream(ctx, io.LimitReader(input, MaxEncryptedSize+1), key)
@@ -500,7 +508,7 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 		if total > maxArchiveSize || len(entries) >= 10000 {
 			return errors.New("备份解压体积过大")
 		}
-		if err = requireSpace(work, header.Size+(128<<20)); err != nil {
+		if err = requireSpace(work, header.Size+backupSpaceReserve); err != nil {
 			return err
 		}
 		hash := sha256.New()

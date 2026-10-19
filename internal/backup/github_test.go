@@ -27,6 +27,7 @@ type fakeGitHub struct {
 	active     release
 	title      string
 	server     *httptest.Server
+	onUpload   func()
 }
 
 func fakeClient(t *testing.T) (*fakeGitHub, *GitHub) {
@@ -57,6 +58,9 @@ func fakeClient(t *testing.T) (*fakeGitHub, *GitHub) {
 			w.WriteHeader(201)
 			_ = json.NewEncoder(w).Encode(f.active)
 		case p == "/repos/owner/private/releases/999/assets" && r.Method == http.MethodPost:
+			if f.onUpload != nil {
+				f.onUpload()
+			}
 			if f.denyUpload {
 				http.Error(w, "private-secret-error-details", 403)
 				return
@@ -259,6 +263,52 @@ func TestRunnerManualAndWeeklyJobsPersistSuccessAndFailure(t *testing.T) {
 	}
 	if RunnerSeen(dir).IsZero() {
 		t.Fatal("runner heartbeat missing")
+	}
+}
+
+func TestRunnerReleasesVerifiedDatabasesBeforeUpload(t *testing.T) {
+	sources, _ := fixture(t)
+	dir := t.TempDir()
+	if _, err := EnsureKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	c := Config{Enabled: true, Repository: "owner/private", Hour: 3, Weekday: 1, Retain: 3, KeySaved: true, Instance: "0123456789abcdef"}
+	if err := SaveConfig(dir, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveToken(dir, "test-only-secret-token"); err != nil {
+		t.Fatal(err)
+	}
+	sourcesFile := filepath.Join(t.TempDir(), "sources.json")
+	if err := writeJSON(sourcesFile, sources); err != nil {
+		t.Fatal(err)
+	}
+	f, g := fakeClient(t)
+	checked := false
+	f.onUpload = func() {
+		checked = true
+		jobs, err := filepath.Glob(filepath.Join(dir, ".job-*"))
+		if err != nil || len(jobs) != 1 {
+			t.Errorf("unexpected upload workspace: %v %v", jobs, err)
+			return
+		}
+		entries, err := os.ReadDir(jobs[0])
+		if err != nil || len(entries) != 1 || entries[0].Name() != archiveName {
+			t.Errorf("snapshot or verified plaintext retained during upload: %v %v", entries, err)
+		}
+		status, err := LoadStatus(dir)
+		if err != nil {
+			t.Error(err)
+		} else if _, ok := status.StageDurationMS["local_verify"]; !ok {
+			t.Error("uploaded before local recovery verification")
+		}
+	}
+	now := time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)
+	if err := tick(t.Context(), dir, sourcesFile, now, func(string) *GitHub { return g }); err != nil {
+		t.Fatal(err)
+	}
+	if !checked || len(f.archive) == 0 {
+		t.Fatal("upload observation not exercised")
 	}
 }
 
