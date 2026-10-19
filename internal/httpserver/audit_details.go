@@ -165,6 +165,15 @@ func auditDetailDisplay(action, detail string) string {
 		return "—"
 	}
 	switch action {
+	case "resource.policy.update":
+		parts := strings.Split(detail, "；")
+		visible := parts[:0]
+		for _, part := range parts {
+			if !strings.HasPrefix(strings.TrimSpace(part), "版本=") {
+				visible = append(visible, part)
+			}
+		}
+		return strings.Join(visible, "；")
 	case "admin.promote":
 		if detail == "user -> admin" {
 			return "普通用户转为管理员"

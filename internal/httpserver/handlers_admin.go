@@ -1079,6 +1079,24 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 			owners[hash] = account
 		}
 		row := webui.GlobalRequestView{RequestView: s.requestView(event), UserLabel: "外部 Key"}
+		if event.PortalResourceID != 0 {
+			row.UserLabel = emptyDash(event.PortalUserLabel)
+			if event.PortalUserID != "" {
+				identity := "resource-user:" + event.PortalUserID
+				account, cached := owners[identity]
+				if !cached {
+					if target, userErr := s.Store.UserByID(r.Context(), event.PortalUserID); userErr == nil {
+						account = owner{user: target, linked: true}
+					}
+					owners[identity] = account
+				}
+				if account.linked {
+					row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
+				}
+			}
+			v.Requests = append(v.Requests, row)
+			continue
+		}
 		if account.linked {
 			row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
 		}

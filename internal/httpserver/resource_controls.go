@@ -51,7 +51,18 @@ func (s *Server) resourceAudit(ctx context.Context, events []resourcecontrol.Eve
 		} else if u, err := s.Store.UserByID(ctx, e.User); err == nil {
 			id, name = u.ID, u.Name
 		}
-		rows = append(rows, domain.AuditEvent{ActorLabel: "资源保护", Action: action, TargetID: id, TargetLabel: name, Detail: resourceReason(e.Reason), CreatedAt: e.At})
+		status := e.StatusCode
+		if status == 0 && !e.Observed {
+			status = resourceRejectionStatus(e.Reason)
+		}
+		if e.Observed {
+			status = 0
+		}
+		detail, err := json.Marshal(resourceRequestDetail{Reason: e.Reason, Message: resourceReason(e.Reason), StatusCode: status})
+		if err != nil {
+			return err
+		}
+		rows = append(rows, domain.AuditEvent{ActorLabel: "资源保护", Action: action, TargetID: id, TargetLabel: name, Detail: string(detail), CreatedAt: e.At})
 	}
 	err := s.Store.ResourceAuditBatch(ctx, rows)
 	if err != nil {
@@ -185,6 +196,6 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 	if saved.Mode == "enforce" {
 		mode = "启用保护"
 	}
-	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%d MiB；CPU 总上限=%.1f%%；内存总上限=%d MiB；版本=%d", mode, saved.Global, saved.PerUser, saved.BodyMiB, saved.CPUPercent, saved.MemoryMiB, saved.Revision))
+	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%d MiB；CPU 总上限=%.1f%%；内存总上限=%d MiB", mode, saved.Global, saved.PerUser, saved.BodyMiB, saved.CPUPercent, saved.MemoryMiB))
 	s.resourceRedirect(w, r, "msg", "资源保护设置已保存，对后续请求生效")
 }

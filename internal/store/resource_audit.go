@@ -11,6 +11,28 @@ type ResourceCounts struct {
 	Observed uint64
 }
 
+// ResourceRequestEvents shares the existing durable event storage and seven-day
+// counters. Moving their presentation does not discard or duplicate old records.
+func (s *Store) ResourceRequestEvents(ctx context.Context, from, to time.Time, userID string, limit int) ([]domain.AuditEvent, int64, error) {
+	where := ` WHERE action IN ('resource.rejected','resource.observed') AND created_at_ms>=? AND created_at_ms<?`
+	args := []any{timeMS(from), timeMS(to)}
+	if userID != "" {
+		where += ` AND target_user_id=?`
+		args = append(args, userID)
+	}
+	var count int64
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_logs`+where, args...).Scan(&count); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, max(1, min(limit, 100)))
+	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs`+where+` ORDER BY created_at_ms DESC,id DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	events, err := scanAuditRows(rows)
+	return events, count, err
+}
+
 // Count persisted events in the rolling seven-day window, including across restarts.
 func (s *Store) ResourceCounts(ctx context.Context, now time.Time) (ResourceCounts, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT action,COUNT(*) FROM audit_logs

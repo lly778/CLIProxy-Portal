@@ -575,10 +575,13 @@ func TestAuditTableUsesRequestLogScrollingWithoutClippingCells(t *testing.T) {
 	if err := r.Execute(&out, PageAdminSystem, AdminSystemView{Entries: []AuditView{entry}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{entry.At, entry.ActorName, entry.ActorPhone, entry.Action, entry.Target, entry.Result, entry.RequestID, entry.Details} {
+	for _, value := range []string{entry.At, entry.ActorName, entry.ActorPhone, entry.Action, entry.Target, entry.RequestID, entry.Details} {
 		if !strings.Contains(out.String(), value) {
 			t.Fatalf("audit table must render complete values: %s", value)
 		}
+	}
+	if strings.Contains(out.String(), "audit-result-cell") || strings.Contains(out.String(), ">结果</th>") {
+		t.Fatal("system log result column must be omitted")
 	}
 	asset, err := fs.ReadFile(Assets(), "style.css")
 	if err != nil {

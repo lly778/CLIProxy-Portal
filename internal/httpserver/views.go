@@ -155,6 +155,19 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 	view := webui.RequestView{At: s.formatTime(time.UnixMilli(e.TimestampMS)), Model: requestModelLabel(e), Status: status, StatusLabel: label, InputTokens: compactNumber(e.InputTokens), OutputTokens: compactNumber(e.OutputTokens), CacheTokens: compactNumber(e.CachedTokens + e.CacheReadTokens + e.CacheCreationTokens), ReasoningTokens: compactNumber(e.ReasoningTokens), ReasoningEffort: reasoningEffortLabel(e.ReasoningEffort), TotalTokens: compactNumber(e.TotalTokens), Latency: latency, Error: errorFull, ErrorFull: errorFull}
 	view.TotalLatency = "—"
 	view.LatencyDetail = "模型调用耗时：" + latency + "\n此请求未记录服务器耗时"
+	if e.PortalResourceID != 0 {
+		view.Status, view.StatusLabel = "rejected", "已拦截"
+		view.Model, view.InputTokens, view.OutputTokens, view.CacheTokens = "—", "—", "—", "—"
+		view.ReasoningTokens, view.TotalTokens, view.ReasoningEffort = "—", "—", "—"
+		view.Latency, view.TotalLatency = "—", "—"
+		view.LatencyDetail = "资源保护事件；本条不单独记录模型耗时和 Token 用量。"
+		if e.PortalResourceObserved {
+			view.Status, view.StatusLabel = "warning", "观察放行"
+			view.Error = requestLogMessage(e.FailSummary)
+			view.ErrorFull = view.Error
+		}
+		return view
+	}
 	if s.Store != nil && e.PortalTimingID != "" {
 		if timing, err := s.Store.GatewayTimingByID(contextBackground(), e.PortalTimingID, e.APIKeyHash); err == nil {
 			view.TotalLatency, view.LatencyDetail = requestTimingDisplay(timing, e)
@@ -216,11 +229,11 @@ func requestFailureText(e cpamp.EventRow) string {
 
 	code, message, plain := failureSummaryDetails(summary)
 	if message != "" {
-		parts = appendUnique(parts, message)
+		parts = appendUnique(parts, requestLogMessage(message))
 	} else if plain != "" {
-		parts = appendUnique(parts, plain)
+		parts = appendUnique(parts, requestLogMessage(plain))
 	} else {
-		parts = appendUnique(parts, code)
+		parts = appendUnique(parts, requestLogMessage(code))
 	}
 	return strings.Join(parts, " · ")
 }
@@ -576,9 +589,6 @@ func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []we
 			}
 		}
 		result := "成功"
-		if e.Action == "resource.policy.update" {
-			result = "已保存"
-		}
 		if e.Action == "resource.rejected" {
 			result = "已拒绝"
 		} else if e.Action == "resource.observed" {

@@ -3,6 +3,7 @@ package httpserver
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"cliproxy-portal/internal/cpamp"
 )
@@ -11,6 +12,41 @@ func TestRequestFailureSummaryHidesSuccessMetadata(t *testing.T) {
 	event := cpamp.EventRow{Failed: false, FailSummary: `{"Cf-Cache-Status":["DYNAMIC"],"Cf-Ray":["abc"]}`}
 	if got := requestFailureText(event); got != "" {
 		t.Fatalf("success summary = %q, want empty", got)
+	}
+}
+
+func TestRequestLogMessagesUseEnglishBelowChineseStatus(t *testing.T) {
+	for _, test := range []struct{ stored, want string }{
+		{"全局并发已满", "Global concurrency limit reached"},
+		{"用户并发已满", "User concurrency limit reached"},
+		{"交互记录待处理过多", "Interaction capture backlog limit reached"},
+		{"整机内存达到总上限", "Server memory limit reached"},
+		{"CPU 持续繁忙", "Server CPU limit exceeded"},
+		{"资源监测未连接", "Resource monitor unavailable"},
+		{"请求超过大小上限", "Request size limit exceeded"},
+		{"请求过大或内容无效", "Request too large or invalid"},
+		{"Upstream request failed", "Upstream request failed"},
+		{"Connection refused", "Connection refused"},
+	} {
+		t.Run(test.stored, func(t *testing.T) {
+			status := int64(503)
+			event := cpamp.EventRow{PortalResourceID: 1, Failed: true, FailStatusCode: &status, FailSummary: test.stored}
+			s := &Server{}
+			// A local resource event still needs a valid display time zone.
+			s.Cfg.TimeZone = time.UTC
+			view := s.requestView(event)
+			if view.StatusLabel != "已拦截" || view.Error != "HTTP 503 · "+test.want || view.ErrorFull != view.Error {
+				t.Fatalf("blocked display: %+v", view)
+			}
+			event.PortalResourceObserved, event.Failed = true, false
+			view = s.requestView(event)
+			if view.StatusLabel != "观察放行" || view.Error != test.want || view.ErrorFull != view.Error {
+				t.Fatalf("observed display: %+v", view)
+			}
+			if event.FailSummary != test.stored {
+				t.Fatal("display translation changed original metadata")
+			}
+		})
 	}
 }
 

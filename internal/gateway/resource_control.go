@@ -66,7 +66,7 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			defer cleanup()
 		}
 		if err != nil {
-			lease.Record("request_too_large_or_invalid")
+			lease.RecordStatus("request_too_large_or_invalid", code)
 			message := "请求内容无效或压缩格式不支持"
 			if code == 413 {
 				message = "请求过大，请压缩图片或减少历史消息后重试"

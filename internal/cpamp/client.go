@@ -523,7 +523,12 @@ type EventsResponse struct {
 type EventRow struct {
 	// PortalTimingID is local-only metadata for a gateway failure that never
 	// produced an upstream trace. It is never accepted from CPAMP JSON.
-	PortalTimingID      string `json:"-"`
+	PortalTimingID         string `json:"-"`
+	PortalResourceID       int64  `json:"-"`
+	PortalUserID           string `json:"-"`
+	PortalUserLabel        string `json:"-"`
+	PortalResourceObserved bool   `json:"-"`
+
 	RequestID           string `json:"request_id,omitempty"`
 	EventHash           string `json:"event_hash"`
 	TimestampMS         int64  `json:"timestamp_ms"`

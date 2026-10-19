@@ -111,8 +111,12 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	s.Resources.Record("<script>bad</script>", "request_too_large")
 	s.Resources.FlushEvents(t.Context())
 	page = getBody(t, client, server.URL+"/admin/system", 200)
-	if strings.Contains(page, "<script>bad</script>") || !strings.Contains(page, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(page, "资源保护拦截") {
-		t.Fatal("unsafe event rendering")
+	if strings.Contains(page, "<script>bad</script>") || strings.Contains(page, "资源保护拦截") || strings.Contains(page, "audit-result-cell") {
+		t.Fatal("protection events or result column remain in system logs")
+	}
+	requests := getBody(t, client, server.URL+"/admin/requests", 200)
+	if strings.Contains(requests, "<script>bad</script>") || !strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(requests, "已拦截") || !strings.Contains(requests, "HTTP 413") {
+		t.Fatal("protection request log missing or unsafe")
 	}
 	for _, field := range []string{"global", "per_user", "body_mib", "cpu_percent", "memory_mib"} {
 		form.Set(field, "0")
@@ -172,6 +176,9 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 			t.Fatal(e)
 		}
 		if e = os.WriteFile(filepath.Join(out, "index.html"), []byte(page), 0600); e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(filepath.Join(out, "requests.html"), []byte(requests), 0600); e != nil {
 			t.Fatal(e)
 		}
 		if e = os.WriteFile(filepath.Join(out, "status.json"), body, 0600); e != nil {

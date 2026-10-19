@@ -43,6 +43,7 @@ func TestAuditTargetAndDetailDisplay(t *testing.T) {
 		action, id, label, detail, targetWant, detailWant string
 	}{
 		{"quota.refresh", "codex", "codex", "用户手动刷新", "Codex 额度", "用户手动刷新"},
+		{"resource.policy.update", "", "资源保护", "模式=启用保护；全局并发=5；版本=2", "资源保护", "模式=启用保护；全局并发=5"},
 		{"gateway.dialogue.download", "record-1", "record-1", "用户与助手文本及实际工具交互", "交互记录（record-1）", "用户与助手文本及实际工具交互"},
 		{"key.issue", "key-1", "key-1", "claim", "接口密钥（key-1）", "用户领取密钥"},
 		{"key.model_test", "gpt-6-luna", "gpt-6-luna", "latency=123ms", "gpt-6-luna", "耗时 123 毫秒"},

@@ -8,10 +8,11 @@ import (
 )
 
 type Event struct {
-	At       time.Time `json:"at"`
-	User     string    `json:"user"`
-	Reason   string    `json:"reason"`
-	Observed bool      `json:"observed"`
+	At         time.Time `json:"at"`
+	User       string    `json:"user"`
+	Reason     string    `json:"reason"`
+	Observed   bool      `json:"observed"`
+	StatusCode int       `json:"status_code,omitempty"`
 }
 type Snapshot struct {
 	Policy     Policy  `json:"policy"`
@@ -130,12 +131,15 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 	}
 }
 func (c *Controller) event(user, reason string, observed bool) {
+	c.eventWithStatus(user, reason, observed, 0)
+}
+func (c *Controller) eventWithStatus(user, reason string, observed bool, status int) {
 	if observed {
 		c.observed++
 	} else {
 		c.rejected++
 	}
-	e := Event{At: time.Now().UTC(), User: user, Reason: reason, Observed: observed}
+	e := Event{At: time.Now().UTC(), User: user, Reason: reason, Observed: observed, StatusCode: status}
 	// Queue backpressure never holds the admission/monitor mutex. The bounded
 	// channel stores individual events; the writer batches commits, never records.
 	c.mu.Unlock()
@@ -227,9 +231,15 @@ type Lease struct {
 // Record uses the admission policy so changing modes does not relabel an
 // already admitted streaming request or WebSocket connection.
 func (l *Lease) Record(reason string) {
+	l.RecordStatus(reason, 0)
+}
+
+// RecordStatus preserves the actual HTTP result when the same protection reason
+// can reject with different statuses, such as malformed and oversized bodies.
+func (l *Lease) RecordStatus(reason string, status int) {
 	l.c.mu.Lock()
 	defer l.c.mu.Unlock()
-	l.c.event(l.user, reason, l.Policy.Mode != "enforce")
+	l.c.eventWithStatus(l.user, reason, l.Policy.Mode != "enforce", status)
 }
 
 func (l *Lease) ModelDone() {

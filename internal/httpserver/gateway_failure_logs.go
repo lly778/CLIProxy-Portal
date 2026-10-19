@@ -17,7 +17,7 @@ func (s *Server) supplementGatewayFailures(ctx context.Context, page cpamp.Event
 	rows, count, err := s.Store.GatewayUntracedFailures(ctx, from, to, userID, limit)
 	if err != nil {
 		s.Logger.Warn("list gateway failure metadata", "error", err)
-		return page
+		rows, count = nil, 0
 	}
 	items := append([]cpamp.EventRow(nil), page.Items...)
 	for _, row := range rows {
@@ -34,6 +34,15 @@ func (s *Server) supplementGatewayFailures(ctx context.Context, page cpamp.Event
 			e.FailStatusCode = &code
 		}
 		items = append(items, e)
+	}
+	resources, resourceCount, resourceErr := s.Store.ResourceRequestEvents(ctx, from, to, userID, limit)
+	if resourceErr != nil {
+		s.Logger.Warn("list resource request metadata", "error", resourceErr)
+	} else {
+		for _, event := range resources {
+			items = append(items, resourceRequestEvent(event))
+		}
+		count += resourceCount
 	}
 	sort.SliceStable(items, func(i, j int) bool { return items[i].TimestampMS > items[j].TimestampMS })
 	if len(items) > limit {

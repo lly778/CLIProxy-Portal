@@ -143,6 +143,31 @@ func TestResourceLimitsRejectLargePlainCompressedAndChunkedBeforeCPA(t *testing.
 		t.Fatal("body rejection leaked capacity", q)
 	}
 }
+
+func TestResourceBodyRejectionsRetainActualHTTPStatus(t *testing.T) {
+	g, calls := resourceGateway(t, func(http.ResponseWriter, *http.Request) { t.Error("rejected body reached CPA") })
+	var events []resourcecontrol.Event
+	g.Resources.SetEventSink(func(_ context.Context, batch []resourcecontrol.Event) error {
+		events = append(events, batch...)
+		return nil
+	})
+	for _, tc := range []struct {
+		encoding string
+		status   int
+	}{{"gzip", 400}, {"unsupported", 415}} {
+		r := httptest.NewRequest("POST", "/v1/responses", strings.NewReader("invalid"))
+		r.Header.Set("Content-Encoding", tc.encoding)
+		w := httptest.NewRecorder()
+		g.Handler().ServeHTTP(w, r)
+		g.Resources.FlushEvents(t.Context())
+		if w.Code != tc.status || len(events) == 0 || events[len(events)-1].StatusCode != w.Code {
+			t.Fatalf("lost HTTP status: %d %+v", w.Code, events)
+		}
+	}
+	if calls.Load() != 0 {
+		t.Fatal("rejected requests reached CPA")
+	}
+}
 func TestResourceConcurrencyHoldsStreamsAndReleasesAfterCancellation(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	g, calls := resourceGateway(t, func(w http.ResponseWriter, r *http.Request) {

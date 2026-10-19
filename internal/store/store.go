@@ -746,14 +746,14 @@ func (s *Store) Audit(ctx context.Context, e domain.AuditEvent) error {
 	return err
 }
 func (s *Store) ListAudit(ctx context.Context, limit, offset int) ([]domain.AuditEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE action <> 'quota.refresh' ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE action NOT IN ('quota.refresh','resource.rejected','resource.observed') ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	return scanAuditRows(rows)
 }
 func (s *Store) ListAuditForUser(ctx context.Context, userID string, limit, offset int) ([]domain.AuditEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE actor_user_id=? OR target_user_id=? ORDER BY id DESC LIMIT ? OFFSET ?`, userID, userID, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE (actor_user_id=? OR target_user_id=?) AND action NOT IN ('resource.rejected','resource.observed') ORDER BY id DESC LIMIT ? OFFSET ?`, userID, userID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
