@@ -575,7 +575,7 @@ func TestAuditTableUsesRequestLogScrollingWithoutClippingCells(t *testing.T) {
 	if err := r.Execute(&out, PageAdminSystem, AdminSystemView{Entries: []AuditView{entry}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{entry.At, entry.ActorName, entry.ActorPhone, entry.Action, entry.Target, entry.Result, entry.IP, entry.RequestID, entry.Details} {
+	for _, value := range []string{entry.At, entry.ActorName, entry.ActorPhone, entry.Action, entry.Target, entry.Result, entry.RequestID, entry.Details} {
 		if !strings.Contains(out.String(), value) {
 			t.Fatalf("audit table must render complete values: %s", value)
 		}

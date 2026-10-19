@@ -59,9 +59,15 @@ func (s *Server) resourceAudit(ctx context.Context, events []resourcecontrol.Eve
 	}
 	return err
 }
-func (s *Server) resourceView() webui.ResourceView {
+func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	q := s.Resources.Snapshot()
-	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: strconv.FormatUint(q.Rejected, 10), Observed: strconv.FormatUint(q.Observed, 10), Fresh: q.Fresh, Updated: "等待监测"}
+	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: "—", Observed: "—", Fresh: q.Fresh, Updated: "等待监测"}
+	countsCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if counts, err := s.Store.ResourceCounts(countsCtx, time.Now()); err == nil {
+		v.Rejected = strconv.FormatUint(counts.Rejected, 10)
+		v.Observed = strconv.FormatUint(counts.Observed, 10)
+	}
 	if q.Policy.Global == 0 {
 		v.Active = fmt.Sprintf("%d / 不限", q.Active)
 	}
@@ -70,9 +76,11 @@ func (s *Server) resourceView() webui.ResourceView {
 	}
 	if q.Paused != "" {
 		v.State = resourceReason(q.Paused)
-		v.StateClass = "warning"
+		v.StateClass = "danger"
+		v.StateHelp = "当前为观察模式，请求仍会继续放行。"
 		if q.Policy.Mode == "enforce" {
 			v.State = "暂停新请求 · " + v.State
+			v.StateHelp = "已有请求继续处理，资源恢复稳定后自动接收新请求。"
 		}
 	}
 	if q.Fresh {
@@ -90,7 +98,24 @@ func (s *Server) resourceView() webui.ResourceView {
 func (s *Server) resourceStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_ = json.NewEncoder(w).Encode(s.resourceView())
+	_ = json.NewEncoder(w).Encode(s.resourceView(r.Context()))
+}
+
+func (s *Server) resourceHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	now := time.Now().UTC()
+	zone := "Asia/Shanghai"
+	if s.Cfg.TimeZone != nil {
+		zone = s.Cfg.TimeZone.String()
+	}
+	_ = json.NewEncoder(w).Encode(struct {
+		From          time.Time                      `json:"from"`
+		To            time.Time                      `json:"to"`
+		TimeZone      string                         `json:"time_zone"`
+		SampleSeconds int                            `json:"sample_seconds"`
+		Points        []resourcecontrol.HistoryPoint `json:"points"`
+	}{now.Add(-resourcecontrol.HistoryWindow), now, zone, int(resourcecontrol.HistoryInterval / time.Second), s.Resources.History(now)})
 }
 func (s *Server) resourceAuthorize(w http.ResponseWriter, r *http.Request) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)

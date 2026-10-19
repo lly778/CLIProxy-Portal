@@ -21,7 +21,7 @@ func TestStaticAssetURLsUseContentVersions(t *testing.T) {
 	if err := r.Execute(&html, PageAdminSystem, AdminSystemView{LayoutView: LayoutView{ActiveNav: "admin-system"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"app.js", "style.css", "quota-carousel.js", "masonry-sort.js", "upstream-channels.js", "codex-identity-toggle.js", "backup-controls.js", "resource-controls.js"} {
+	for _, name := range []string{"app.js", "style.css", "quota-carousel.js", "masonry-sort.js", "upstream-channels.js", "codex-identity-toggle.js", "backup-controls.js", "resource-controls.js", "resource-history.js"} {
 		data, err := fs.ReadFile(Assets(), name)
 		if err != nil {
 			t.Fatal(err)

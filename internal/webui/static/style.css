@@ -742,11 +742,10 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .audit-table th, .audit-table td { text-align: center; }
 .audit-table th:nth-child(1) { width: 13%; }
 .audit-table th:nth-child(2) { width: 12%; }
-.audit-table th:nth-child(3) { width: 14%; }
-.audit-table th:nth-child(4) { width: 14%; }
-.audit-table th:nth-child(5) { width: 10%; }
-.audit-table th:nth-child(6) { width: 10%; }
-.audit-table th:nth-child(7) { width: 27%; }
+.audit-table th:nth-child(3) { width: 12%; }
+.audit-table th:nth-child(4) { width: 23%; }
+.audit-table th:nth-child(5) { width: 8%; }
+.audit-table th:nth-child(6) { width: 32%; }
 .audit-table td { overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }
 .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
 .audit-result-cell { width: 1%; min-width: 90px; }
@@ -1073,12 +1072,38 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .resource-metrics .card { display: flex; flex-direction: column; gap: 9px; padding: 20px; }
 .resource-metrics strong { font-size: 22px; overflow-wrap: anywhere; }
 .resource-monitor-status { margin: 12px 0 18px; }
+.resource-history { margin-bottom: 18px; }
+.resource-history-head, .resource-chart-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.resource-history-head { margin: 0 0 12px; }
+.resource-history-head h3 { margin: 0; font-size: 14px; }
+.resource-chart { --chart-color: var(--primary); padding: 18px 18px 10px; min-width: 0; }
+.resource-chart-head { margin-bottom: 8px; }
+.resource-chart-legend { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; flex-wrap: wrap; }
+.resource-chart-legend .muted { font-weight: 400; }
+.resource-chart-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--chart-color); }
+.resource-chart-memory-dot { background: var(--success); }
+.resource-chart-stage { position: relative; min-width: 0; height: 245px; outline-offset: 3px; border-radius: 5px; }
+.resource-chart-stage:focus-visible { outline: 2px solid var(--chart-color); }
+.resource-chart-svg { display: block; width: 100%; height: 245px; overflow: visible; }
+.resource-chart-svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+.resource-chart-grid { stroke: var(--line); stroke-width: 1; }
+.resource-chart-cpu-series { --series-color: var(--primary); }
+.resource-chart-memory-series { --series-color: var(--success); }
+.resource-chart-area { fill: var(--series-color); opacity: .06; }
+.resource-chart-line { stroke: var(--series-color); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.resource-chart-point { fill: var(--series-color); }
+.resource-chart-cursor { stroke: var(--chart-color); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6; }
+.resource-chart-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 12px; pointer-events: none; }
+.resource-chart-empty[hidden], .resource-chart-tooltip[hidden] { display: none; }
+.resource-chart-tooltip { position: absolute; z-index: 2; top: 12px; display: grid; gap: 3px; width: max-content; max-width: calc(100% - 16px); padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); box-shadow: var(--shadow); color: var(--text); font-size: 12px; pointer-events: none; }
+.resource-chart-tooltip time { color: var(--muted); font-size: 11px; }
+@media (max-width: 640px) { .resource-chart { padding: 14px 12px 8px; } }
 .resource-settings { padding: 24px; }
 .resource-settings.backup-dialog { width: min(720px, calc(100% - 32px)); }
 .resource-settings.backup-dialog form { display: block; margin-top: 16px; }
 .resource-settings .resource-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .resource-fields > div { display: grid; align-content: start; gap: 12px; min-width: 0; }
-[data-resource-field="State"][hidden] { display: none; }
+.resource-limit-alert[hidden] { display: none; }
 .resource-settings h3 { margin: 0 0 10px; }
 .resource-settings h3:not(:first-child) { margin-top: 25px; }
 .resource-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }

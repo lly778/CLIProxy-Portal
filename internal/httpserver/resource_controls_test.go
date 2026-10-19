@@ -58,8 +58,10 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	}
 	anonymous := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	getBody(t, anonymous, server.URL+"/admin/system/resources/status", 303)
+	getBody(t, anonymous, server.URL+"/admin/system/resources/history", 303)
 	ordinary, _ := login(user.Phone)
 	getBody(t, ordinary, server.URL+"/admin/system/resources/status", 403)
+	getBody(t, ordinary, server.URL+"/admin/system/resources/history", 403)
 	postForm(t, ordinary, server.URL+"/admin/system/resources/save", url.Values{}, 403)
 	client, _ := login(admin.Phone)
 	page := getBody(t, client, server.URL+"/admin/system", 200)
@@ -120,7 +122,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.BodyMiB != 0 || saved.CPUPercent != 0 || saved.MemoryMiB != 0 {
 		t.Fatal("zero limits did not persist", saved, e)
 	}
-	if s.resourceView().Active != "0 / 不限" {
+	if s.resourceView(t.Context()).Active != "0 / 不限" {
 		t.Fatal("unlimited concurrency displayed as zero capacity")
 	}
 	response, e := client.Get(server.URL + "/admin/system/resources/status")
@@ -132,6 +134,38 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if response.Header.Get("Cache-Control") != "no-store" || !json.Valid(body) || strings.Contains(string(body), password) || strings.Contains(string(body), admin.PasswordHash) {
 		t.Fatal("unsafe status response")
 	}
+	restarted, e := New(s.Cfg, st, accounts, s.Keys, secret, s.Logger)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if restarted.Resources.Snapshot().Rejected != 0 || restarted.resourceView(t.Context()).Rejected != "1" {
+		t.Fatal("seven-day counters were reset with the controller")
+	}
+	historyResponse, e := client.Get(server.URL + "/admin/system/resources/history")
+	if e != nil {
+		t.Fatal(e)
+	}
+	historyBody, _ := io.ReadAll(historyResponse.Body)
+	historyResponse.Body.Close()
+	var history struct {
+		From          time.Time                      `json:"from"`
+		To            time.Time                      `json:"to"`
+		SampleSeconds int                            `json:"sample_seconds"`
+		Points        []resourcecontrol.HistoryPoint `json:"points"`
+	}
+	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 516 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
+		t.Fatalf("history did not return the current rolling hour: %s, %v", historyBody, e)
+	}
+	limited := saved
+	limited.MemoryMiB = 768
+	s.Resources.SetPolicy(limited)
+	hot := m
+	hot.At, hot.AvailableMiB = time.Now(), 100
+	s.Resources.UpdateMetrics(hot, hot.At)
+	if view := s.resourceView(t.Context()); view.StateClass != "danger" || !strings.Contains(view.State, "暂停新请求") || !strings.Contains(view.StateHelp, "自动接收新请求") {
+		t.Fatalf("missing resource error presentation: %+v", view)
+	}
+	s.Resources.SetPolicy(saved)
 	// Optional browser-review fixture; contains synthetic test data only.
 	if out := os.Getenv("PORTAL_TEST_UI_DIR"); out != "" {
 		if e = os.MkdirAll(filepath.Join(out, "static"), 0700); e != nil {
@@ -141,6 +175,9 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 			t.Fatal(e)
 		}
 		if e = os.WriteFile(filepath.Join(out, "status.json"), body, 0600); e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(filepath.Join(out, "history.json"), historyBody, 0600); e != nil {
 			t.Fatal(e)
 		}
 		entries, _ := fs.ReadDir(webui.Assets(), ".")

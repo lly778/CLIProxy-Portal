@@ -6,7 +6,9 @@ const vm = require('node:vm');
 
 function setup({ narrow = true, content = 1500, width = 600, saved = '0' } = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
-  const end = source.indexOf('  document.addEventListener("click"');
+  const start = source.indexOf('  var mobileNav =');
+  const end = source.indexOf('  document.addEventListener("click"', start);
+  assert(start >= 0 && end > start, 'mobile navigation section is present');
   function element(values = {}) {
     return Object.assign({ handlers: {}, addEventListener(name, callback) { this.handlers[name] = callback; } }, values);
   }
@@ -21,7 +23,7 @@ function setup({ narrow = true, content = 1500, width = 600, saved = '0' } = {})
     ResizeObserver: class { constructor(callback) { window.observer = callback; } observe() {} },
   });
   const selectors = { '[data-mobile-nav]': nav, '[data-nav-controls]': controls, '[data-nav-previous]': previous, '[data-nav-next]': next };
-  vm.runInNewContext(source.slice(0, end) + '})();', { window, document: { querySelector: key => selectors[key] } });
+  vm.runInNewContext('(function () {\n' + source.slice(start, end) + '})();', { window, document: { querySelector: key => selectors[key] } });
   const update = () => window.observer();
   const flush = () => { while (frames.length) frames.shift()(); };
   function wheel(values) {

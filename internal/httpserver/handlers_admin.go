@@ -1108,7 +1108,7 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	now := time.Now().UTC()
 	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system")}
-	v.Resources = s.resourceView()
+	v.Resources = s.resourceView(r.Context())
 	if msg := r.URL.Query().Get("resource_msg"); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}

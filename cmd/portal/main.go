@@ -177,6 +177,7 @@ func serve(cfg config.Config, st *store.Store) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		app.Resources.FlushEvents(ctx)
+		app.Resources.FlushHistory(ctx)
 	}()
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	var gatewayServer *http.Server

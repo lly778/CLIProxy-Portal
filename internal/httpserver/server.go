@@ -56,6 +56,18 @@ func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *s
 	}
 	s := &Server{Cfg: cfg, Store: st, Accounts: accounts, Keys: keys, UI: ui, Secret: secret, Logger: logger, limit: newLimiter(), Resources: resourcecontrol.NewController(p)}
 	s.Resources.SetEventSink(s.resourceAudit)
+	if points, historyErr := st.ResourceHistory(context.Background()); historyErr == nil {
+		s.Resources.RestoreHistory(points, time.Now())
+	} else {
+		logger.Warn("resource history load failed", "error", historyErr)
+	}
+	s.Resources.SetHistorySink(func(ctx context.Context, points []resourcecontrol.HistoryPoint) error {
+		err := st.SaveResourceHistory(ctx, points)
+		if err != nil {
+			logger.Warn("resource history save failed", "error", err)
+		}
+		return err
+	})
 	return s, nil
 }
 
@@ -118,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/logs/dialogue/{id}", s.withAdmin(s.downloadDialogue))
 	mux.HandleFunc("GET /admin/system", s.withAdmin(s.adminSystem))
 	mux.HandleFunc("GET /admin/system/resources/status", s.withAdmin(s.resourceStatus))
+	mux.HandleFunc("GET /admin/system/resources/history", s.withAdmin(s.resourceHistory))
 	mux.HandleFunc("POST /admin/system/resources/save", s.withAdmin(s.resourceSave))
 	mux.HandleFunc("POST /admin/system/check", s.withAdmin(s.adminSystem))
 	mux.HandleFunc("POST /admin/system/backup/run", s.withAdmin(s.adminBackupRun))

@@ -199,6 +199,7 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at_ms DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_logs(actor_user_id,id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_logs(target_user_id,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_resource_window ON audit_logs(action,created_at_ms) WHERE action IN ('resource.rejected','resource.observed')`,
 		`CREATE TABLE IF NOT EXISTS policies (
 			version INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT NOT NULL,

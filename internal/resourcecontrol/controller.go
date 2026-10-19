@@ -39,6 +39,9 @@ type Controller struct {
 	paused                              string
 	flushMu                             sync.Mutex
 	eventSink                           func(context.Context, []Event) error
+	history                             historyBuffer
+	historyFlushMu                      sync.Mutex
+	historySink                         func(context.Context, []HistoryPoint) error
 }
 
 func NewController(p Policy) *Controller {
@@ -57,6 +60,7 @@ func (c *Controller) Run(ctx context.Context) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	go c.runAudit(ctx)
+	go c.runHistory(ctx)
 	sample := newHostSampler()
 	for {
 		m, e := sample()
@@ -88,6 +92,10 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 		c.recoverSince = time.Time{}
 		return
 	}
+	c.history.add(HistoryPoint{
+		At: m.At.UTC().Truncate(HistoryInterval), CPUPercent: math.Round(m.CPUPercent*10) / 10,
+		UsedMiB: math.Round(m.UsedMiB()*10) / 10, TotalMiB: math.Round(m.TotalMiB*10) / 10,
+	})
 	high := c.policy.CPUPercent > 0 && m.CPUPercent >= c.policy.CPUPercent
 	low := c.policy.CPUPercent == 0 || m.CPUPercent <= math.Max(c.policy.CPUPercent-15, c.policy.CPUPercent/2)
 	memory := c.policy.MemoryMiB > 0 && m.UsedMiB() >= float64(c.policy.MemoryMiB)
