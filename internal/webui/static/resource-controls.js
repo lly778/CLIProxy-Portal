@@ -23,7 +23,7 @@
       .then(function (r) { if (!r.ok || !(r.headers.get("content-type") || "").includes("application/json")) throw new Error("monitor"); return r.json(); })
       .then(function (v) {
         panel.querySelectorAll("[data-resource-field]").forEach(function (el) { el.textContent = v[el.dataset.resourceField] || "0"; });
-        var state = panel.querySelector('[data-resource-field="State"]'); state.className = "badge " + v.StateClass;
+        var state = panel.querySelector('[data-resource-field="State"]'); state.className = "badge " + v.StateClass; state.hidden = v.State === "正常";
         text("[data-resource-warning]", v.Warning);
         var revision = panel.querySelector('[data-resource-settings] [name="revision"]');
         note.textContent = revision && Number(revision.value) !== v.Policy.revision ? " · 设置已更新，请重新载入后保存" : "";

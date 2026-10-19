@@ -1077,6 +1077,8 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .resource-settings.backup-dialog { width: min(720px, calc(100% - 32px)); }
 .resource-settings.backup-dialog form { display: block; margin-top: 16px; }
 .resource-settings .resource-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.resource-fields > div { display: grid; align-content: start; gap: 12px; min-width: 0; }
+[data-resource-field="State"][hidden] { display: none; }
 .resource-settings h3 { margin: 0 0 10px; }
 .resource-settings h3:not(:first-child) { margin-top: 25px; }
 .resource-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }

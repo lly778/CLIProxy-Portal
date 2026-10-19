@@ -2,7 +2,7 @@
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>系统管理</h1><p class="muted">集中查看资源保护、存储占用、系统健康和系统日志。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="section" id="resources" data-resource-panel>
-  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">统一监测整台服务器，按总 CPU、内存用量决定是否接收新模型请求。</p></div><div class="button-row"><span class="badge {{.Resources.StateClass}}" data-resource-field="State">{{.Resources.State}}</span><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
+  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">统一监测整台服务器，按总 CPU、内存用量决定是否接收新模型请求。</p></div><div class="button-row"><span class="badge {{.Resources.StateClass}}" data-resource-field="State"{{if eq .Resources.State "正常"}} hidden{{end}}>{{.Resources.State}}</span><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
   <div class="resource-metrics">
     <article class="card"><span class="muted small">正在处理的请求</span><strong data-resource-field="Active">{{.Resources.Active}}</strong><span class="muted small">待完成工作 <span data-resource-field="Processing">{{.Resources.Processing}}</span></span></article>
     <article class="card"><span class="muted small">整机 CPU</span><strong data-resource-field="CPU">{{.Resources.CPU}}</strong><span class="muted small">100% 表示整机满负载</span></article>
@@ -11,10 +11,10 @@
   </div>
   <p class="muted small resource-monitor-status" aria-live="polite">监测更新：<span data-resource-field="Updated">{{.Resources.Updated}}</span> · <span data-resource-field="Mode">{{.Resources.Mode}}</span><span data-resource-poll-status></span></p>
   <dialog class="backup-dialog resource-settings" id="resource-settings-dialog" aria-labelledby="resource-settings-title">
-    <h2 id="resource-settings-title">资源保护设置</h2><p class="field-help">填 0 表示不限。</p>
+    <h2 id="resource-settings-title">资源保护设置</h2>
     <form method="post" action="/admin/system/resources/save" data-resource-settings>
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="revision" value="{{.Resources.Policy.Revision}}">
-      <p class="field-help">观察模式记录并继续放行。启用保护后，达到并发或资源阈值时暂停新请求，已有请求继续处理，因此短时用量仍可能超过阈值。新设置用于后续请求与新连接。</p>
+      <p class="field-help">填 0 表示不限。观察模式记录并继续放行。启用保护后，达到并发或资源阈值时暂停新请求，已有请求继续处理，因此短时用量仍可能超过阈值。新设置用于后续请求与新连接。</p>
       <div class="resource-fields">
         <div><label for="resource-mode">运行模式</label><select id="resource-mode" name="mode"><option value="observe" {{if eq .Resources.Policy.Mode "observe"}}selected{{end}}>观察模式 · 记录并放行</option><option value="enforce" {{if eq .Resources.Policy.Mode "enforce"}}selected{{end}}>启用保护 · 超限拒绝</option></select></div>
         <div><label for="resource-global">全局最大并发</label><input id="resource-global" type="number" name="global" value="{{.Resources.Policy.Global}}" min="0" max="128" required></div>
