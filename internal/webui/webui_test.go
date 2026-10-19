@@ -438,7 +438,7 @@ func TestLogTablesCenterContentsWithAuditTextColumnExceptions(t *testing.T) {
 	for _, rule := range []string{
 		".request-log-table th, .request-log-table td, .request-detail-table th, .request-detail-table td { text-align: center; }",
 		".audit-table th, .audit-table td { text-align: center; }",
-		".audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }",
+		".audit-table td.audit-detail-cell { text-align: left; }",
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing log table alignment: %s", rule)

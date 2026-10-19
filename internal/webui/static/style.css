@@ -747,7 +747,7 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .audit-table th:nth-child(5) { width: 8%; }
 .audit-table th:nth-child(6) { width: 32%; }
 .audit-table td { overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }
-.audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
+.audit-table td.audit-detail-cell { text-align: left; }
 .audit-result-cell { width: 1%; min-width: 90px; }
 .audit-actor-cell span, .audit-actor-cell small { display: block; }
 .audit-actor-cell small { white-space: nowrap; }
