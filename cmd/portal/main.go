@@ -173,6 +173,11 @@ func serve(cfg config.Config, st *store.Store) error {
 	if err != nil {
 		return err
 	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		app.Resources.FlushEvents(ctx)
+	}()
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: app.Handler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 90 * time.Second, MaxHeaderBytes: 1 << 20}
 	var gatewayServer *http.Server
 	var captureGateway *gateway.Gateway
@@ -188,12 +193,14 @@ func serve(cfg config.Config, st *store.Store) error {
 		}
 		captureVault = vault
 		captureGateway = proxy
+		proxy.Resources = app.Resources
 		app.CaptureVault = vault
 		gatewayServer = newGatewayServer(cfg.GatewayListenAddr, proxy.Handler())
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go background(ctx, st, keys, cfg, logger, captureVault)
+	go app.Resources.Run(ctx)
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("portal listening", "address", cfg.ListenAddr, "external_url", cfg.ExternalURL)

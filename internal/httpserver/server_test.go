@@ -445,7 +445,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("manual global refresh analytics calls = %d, want %d", eventsAfterRefresh, eventsBeforeRefresh+1)
 	}
 	adminSystemPage := getBody(t, adminClient, portal.URL+"/admin/system", http.StatusOK)
-	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "操作日志") {
+	if !strings.Contains(adminSystemPage, "系统健康") || !strings.Contains(adminSystemPage, "Key 对账") || !strings.Contains(adminSystemPage, "系统日志") {
 		t.Fatalf("admin system page did not merge health and operation logs: %s", adminSystemPage)
 	}
 	for _, label := range []string{"门户 SQLite", "CPAMP SQLite", "其他存储", "交互记录", "日志", "模型网关", "CPA 上游", "health-card-metric", "Key 对账"} {

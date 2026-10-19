@@ -642,6 +642,7 @@ type AdminPolicyView struct {
 
 type AdminSystemView struct {
 	LayoutView
+	Resources    ResourceView
 	Backup       BackupView
 	Storage      []HealthCheckView
 	Checks       []HealthCheckView

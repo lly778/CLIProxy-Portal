@@ -741,12 +741,12 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .audit-table table { min-width: 1100px; table-layout: fixed; }
 .audit-table th, .audit-table td { text-align: center; }
 .audit-table th:nth-child(1) { width: 13%; }
-.audit-table th:nth-child(2) { width: 14%; }
-.audit-table th:nth-child(3) { width: 15%; }
-.audit-table th:nth-child(4) { width: 22%; }
-.audit-table th:nth-child(5) { width: 8%; }
-.audit-table th:nth-child(6) { width: 13%; }
-.audit-table th:nth-child(7) { width: 15%; }
+.audit-table th:nth-child(2) { width: 12%; }
+.audit-table th:nth-child(3) { width: 14%; }
+.audit-table th:nth-child(4) { width: 14%; }
+.audit-table th:nth-child(5) { width: 10%; }
+.audit-table th:nth-child(6) { width: 10%; }
+.audit-table th:nth-child(7) { width: 27%; }
 .audit-table td { overflow-wrap: anywhere; white-space: normal; line-height: 1.45; }
 .audit-table .audit-target-cell, .audit-table td.audit-detail-cell { text-align: left; }
 .audit-result-cell { width: 1%; min-width: 90px; }
@@ -1067,3 +1067,23 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .audit-mini { grid-template-columns: minmax(0, 1fr); gap: 5px; }
   .section-head { flex-wrap: wrap; }
 }
+.resource-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+#resources { scroll-margin-top: 120px; }
+.resource-settings input[type="number"] { min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 7px; }
+.resource-metrics .card { display: flex; flex-direction: column; gap: 9px; padding: 20px; }
+.resource-metrics strong { font-size: 22px; overflow-wrap: anywhere; }
+.resource-monitor-status { margin: 12px 0 18px; }
+.resource-settings { padding: 24px; }
+.resource-settings.backup-dialog { width: min(720px, calc(100% - 32px)); }
+.resource-settings.backup-dialog form { display: block; margin-top: 16px; }
+.resource-settings .resource-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.resource-settings h3 { margin: 0 0 10px; }
+.resource-settings h3:not(:first-child) { margin-top: 25px; }
+.resource-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 16px 0; }
+.resource-settings input, .resource-settings select { width: 100%; min-width: 0; }
+@media (max-width: 900px) { .resource-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .resource-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .resource-settings .resource-fields { grid-template-columns: minmax(0, 1fr); } .resource-settings { padding: 16px; } .resource-metrics .card { padding: 14px; } .resource-metrics strong { font-size: 18px; } }
+
+.resource-save-actions { margin-top: 16px; }
+
+.audit-table td:nth-child(5) .badge { white-space: nowrap; }

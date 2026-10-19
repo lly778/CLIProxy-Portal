@@ -13,6 +13,7 @@ import (
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/gateway"
+	"cliproxy-portal/internal/resourcecontrol"
 	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
@@ -34,6 +35,7 @@ type Server struct {
 	Secret       []byte
 	Logger       *slog.Logger
 	CaptureVault *gateway.Vault
+	Resources    *resourcecontrol.Controller
 	limit        *limiter
 	systemMu     sync.RWMutex
 	systemChecks systemCheckSnapshot
@@ -48,7 +50,13 @@ func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *s
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{Cfg: cfg, Store: st, Accounts: accounts, Keys: keys, UI: ui, Secret: secret, Logger: logger, limit: newLimiter()}, nil
+	p, err := st.ResourcePolicy(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{Cfg: cfg, Store: st, Accounts: accounts, Keys: keys, UI: ui, Secret: secret, Logger: logger, limit: newLimiter(), Resources: resourcecontrol.NewController(p)}
+	s.Resources.SetEventSink(s.resourceAudit)
+	return s, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -109,6 +117,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/requests", s.withAdmin(s.adminRequests))
 	mux.HandleFunc("GET /admin/logs/dialogue/{id}", s.withAdmin(s.downloadDialogue))
 	mux.HandleFunc("GET /admin/system", s.withAdmin(s.adminSystem))
+	mux.HandleFunc("GET /admin/system/resources/status", s.withAdmin(s.resourceStatus))
+	mux.HandleFunc("POST /admin/system/resources/save", s.withAdmin(s.resourceSave))
 	mux.HandleFunc("POST /admin/system/check", s.withAdmin(s.adminSystem))
 	mux.HandleFunc("POST /admin/system/backup/run", s.withAdmin(s.adminBackupRun))
 	mux.HandleFunc("POST /admin/system/backup/settings", s.withAdmin(s.adminBackupSettings))

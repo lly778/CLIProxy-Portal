@@ -1108,6 +1108,13 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	now := time.Now().UTC()
 	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system")}
+	v.Resources = s.resourceView()
+	if msg := r.URL.Query().Get("resource_msg"); msg != "" {
+		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
+	}
+	if msg := r.URL.Query().Get("resource_error"); msg != "" {
+		v.Flash = &webui.FlashView{Kind: "danger", Message: msg}
+	}
 	v.Backup = s.backupView()
 	var next systemCheckSnapshot
 	if scope != "health" {
@@ -1143,7 +1150,7 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 	}
 	items, auditErr := s.Store.ListAudit(r.Context(), 100, 0)
 	if auditErr != nil {
-		v.AuditError = "操作日志暂时不可用"
+		v.AuditError = "系统日志暂时不可用"
 		s.Logger.Error("list audit log", "error", auditErr)
 	} else {
 		v.Entries = s.auditViews(r.Context(), items)

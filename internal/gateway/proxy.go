@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"cliproxy-portal/internal/cpamp"
+	"cliproxy-portal/internal/resourcecontrol"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
 )
@@ -26,6 +27,7 @@ import (
 const modelListLimit = 2 << 20
 
 type Gateway struct {
+	Resources    *resourcecontrol.Controller
 	upstream     *url.URL
 	keys         *service.Keys
 	store        *store.Store
@@ -60,7 +62,7 @@ func (g *Gateway) Handler() http.Handler {
 	return http.HandlerFunc(g.serveHTTP)
 }
 
-func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 	start, source, connection := requestStart(r)
 	isModelList := r.Method == http.MethodGet && r.URL.Path == "/v1/models"
 	var capture *requestCapture
@@ -91,6 +93,10 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			}()
 		}
 		if capture != nil {
+			if state, ok := r.Context().Value(resourceRequestKey{}).(*resourceRequest); ok {
+				capture.resourceDone = state.lease.Finish
+				state.transferred = true
+			}
 			defer g.saveCaptureInBackground(capture)
 			if r.Body != nil {
 				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture.request), Closer: r.Body}
@@ -142,6 +148,11 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		Transport:     g.transport,
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
+			if state, ok := r.Context().Value(resourceRequestKey{}).(*resourceRequest); ok && state.enforce && state.limit > 0 && resp.StatusCode == http.StatusSwitchingProtocols {
+				if rw, ok := resp.Body.(io.ReadWriteCloser); ok {
+					resp.Body = &resourceWebsocket{ReadWriteCloser: rw, limit: uint64(state.limit), onReject: func() { state.lease.Record("websocket_message_too_large") }}
+				}
+			}
 			if measurement != nil {
 				measurement.upstreamResponse(resp)
 			}
@@ -221,6 +232,7 @@ type teeReadCloser struct {
 }
 
 type requestCapture struct {
+	resourceDone            func()
 	row                     store.GatewayCapture
 	request                 *CaptureWriter
 	response                *CaptureWriter
@@ -272,6 +284,9 @@ func (g *Gateway) startCapture(r *http.Request, timing store.GatewayRequestTimin
 }
 
 func (g *Gateway) finishCapture(capture *requestCapture) {
+	if capture.resourceDone != nil {
+		defer capture.resourceDone()
+	}
 	requestTruncated, requestErr := capture.request.Close()
 	responseTruncated, responseErr := capture.response.Close()
 	if requestErr != nil || responseErr != nil {

@@ -91,6 +91,12 @@ func auditActionDisplay(action string) string {
 		return "修改备份设置"
 	case "backup.request":
 		return "请求备份"
+	case "resource.policy.update":
+		return "修改资源保护"
+	case "resource.rejected":
+		return "资源保护拦截"
+	case "resource.observed":
+		return "资源保护观察"
 	case "backup.restore.request":
 		return "请求恢复门户数据库"
 	case "backup.rebuild.request":

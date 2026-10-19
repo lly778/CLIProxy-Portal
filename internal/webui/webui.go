@@ -259,11 +259,11 @@ func formatTime(v any) string {
 func statusClass(status string) string {
 	status = strings.ToLower(strings.TrimSpace(status))
 	switch {
-	case strings.Contains(status, "approved"), strings.Contains(status, "active"), strings.Contains(status, "success"), strings.Contains(status, "healthy"):
+	case status == "成功", status == "已保存", strings.Contains(status, "approved"), strings.Contains(status, "active"), strings.Contains(status, "success"), strings.Contains(status, "healthy"):
 		return "success"
-	case strings.Contains(status, "pending"), strings.Contains(status, "warning"), strings.Contains(status, "sync"):
+	case status == "观察放行", strings.Contains(status, "pending"), strings.Contains(status, "warning"), strings.Contains(status, "sync"):
 		return "warning"
-	case strings.Contains(status, "reject"), strings.Contains(status, "suspend"), strings.Contains(status, "revok"), strings.Contains(status, "error"), strings.Contains(status, "fail"):
+	case status == "已拒绝", strings.Contains(status, "reject"), strings.Contains(status, "suspend"), strings.Contains(status, "revok"), strings.Contains(status, "error"), strings.Contains(status, "fail"):
 		return "danger"
 	default:
 		return "neutral"

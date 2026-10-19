@@ -575,7 +575,16 @@ func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []we
 				detail = "操作代码：" + e.Action + "；" + detail
 			}
 		}
-		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: label, ActorName: emptyDash(name), ActorPhone: phone, Action: action, Target: target, Result: "success", IP: e.IP, Details: detail})
+		result := "成功"
+		if e.Action == "resource.policy.update" {
+			result = "已保存"
+		}
+		if e.Action == "resource.rejected" {
+			result = "已拒绝"
+		} else if e.Action == "resource.observed" {
+			result = "观察放行"
+		}
+		out = append(out, webui.AuditView{At: s.formatTime(e.CreatedAt), Actor: label, ActorName: emptyDash(name), ActorPhone: phone, Action: action, Target: target, Result: result, IP: e.IP, Details: detail})
 	}
 	return out
 }
