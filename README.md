@@ -114,7 +114,7 @@ docker compose -f compose.yaml ps
 curl -fsS http://127.0.0.1:18080/healthz
 ```
 
-Dockerfile 使用 Go 多阶段构建，运行镜像包含 CA 证书及时间区域数据。两种 Compose 均以 UID/GID `10001:10001` 运行，默认限制为 192 MiB 内存、0.75 CPU。
+Dockerfile 使用 Go 多阶段构建，运行镜像包含 CA 证书及时间区域数据。两种 Compose 均以 UID/GID `10001:10001` 运行，不设置单个容器的 CPU、内存限制；整机预算由“系统管理 → 资源保护”控制新请求准入。旧部署若仍有 192 MiB 内存、0.75 CPU 限制，更新 Compose 文件后须使用原有文件组合执行 `docker compose up -d` 重建门户容器；仅重启容器不会移除旧限制。
 
 ### 3. 创建首位管理员
 

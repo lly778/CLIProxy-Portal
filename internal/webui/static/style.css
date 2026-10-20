@@ -960,6 +960,9 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .filter-inline > span, .filter-bar > span { flex: 0 0 auto; width: auto !important; align-self: center; }
   .request-log-table table { min-width: 1120px; table-layout: auto; }
   .request-log-table th { width: auto !important; }
+  .request-log-table .request-time-cell { min-width: 160px; white-space: nowrap; }
+  .request-log-table td:nth-child(2) { min-width: 144px; }
+  .request-log-table td:nth-child(2) small { display: block; white-space: nowrap; }
   .request-log-table .request-model-cell, .request-detail-table .request-model-cell { min-width: 220px; }
   .request-log-table .request-model-cell { min-width: 250px; }
   .request-model-text { -webkit-line-clamp: unset; }
