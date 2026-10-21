@@ -387,6 +387,19 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminCSRF := extract(t, adminLogin, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/login", url.Values{"csrf_token": {adminCSRF}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
 	adminDashboard := getBody(t, adminClient, portal.URL+"/admin", http.StatusOK)
+	for _, want := range []string{"最近全局请求日志", "资源占用", "上游模型", "1 个已启用账号", `class="overview-model-name mono">gpt-enabled</span>`, modelRoute, "张三"} {
+		if !strings.Contains(adminDashboard, want) {
+			t.Fatalf("overview missing %q", want)
+		}
+	}
+	if strings.Contains(adminDashboard, `class="overview-model-name mono">gpt-disabled</span>`) {
+		t.Fatal("overview lists an excluded upstream model")
+	}
+	for _, obsolete := range []string{"查看系统管理", "暂无系统日志", "audit-mini"} {
+		if strings.Contains(adminDashboard, obsolete) {
+			t.Fatalf("overview still contains %q", obsolete)
+		}
+	}
 	mu.Lock()
 	adminWeekly := lastUsageAnalytics
 	mu.Unlock()

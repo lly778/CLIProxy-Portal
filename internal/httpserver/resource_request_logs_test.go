@@ -72,6 +72,10 @@ func TestProtectionRequestLogsPreserveOldEventsScopeAndActualStatuses(t *testing
 	if global.TotalCount != 15 || len(global.Items) != 2 || global.Items[1].PortalUserID != "b" {
 		t.Fatalf("global limit or ownership: %+v", global)
 	}
+	views := s.globalRequestViews(t.Context(), global.Items)
+	if len(views) != 2 || !views[0].Linked || views[0].User.ID != "a" || !views[1].Linked || views[1].User.ID != "b" || views[1].StatusLabel != "已拦截" {
+		t.Fatalf("global request cards lost protection-event ownership or status: %+v", views)
+	}
 	for _, rows := range []func() ([]domain.AuditEvent, error){
 		func() ([]domain.AuditEvent, error) { return st.ListAudit(t.Context(), 1, 0) },
 		func() ([]domain.AuditEvent, error) { return st.ListAuditForUser(t.Context(), "a", 1, 0) },

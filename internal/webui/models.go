@@ -448,8 +448,19 @@ type AdminDashboardView struct {
 	Usage           UsageSummaryView
 	Health          []HealthCheckView
 	TopUsers        []UserUsageRankView
-	RecentAudit     []AuditView
+	RecentRequests  []GlobalRequestView
+	RequestsError   string
+	Resources       ResourceView
+	Upstreams       []UpstreamSummaryView
+	UpstreamsError  string
 	UnlinkedSummary UsageSummaryView
+}
+
+type UpstreamSummaryView struct {
+	Channel, Label string
+	Accounts       int
+	Models         []string
+	ModelsReady    bool
 }
 
 type UserRowView struct {

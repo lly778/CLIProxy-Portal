@@ -1078,20 +1078,20 @@ func TestQuotaPoolHeaderOmitsDuplicateAccountTotal(t *testing.T) {
 	}
 }
 
-func TestRecentAuditUsesResponsiveCardWithoutTruncatingTargets(t *testing.T) {
+func TestRecentRequestsShowGlobalMetadataInsteadOfAuditOperations(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
 		t.Fatal(err)
 	}
-	const target = "上游账号 (d1711e2f9e0cf4cb7fa94b89bedabb29a1cffe94501a6648021122299abcdef)"
+	const target = "long-model-name-d1711e2f9e0cf4cb7fa94b89bedabb29a1cffe94501a6648021122299abcdef"
 	var out bytes.Buffer
-	view := AdminDashboardView{RecentAudit: []AuditView{{Action: "启用上游账号", Actor: "管理员", Target: target, At: "2026-10-04 19:32"}}}
+	view := AdminDashboardView{RecentRequests: []GlobalRequestView{{RequestView: RequestView{Model: target, Status: "failed", StatusLabel: "已拦截", Error: "HTTP 503 · Server memory limit reached", At: "2026-10-04 19:32"}, UserLabel: "用户<甲>"}}}
 	if err := r.Execute(&out, PageAdminDashboard, view); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`class="card audit-mini-card"`, target, `<time class="muted small">2026-10-04 19:32</time>`} {
+	for _, want := range []string{`class="card request-mini-card"`, "最近全局请求日志", `href="/admin/requests"`, "HTTP 503 · Server memory limit reached", "已拦截", "用户&lt;甲&gt;", target, `<time class="muted small">2026-10-04 19:32</time>`} {
 		if !strings.Contains(out.String(), want) {
-			t.Fatalf("missing responsive audit markup or full data: %s", want)
+			t.Fatalf("missing global request metadata: %s", want)
 		}
 	}
 }

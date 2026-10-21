@@ -21,6 +21,7 @@ import (
 )
 
 func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	u := currentUser(r)
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
@@ -85,8 +86,22 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 			v.TopUsers = append(v.TopUsers, webui.UserUsageRankView{Rank: i + 1, User: s.userView(x.user), Requests: compactNumber(x.calls), Tokens: compactNumber(x.tokens), Percent: int(x.calls * 100 / totalCalls)})
 		}
 	}
-	audits, _ := s.Store.ListAudit(r.Context(), 8, 0)
-	v.RecentAudit = s.auditViews(r.Context(), audits)
+	v.Resources = s.resourceView(r.Context())
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	upstreams, upstreamErr := s.Keys.EnabledUpstreams(ctx)
+	if upstreamErr != nil {
+		v.UpstreamsError = "上游配置暂时不可用"
+	}
+	for _, row := range upstreams {
+		v.Upstreams = append(v.Upstreams, webui.UpstreamSummaryView{Channel: row.Channel, Label: service.OAuthChannelLabel(row.Channel), Accounts: row.Accounts, Models: row.Models, ModelsReady: row.ModelsReady})
+	}
+	events, requestErr := s.Keys.GlobalRequests(r.Context(), 8)
+	if requestErr != nil {
+		v.RequestsError = "全局调用元数据暂时不可用"
+	}
+	events = s.supplementGatewayFailures(r.Context(), events, to.AddDate(-10, 0, 0), to, "", 8)
+	v.RecentRequests = s.globalRequestViews(r.Context(), events.Items)
 	_ = s.UI.Render(w, webui.PageAdminDashboard, v)
 }
 
@@ -1062,46 +1077,7 @@ func (s *Server) adminRequests(w http.ResponseWriter, r *http.Request) {
 	if events.TotalCount == 0 && len(events.Items) > 0 {
 		v.Total = strconv.Itoa(len(events.Items))
 	}
-	type owner struct {
-		user   domain.User
-		linked bool
-	}
-	owners := make(map[string]owner)
-	for _, event := range events.Items {
-		hash := strings.ToLower(strings.TrimSpace(event.APIKeyHash))
-		account, cached := owners[hash]
-		if !cached && hash != "" {
-			if key, keyErr := s.Store.KeyByHash(r.Context(), hash); keyErr == nil {
-				if target, userErr := s.Store.UserByID(r.Context(), key.UserID); userErr == nil {
-					account = owner{user: target, linked: true}
-				}
-			}
-			owners[hash] = account
-		}
-		row := webui.GlobalRequestView{RequestView: s.requestView(event), UserLabel: "外部 Key"}
-		if event.PortalResourceID != 0 {
-			row.UserLabel = emptyDash(event.PortalUserLabel)
-			if event.PortalUserID != "" {
-				identity := "resource-user:" + event.PortalUserID
-				account, cached := owners[identity]
-				if !cached {
-					if target, userErr := s.Store.UserByID(r.Context(), event.PortalUserID); userErr == nil {
-						account = owner{user: target, linked: true}
-					}
-					owners[identity] = account
-				}
-				if account.linked {
-					row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
-				}
-			}
-			v.Requests = append(v.Requests, row)
-			continue
-		}
-		if account.linked {
-			row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
-		}
-		v.Requests = append(v.Requests, row)
-	}
+	v.Requests = s.globalRequestViews(r.Context(), events.Items)
 	_ = s.UI.Render(w, webui.PageAdminRequests, v)
 }
 
