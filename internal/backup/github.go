@@ -3,8 +3,6 @@ package backup
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,10 +18,11 @@ import (
 )
 
 type GitHub struct {
-	client  *http.Client
-	api     string
-	uploads string
-	token   string
+	client              *http.Client
+	api                 string
+	uploads             string
+	token               string
+	downloadIdleTimeout time.Duration
 }
 
 type release struct {
@@ -161,7 +160,7 @@ func (g *GitHub) upload(ctx context.Context, c Config, file, tag string, stages 
 	finishDownload := stages.start("download_verify")
 	defer finishDownload()
 	// Download and hash the encrypted asset, not just its upload response.
-	if err = g.verifyAsset(ctx, c.Repository, uploaded.ID, entry); err != nil {
+	if err = g.verifyAssetProgress(ctx, c.Repository, uploaded.ID, entry, stages); err != nil {
 		return "", 0, "", err
 	}
 	finishDownload()
@@ -195,46 +194,6 @@ func (g *GitHub) uploadAsset(ctx context.Context, repository string, releaseID i
 		return a, errors.New("GitHub 附件返回数据无效")
 	}
 	return a, nil
-}
-
-func (g *GitHub) verifyAsset(ctx context.Context, repository string, id int64, expected Entry) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.api+"/repos/"+repository+"/releases/assets/"+strconv.FormatInt(id, 10), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+g.token)
-	req.Header.Set("Accept", "application/octet-stream")
-	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return errors.New("下载备份附件进行校验失败")
-	}
-	if resp.StatusCode == http.StatusFound {
-		location, e := url.Parse(resp.Header.Get("Location"))
-		_ = resp.Body.Close()
-		if e != nil || location.Scheme != "https" || location.User != nil || location.Port() != "" || !(location.Hostname() == "release-assets.githubusercontent.com" || location.Hostname() == "objects.githubusercontent.com") {
-			return errors.New("GitHub 附件下载跳转无效")
-		}
-		// Signed storage URLs must never receive the repository token.
-		req, e = http.NewRequestWithContext(ctx, http.MethodGet, location.String(), nil)
-		if e != nil {
-			return errors.New("GitHub 附件下载链接无效")
-		}
-		resp, err = g.client.Do(req)
-		if err != nil {
-			return errors.New("下载备份附件进行校验失败")
-		}
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("备份下载校验失败（HTTP %d）", resp.StatusCode)
-	}
-	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(resp.Body, expected.Size+1))
-	if err != nil || n != expected.Size || hex.EncodeToString(h.Sum(nil)) != expected.SHA256 {
-		return errors.New("远端备份大小或 SHA256 校验失败，旧备份不会清理")
-	}
-	return nil
 }
 
 // Retain only touches complete releases belonging to this installation. It is

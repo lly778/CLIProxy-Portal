@@ -139,6 +139,22 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		}
 	}
 	stages := &stageHooks{
+		progress: func(p downloadProgress) {
+			switch p.Step {
+			case "address":
+				s.Message = fmt.Sprintf("正在下载校验远端备份（第 %d/%d 次）：获取 GitHub 附件下载地址", p.Attempt, downloadAttempts)
+			case "connect":
+				s.Message = fmt.Sprintf("正在下载校验远端备份（第 %d/%d 次）：连接附件存储节点", p.Attempt, downloadAttempts)
+			case "transfer":
+				if p.Total > 0 {
+					s.Message = fmt.Sprintf("正在下载校验远端备份：%.1f / %.1f MiB（%.1f%%，第 %d/%d 次）", float64(p.Bytes)/(1<<20), float64(p.Total)/(1<<20), 100*float64(p.Bytes)/float64(p.Total), p.Attempt, downloadAttempts)
+				}
+			case "retry":
+				s.Message = fmt.Sprintf("%s；准备第 %d/%d 次下载校验", p.Reason, p.Attempt+1, downloadAttempts)
+				log.Printf("backup download retry attempt=%d reason=%s", p.Attempt, p.Reason)
+			}
+			saveProgress()
+		},
 		begin: func(name string) {
 			s.Phase = name
 			messages := map[string]string{"preflight": "正在检查备份条件", "snapshot": "正在生成数据库和配置快照", "compress_encrypt": "正在压缩并加密备份", "local_verify": "正在进行本地恢复验证", "upload": "正在上传加密备份", "download_verify": "正在下载校验远端备份", "publish": "正在发布已验证备份", "retention": "正在清理超过保留数量的旧备份"}
