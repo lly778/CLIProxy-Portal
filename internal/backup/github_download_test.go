@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -166,5 +167,55 @@ func TestDownloadErrorClassifiesIdleWithoutRawNetworkDetails(t *testing.T) {
 	e := downloadNetworkFailure(ctx, "读取附件数据", errors.New("private-signed-url"))
 	if !e.retry || !strings.Contains(e.Error(), "连续 30 秒") || strings.Contains(e.Error(), "private-signed-url") {
 		t.Fatalf("unsafe error: %v", e)
+	}
+}
+
+func TestGitHubAPIReadsRetryButWritesNeverRepeat(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			g := NewGitHub("test-only-token")
+			var calls int
+			g.client.Transport = downloadRoundTrip(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return nil, &url.Error{URL: "https://private-signed-secret", Err: context.DeadlineExceeded}
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			})
+			resp, err := g.request(t.Context(), method, g.api+"/repos/owner/private", "application/json", strings.NewReader("{}"), 2)
+			if method == http.MethodGet {
+				if err != nil || calls != 2 {
+					t.Fatalf("safe GET not recovered: %v calls=%d", err, calls)
+				}
+				resp.Body.Close()
+			} else if err == nil || calls != 1 || strings.Contains(err.Error(), "private-signed-secret") {
+				t.Fatalf("write retried or leaked request: %v calls=%d", err, calls)
+			}
+		})
+	}
+}
+
+func TestGitHubAPIRequestsUseFreshConnections(t *testing.T) {
+	var addresses []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		addresses = append(addresses, r.RemoteAddr)
+		mu.Unlock()
+		io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+	g := NewGitHub("test-only-token")
+	g.api = server.URL
+	for i := 0; i < 2; i++ {
+		var value map[string]any
+		if err := g.json(t.Context(), http.MethodGet, "/repos/owner/private", nil, &value, 200); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(addresses) != 2 || addresses[0] == addresses[1] {
+		t.Fatalf("API reused idle connection: %v", addresses)
 	}
 }

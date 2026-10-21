@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -43,7 +44,8 @@ type asset struct {
 }
 
 func NewGitHub(token string) *GitHub {
-	return &GitHub{client: &http.Client{Timeout: 10 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, api: "https://api.github.com", uploads: "https://uploads.github.com", token: token}
+	client := downloadClient(&http.Client{Timeout: 10 * time.Minute}, false)
+	return &GitHub{client: client, api: "https://api.github.com", uploads: "https://uploads.github.com", token: token}
 }
 
 func (g *GitHub) request(ctx context.Context, method, target, contentType string, body io.Reader, length int64) (*http.Response, error) {
@@ -59,11 +61,44 @@ func (g *GitHub) request(ctx context.Context, method, target, contentType string
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return nil, errors.New("无法连接 GitHub，请检查网络或稍后重试")
+	client := *g.client
+	// Uploads retain the large-file budget; small API responses must not hold
+	// publication/retention for ten minutes on a silent connection.
+	if !strings.HasPrefix(target, g.uploads+"/") && (client.Timeout == 0 || client.Timeout > 30*time.Second) {
+		client.Timeout = 30 * time.Second
 	}
-	return resp, nil
+	attempts := 1
+	if method == http.MethodGet && (length == 0 || req.GetBody != nil) {
+		attempts = 3
+	}
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 && req.GetBody != nil {
+			req.Body, err = req.GetBody()
+			if err != nil {
+				return nil, errors.New("GitHub 请求无法安全重试")
+			}
+		}
+		// This job performs requests serially. Fresh connections also protect
+		// the API request after an upload or full download left its pool idle.
+		client.CloseIdleConnections()
+		resp, err := client.Do(req)
+		if err == nil {
+			return resp, nil
+		}
+		failure := downloadNetworkFailure(ctx, "GitHub 管理接口", err)
+		if ctx.Err() != nil || !failure.retry || attempt == attempts {
+			return nil, fmt.Errorf("%s（请求 %s，已尝试 %d 次）", failure.Error(), method, attempt)
+		}
+		log.Printf("backup github api retry method=%s attempt=%d reason=%s", method, attempt, failure.reason)
+		timer := time.NewTimer(time.Duration(attempt) * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, errors.New("GitHub 请求已取消")
+		case <-timer.C:
+		}
+	}
+	return nil, errors.New("无法连接 GitHub")
 }
 
 func (g *GitHub) json(ctx context.Context, method, endpoint string, payload, result any, status int) error {
