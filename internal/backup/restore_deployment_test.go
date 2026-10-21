@@ -120,15 +120,23 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 				t.Fatal(err)
 			}
 			pulls, ups := 0, 0
+			var phase string
+			ctx := context.WithValue(t.Context(), restoreProgressKey{}, func(v string) { phase = v })
 			d := &dockerPortal{policy: p, rebuild: true, execute: func(_ context.Context, args ...string) ([]byte, error) {
 				joined := strings.Join(args, " ")
 				if args[0] == "start" {
+					if phase != "start_portal" {
+						t.Fatalf("portal start phase: %s", phase)
+					}
 					return nil, nil
 				}
 				if args[0] == "ps" {
 					return []byte(p.ManagerContainer), nil
 				}
 				if args[0] == "volume" {
+					if phase != "prepare_volume" {
+						t.Fatalf("volume phase: %s", phase)
+					}
 					if args[1] == "ls" {
 						return []byte(p.ManagerVolume), nil
 					}
@@ -183,6 +191,9 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 					t.Fatal("restore would leave the suite accounting cgroup")
 				}
 				if strings.Contains(joined, " pull ") {
+					if phase != "download_images" {
+						t.Fatalf("download phase: %s", phase)
+					}
 					pulls++
 					if scenario == "pull-failure" {
 						return nil, errors.New("registry failed")
@@ -190,13 +201,16 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 					return nil, nil
 				}
 				if strings.Contains(joined, " up --detach --no-deps --force-recreate ") {
+					if phase != "rebuild_services" {
+						t.Fatalf("rebuild phase: %s", phase)
+					}
 					ups++
 					return nil, nil
 				}
 				t.Fatalf("unexpected compose operation %s", joined)
 				return nil, nil
 			}}
-			err := d.Prepare(t.Context(), restored)
+			err := d.Prepare(ctx, restored)
 			if scenario != "valid" {
 				if err == nil {
 					t.Fatal("unsafe rebuild accepted")
@@ -212,7 +226,7 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 			if pulls != 1 || ups != 0 {
 				t.Fatal("must download before stopping services")
 			}
-			if err = d.Start(t.Context()); err != nil {
+			if err = d.Start(ctx); err != nil {
 				t.Fatal(err)
 			}
 			if ups != 1 {

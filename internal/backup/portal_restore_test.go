@@ -373,7 +373,7 @@ func TestQueuedDatabaseRestoreAndOldConsentRejection(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := LoadRestoreStatus(state)
-	if err != nil || status.Running || status.FinishedAt.IsZero() || status.Rollback == "" {
+	if err != nil || status.Running || status.FinishedAt.IsZero() || status.Rollback == "" || status.Phase != "complete" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	checkRestoreDB(t, p.Database, "backup", true)
@@ -386,6 +386,10 @@ func TestQueuedDatabaseRestoreAndOldConsentRejection(t *testing.T) {
 	before := svc.stops
 	if err = run(); err == nil || svc.stops != before {
 		t.Fatal("wrong key touched live service")
+	}
+	status, err = LoadRestoreStatus(state)
+	if err != nil || status.Running || status.Phase != "failed" || status.FailedPhase != "decrypt" || !strings.Contains(status.Message, "解密并解压备份") {
+		t.Fatalf("failure stage: %+v %v", status, err)
 	}
 	if err = RequestRestore(state, bytes.NewReader(content), key, DatabaseRestoreMode); err != nil {
 		t.Fatal(err)

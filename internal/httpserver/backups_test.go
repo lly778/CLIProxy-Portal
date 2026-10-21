@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -27,6 +28,51 @@ import (
 )
 
 type backupTestAPI struct{ cpamp.API }
+
+func TestBackupViewHidesSuccessfulRestoreButRetainsFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name, phase, message      string
+		running, finished, hidden bool
+	}{
+		{"completed", "complete", "恢复成功；请重新登录", false, true, true},
+		{"legacy-rebuild", "", "CPA、CPAMP 已重建，门户及 CPAMP 数据库已恢复；请重新登录", false, true, true},
+		{"legacy-database", "", "门户数据库已恢复，服务健康；请重新登录", false, true, true},
+		{"legacy-committed", "", "恢复已完成，服务健康；请重新登录", false, true, true},
+		{"running", "download_images", "正在下载 CPA / CPAMP 指定版本镜像", true, false, false},
+		{"failed", "failed", "恢复失败：已回退原数据及服务", false, true, false},
+		{"interrupted", "", "上次恢复异常中断，已回退原数据并启动服务", false, true, false},
+		{"incomplete-status", "complete", "恢复成功", false, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			status := backup.RestoreStatus{Phase: tc.phase, Message: tc.message, Running: tc.running, Rollback: "restore-rollback-test"}
+			if tc.finished {
+				status.FinishedAt = time.Now().UTC()
+			}
+			data, err := json.Marshal(status)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.WriteFile(filepath.Join(dir, "restore-status.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			s := &Server{Cfg: config.Config{BackupStateDir: dir}}
+			v := s.backupView()
+			if tc.hidden {
+				if v.RestoreMessage != "" || v.RestoreRollback != "" {
+					t.Fatalf("old success notice still visible: %+v", v)
+				}
+			} else if v.RestoreMessage != tc.message || v.RestoreRollback != status.Rollback {
+				t.Fatalf("important restore state hidden: %+v", v)
+			}
+			// Presentation must not discard the underlying diagnostic record.
+			saved, err := backup.LoadRestoreStatus(dir)
+			if err != nil || saved.Message != tc.message || saved.Rollback != status.Rollback {
+				t.Fatalf("status changed: %+v %v", saved, err)
+			}
+		})
+	}
+}
 
 func (*backupTestAPI) Status(context.Context) (cpamp.StatusResponse, error) {
 	return cpamp.StatusResponse{}, errors.New("not measured")

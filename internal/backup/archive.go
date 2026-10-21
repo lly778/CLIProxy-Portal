@@ -555,6 +555,7 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 	if !manifestSeen || manifest.Version != 1 || !supportedManifestKind(manifest.Kind) || len(manifest.Entries) != len(entries) || len(entries) == 0 {
 		return errors.New("备份清单版本或文件数量无效")
 	}
+	reportRestorePhase(ctx, "verify_archive")
 	checked := map[string]bool{}
 	for _, expected := range manifest.Entries {
 		if (expected.Name == "portal/data/portal.db" || expected.Name == managerDatabaseName) && !expected.SQLite {

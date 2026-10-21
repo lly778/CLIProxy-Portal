@@ -73,7 +73,9 @@ func (s *Server) backupView() webui.BackupView {
 		v.Warning = "恢复状态无法读取"
 		return v
 	}
-	v.RestoreMessage, v.RestoreRollback = restore.Message, restore.Rollback
+	if !restore.Successful() {
+		v.RestoreMessage, v.RestoreRollback = restore.Message, restore.Rollback
+	}
 	if backup.DatabaseRecoveryPending(dir) {
 		v.Running = true
 		v.Warning = "数据库恢复事务尚未完成，请检查后台任务"

@@ -121,6 +121,7 @@ func (d *dockerPortal) Stop(ctx context.Context) error {
 
 func (d *dockerPortal) Start(ctx context.Context) error {
 	if d.rebuild && !d.rollbackMissing {
+		reportRestorePhase(ctx, "rebuild_services")
 		if err := d.compose(ctx, "up"); err != nil {
 			return err
 		}
@@ -138,6 +139,7 @@ func (d *dockerPortal) Start(ctx context.Context) error {
 			}
 		}
 	}
+	reportRestorePhase(ctx, "start_portal")
 	if _, err := d.output(ctx, "start", d.policy.Container); err != nil {
 		return errors.New("门户启动失败")
 	}

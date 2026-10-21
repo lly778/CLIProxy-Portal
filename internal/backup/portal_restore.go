@@ -170,6 +170,7 @@ func DatabaseRecoveryPending(dir string) bool {
 // The host controls every destination and service. Candidate data is fully
 // validated and staged on each target filesystem before any service is stopped.
 func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRestorePolicy, service portalController, mode ...string) (rollback string, result error) {
+	reportRestorePhase(ctx, "verify_targets")
 	selected := DatabaseRestoreMode
 	if len(mode) > 0 {
 		selected = mode[0]
@@ -234,6 +235,7 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 			_ = os.RemoveAll(rollbackDir)
 		}
 	}()
+	reportRestorePhase(ctx, "stage_data")
 	for index := range j.Targets {
 		target := &j.Targets[index]
 		parent := filepath.Dir(target.Path)
@@ -291,7 +293,11 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 	if err = persistDatabaseTransaction(transaction, j); err != nil {
 		return "", err
 	}
+	reportRestorePhase(ctx, "stop_services")
 	err = service.Stop(ctx)
+	if err == nil {
+		reportRestorePhase(ctx, "rollback_snapshot")
+	}
 	for index, target := range j.Targets {
 		if err != nil {
 			break
@@ -319,6 +325,9 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 		j.Phase = "switching"
 		err = persistDatabaseTransaction(transaction, j)
 	}
+	if err == nil {
+		reportRestorePhase(ctx, "replace_data")
+	}
 	for _, target := range j.Targets {
 		if err != nil {
 			break
@@ -342,9 +351,11 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 		err = persistDatabaseTransaction(transaction, j)
 	}
 	if err == nil {
+		reportRestorePhase(ctx, "start_services")
 		err = service.Start(ctx)
 	}
 	if err == nil {
+		reportRestorePhase(ctx, "health_check")
 		err = service.Healthy(ctx)
 	}
 	if err == nil {
@@ -356,6 +367,7 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 			return j.Rollback, nil
 		}
 	}
+	reportRestorePhase(ctx, "rollback")
 	rollbackCtx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	if rollbackErr := rollbackDatabaseTransaction(rollbackCtx, dir, p, service, &j); rollbackErr != nil {

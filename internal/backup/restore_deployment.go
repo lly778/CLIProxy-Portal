@@ -106,6 +106,7 @@ func (d *dockerPortal) validateProfile() error {
 // must exactly match the operator-approved file; restored parameters may not
 // alter mounts, commands, ports or container privilege configuration.
 func (d *dockerPortal) Prepare(ctx context.Context, restored string) error {
+	reportRestorePhase(ctx, "validate_deployment")
 	if err := d.validateProfile(); err != nil {
 		return err
 	}
@@ -142,9 +143,11 @@ func (d *dockerPortal) Prepare(ctx context.Context, restored string) error {
 		return err
 	}
 	d.images = manifest.Images
+	reportRestorePhase(ctx, "download_images")
 	if err = d.compose(ctx, "pull"); err != nil {
 		return err
 	}
+	reportRestorePhase(ctx, "prepare_volume")
 	return d.ensureManagerVolume(ctx)
 }
 
