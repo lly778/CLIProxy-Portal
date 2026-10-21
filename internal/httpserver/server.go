@@ -54,15 +54,20 @@ func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *s
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Cfg: cfg, Store: st, Accounts: accounts, Keys: keys, UI: ui, Secret: secret, Logger: logger, limit: newLimiter(), Resources: resourcecontrol.NewController(p)}
+	s := &Server{Cfg: cfg, Store: st, Accounts: accounts, Keys: keys, UI: ui, Secret: secret, Logger: logger, limit: newLimiter(), Resources: resourcecontrol.NewController(p, cfg.ResourceCgroupPath)}
 	s.Resources.SetEventSink(s.resourceAudit)
-	if points, historyErr := st.ResourceHistory(context.Background()); historyErr == nil {
+	s.Resources.SetHostMetricsPath(cfg.HostMetricsPath)
+	historyScope := ""
+	if cfg.HostMetricsPath != "" {
+		historyScope = "esxi"
+	}
+	if points, historyErr := st.ResourceHistoryForScope(context.Background(), historyScope); historyErr == nil {
 		s.Resources.RestoreHistory(points, time.Now())
 	} else {
 		logger.Warn("resource history load failed", "error", historyErr)
 	}
 	s.Resources.SetHistorySink(func(ctx context.Context, points []resourcecontrol.HistoryPoint) error {
-		err := st.SaveResourceHistory(ctx, points)
+		err := st.SaveResourceHistoryForScope(ctx, points, historyScope)
 		if err != nil {
 			logger.Warn("resource history save failed", "error", err)
 		}

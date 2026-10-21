@@ -23,7 +23,7 @@ func resourceReason(reason string) string {
 	case "capture_backlog":
 		return "交互记录待处理过多"
 	case "memory_pressure":
-		return "整机内存达到总上限"
+		return "CPA 套件内存达到上限"
 	case "cpu_pressure":
 		return "CPU 持续繁忙"
 	case "monitor_unavailable":
@@ -73,6 +73,7 @@ func (s *Server) resourceAudit(ctx context.Context, events []resourcecontrol.Eve
 func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	q := s.Resources.Snapshot()
 	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: "—", Observed: "—", Fresh: q.Fresh, Updated: "等待监测"}
+	v.ESXi = s.Cfg.HostMetricsPath != ""
 	countsCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if counts, err := s.Store.ResourceCounts(countsCtx, time.Now()); err == nil {
@@ -96,8 +97,14 @@ func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	}
 	if q.Fresh {
 		v.CPU = fmt.Sprintf("%.1f%%", q.Metrics.CPUPercent)
-		v.Memory = fmt.Sprintf("%.0f / %.0f MiB", q.Metrics.UsedMiB(), q.Metrics.TotalMiB)
-		v.Available = fmt.Sprintf("可用 %.0f MiB", q.Metrics.AvailableMiB)
+		v.Memory = fmt.Sprintf("%.0f MiB / 不限", q.Metrics.UsedMiB())
+		if q.Policy.MemoryMiB > 0 {
+			v.Memory = fmt.Sprintf("%.0f / %d MiB", q.Metrics.UsedMiB(), q.Policy.MemoryMiB)
+		}
+		v.Available = fmt.Sprintf("整机可用 %.0f / %.0f MiB", q.Metrics.AvailableMiB, q.Metrics.TotalMiB)
+		if v.ESXi && q.Metrics.HostUsedMiB != nil {
+			v.Available = fmt.Sprintf("宿主机可用 %.0f / %.0f MiB", q.Metrics.HostTotalMiB-*q.Metrics.HostUsedMiB, q.Metrics.HostTotalMiB)
+		}
 		v.Updated = s.formatTime(q.Metrics.At)
 		if q.Policy.MemoryMiB > 0 && float64(q.Policy.MemoryMiB) > q.Metrics.TotalMiB-64 {
 			v.Warning = "内存总上限过高，请至少保留 64 MiB 余量"
@@ -196,6 +203,6 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 	if saved.Mode == "enforce" {
 		mode = "启用保护"
 	}
-	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%d MiB；CPU 总上限=%.1f%%；内存总上限=%d MiB", mode, saved.Global, saved.PerUser, saved.BodyMiB, saved.CPUPercent, saved.MemoryMiB))
+	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%d MiB；整机 CPU 上限=%.1f%%；CPA 套件内存上限=%d MiB", mode, saved.Global, saved.PerUser, saved.BodyMiB, saved.CPUPercent, saved.MemoryMiB))
 	s.resourceRedirect(w, r, "msg", "资源保护设置已保存，对后续请求生效")
 }

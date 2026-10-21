@@ -5,42 +5,52 @@ package resourcecontrol
 import (
 	"errors"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
-	"time"
 )
 
-// proc counters report host totals in a standard Docker deployment. Each
-// sampler owns its CPU baseline; no subprocess, Docker API or disk cache is used.
-func newHostSampler() func() (Metrics, error) {
-	var total, idle uint64
-	return func() (Metrics, error) { return collectMetrics(&total, &idle) }
-}
-func cpuTimes() (uint64, uint64, error) {
-	b, e := os.ReadFile("/proc/stat")
-	if e != nil {
-		return 0, 0, e
+// /proc/stat aggregates all host CPUs. Guest time is already included in user
+// and nice, so only the first eight counters participate in the total.
+func readHostCPUTimes(path string) (total, idle uint64, count int, err error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return 0, 0, 0, err
 	}
-	fields := strings.Fields(strings.SplitN(string(b), "\n", 2)[0])
-	if len(fields) < 9 {
-		return 0, 0, errors.New("CPU 数据无效")
-	}
-	var total, idle uint64
-	for i := 1; i <= 8; i++ {
-		n, e := strconv.ParseUint(fields[i], 10, 64)
-		if e != nil {
-			return 0, 0, e
+	found := false
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
 		}
-		total += n
-		if i == 4 || i == 5 {
-			idle += n
+		if f[0] == "cpu" {
+			if len(f) < 9 {
+				return 0, 0, 0, errors.New("CPU 数据无效")
+			}
+			for i := 1; i <= 8; i++ {
+				n, e := strconv.ParseUint(f[i], 10, 64)
+				if e != nil {
+					return 0, 0, 0, e
+				}
+				total += n
+				if i == 4 || i == 5 {
+					idle += n
+				}
+			}
+			found = true
+		} else if strings.HasPrefix(f[0], "cpu") {
+			if n, e := strconv.Atoi(strings.TrimPrefix(f[0], "cpu")); e == nil && n >= 0 {
+				count++
+			}
 		}
 	}
-	return total, idle, nil
+	if !found || count == 0 {
+		return 0, 0, 0, errors.New("整机 CPU 数据缺失")
+	}
+	return total, idle, count, nil
 }
-func memoryTimes() (float64, float64, error) {
-	b, e := os.ReadFile("/proc/meminfo")
+
+func readMemoryTimes(path string) (float64, float64, error) {
+	b, e := os.ReadFile(path)
 	if e != nil {
 		return 0, 0, e
 	}
@@ -64,25 +74,4 @@ func memoryTimes() (float64, float64, error) {
 		return 0, 0, errors.New("内存数据无效")
 	}
 	return total, avail, nil
-}
-
-// Read proc counters only. This process does not call Docker or change limits.
-func collectMetrics(lastTotal, lastIdle *uint64) (Metrics, error) {
-	m := Metrics{At: time.Now().UTC(), HostID: "local-host", CPUCount: runtime.NumCPU()}
-	total, idle, e := cpuTimes()
-	if e != nil {
-		return m, e
-	}
-	if *lastTotal > 0 && total > *lastTotal && idle >= *lastIdle {
-		m.CPUPercent = 100 * (1 - float64(idle-*lastIdle)/float64(total-*lastTotal))
-	} else if *lastTotal == 0 {
-		e = errors.New("等待第二次 CPU 采样")
-	}
-	*lastTotal, *lastIdle = total, idle
-	var memoryErr error
-	m.TotalMiB, m.AvailableMiB, memoryErr = memoryTimes()
-	if memoryErr != nil {
-		return m, memoryErr
-	}
-	return m, e
 }

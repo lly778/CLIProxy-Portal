@@ -251,7 +251,10 @@ func (d *dockerPortal) compose(ctx context.Context, action string) error {
 	}
 	defer os.RemoveAll(work)
 	override := filepath.Join(work, "images.json")
-	services := map[string]any{d.policy.UpstreamService: map[string]string{"image": d.images["cpa"]}, d.policy.ManagerService: map[string]string{"image": d.images["cpamp"]}}
+	// Resource accounting is controlled by the host policy, never by uploaded
+	// backup parameters. Preserve the approved base template byte for byte.
+	parent := d.policy.resourceCgroupParent()
+	services := map[string]any{d.policy.UpstreamService: map[string]string{"image": d.images["cpa"], "cgroup_parent": parent}, d.policy.ManagerService: map[string]string{"image": d.images["cpamp"], "cgroup_parent": parent}}
 	if err = writeJSON(override, map[string]any{"services": services}); err != nil {
 		return err
 	}

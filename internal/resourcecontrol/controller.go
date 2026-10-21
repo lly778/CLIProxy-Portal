@@ -43,10 +43,16 @@ type Controller struct {
 	history                             historyBuffer
 	historyFlushMu                      sync.Mutex
 	historySink                         func(context.Context, []HistoryPoint) error
+	cgroupPath                          string
+	hostMetricsPath                     string
 }
 
-func NewController(p Policy) *Controller {
-	return &Controller{policy: p, users: map[string]int{}, events: make(chan Event, 256), auditWake: make(chan struct{}, 1)}
+func NewController(p Policy, cgroupPath ...string) *Controller {
+	path := DefaultCgroupPath
+	if len(cgroupPath) > 0 && cgroupPath[0] != "" {
+		path = cgroupPath[0]
+	}
+	return &Controller{policy: p, users: map[string]int{}, events: make(chan Event, 256), auditWake: make(chan struct{}, 1), cgroupPath: path}
 }
 func (c *Controller) SetPolicy(p Policy) {
 	c.mu.Lock()
@@ -57,16 +63,26 @@ func (c *Controller) SetPolicy(p Policy) {
 	c.paused = ""
 }
 func (c *Controller) Policy() Policy { c.mu.Lock(); defer c.mu.Unlock(); return c.policy }
+
+func memoryRecoveryThreshold(limit int64) float64 {
+	budget := float64(limit)
+	return math.Max(budget-math.Max(32, budget*0.05), budget/2)
+}
+
 func (c *Controller) Run(ctx context.Context) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	go c.runAudit(ctx)
 	go c.runHistory(ctx)
-	sample := newHostSampler()
+	sample := newSuiteSampler(c.cgroupPath)
 	for {
 		m, e := sample()
+		if c.hostMetricsPath != "" && m.SuiteUsedMiB != nil && m.TotalMiB > 0 && m.CPUCount > 0 {
+			// External CPU does not need the local CPU delta warm-up.
+			m, e = applyExternalMetrics(m, c.hostMetricsPath, time.Now())
+		}
 		if e != nil {
-			m.Error = "整机资源监测暂不可用"
+			m.Error = "CPA 套件资源监测暂不可用"
 		}
 		c.UpdateMetrics(m, time.Now())
 		select {
@@ -93,9 +109,13 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 		c.recoverSince = time.Time{}
 		return
 	}
+	historyUsed, historyTotal := m.UsedMiB(), m.TotalMiB
+	if m.HostUsedMiB != nil {
+		historyUsed, historyTotal = *m.HostUsedMiB, m.HostTotalMiB
+	}
 	c.history.add(HistoryPoint{
 		At: m.At.UTC().Truncate(HistoryInterval), CPUPercent: math.Round(m.CPUPercent*10) / 10,
-		UsedMiB: math.Round(m.UsedMiB()*10) / 10, TotalMiB: math.Round(m.TotalMiB*10) / 10,
+		UsedMiB: math.Round(historyUsed*10) / 10, TotalMiB: math.Round(historyTotal*10) / 10,
 	})
 	high := c.policy.CPUPercent > 0 && m.CPUPercent >= c.policy.CPUPercent
 	low := c.policy.CPUPercent == 0 || m.CPUPercent <= math.Max(c.policy.CPUPercent-15, c.policy.CPUPercent/2)
@@ -117,7 +137,7 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 	}
 	c.highSince = time.Time{}
 	if c.paused != "" {
-		if low && (c.policy.MemoryMiB == 0 || m.UsedMiB() <= math.Max(float64(c.policy.MemoryMiB-32), float64(c.policy.MemoryMiB)/2)) {
+		if low && (c.policy.MemoryMiB == 0 || m.UsedMiB() <= memoryRecoveryThreshold(c.policy.MemoryMiB)) {
 			if c.recoverSince.IsZero() {
 				c.recoverSince = now
 			}

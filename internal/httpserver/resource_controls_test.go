@@ -94,7 +94,8 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if p.Global != 2 {
 		t.Fatal("stale editor overwrote settings")
 	}
-	m := resourcecontrol.Metrics{At: time.Now(), HostID: "host-test", CPUCount: 1, CPUPercent: 12.3, TotalMiB: 926, AvailableMiB: 410}
+	used := 120.0
+	m := resourcecontrol.Metrics{At: time.Now(), HostID: "cpa-suite", CPUCount: 1, CPUPercent: 12.3, TotalMiB: 926, AvailableMiB: 410, SuiteUsedMiB: &used}
 	s.Resources.UpdateMetrics(m, time.Now())
 	form.Set("revision", "2")
 	form.Set("memory_mib", "926")
@@ -104,8 +105,8 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		t.Fatal("impossible total budget saved")
 	}
 	page = getBody(t, client, server.URL+"/admin/system", 200)
-	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "流式请求和 WebSocket 连接持续计入并发") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "应用容器预算") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || !strings.Contains(page, "已用 / 总内存") || !strings.Contains(page, "516 / 926 MiB") {
-		t.Fatal("panel is not total-only")
+	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || strings.Contains(page, "CPA 套件 CPU") || !strings.Contains(page, "整机 CPU 使用率上限") || !strings.Contains(page, "CPA 套件内存") || !strings.Contains(page, "120 / 768 MiB") || !strings.Contains(page, "整机可用 410 / 926 MiB") {
+		t.Fatal("panel does not distinguish suite usage from host availability")
 	}
 	// Values shown in the table are escaped, including user-controlled names.
 	s.Resources.Record("<script>bad</script>", "request_too_large")
@@ -128,6 +129,9 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	}
 	if s.resourceView(t.Context()).Active != "0 / 不限" {
 		t.Fatal("unlimited concurrency displayed as zero capacity")
+	}
+	if s.resourceView(t.Context()).Memory != "120 MiB / 不限" {
+		t.Fatal("unlimited memory displayed as zero capacity")
 	}
 	response, e := client.Get(server.URL + "/admin/system/resources/status")
 	if e != nil {
@@ -157,14 +161,34 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		SampleSeconds int                            `json:"sample_seconds"`
 		Points        []resourcecontrol.HistoryPoint `json:"points"`
 	}
-	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 516 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
+	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 120 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
 		t.Fatalf("history did not return the current rolling hour: %s, %v", historyBody, e)
 	}
+	// ESXi changes CPU and host availability/history, but not the suite card.
+	s.Cfg.HostMetricsPath = "/data/esxi-metrics.json"
+	host := m
+	host.At, host.CPUPercent, host.HostTotalMiB = time.Now(), 12.2, 24420
+	hostUsed := 14000.0
+	host.HostUsedMiB = &hostUsed
+	s.Resources.UpdateMetrics(host, host.At)
+	view := s.resourceView(t.Context())
+	if !view.ESXi || view.CPU != "12.2%" || view.Memory != "120 MiB / 不限" || view.Available != "宿主机可用 10420 / 24420 MiB" {
+		t.Fatal("ESXi display scope mixed with suite memory", view)
+	}
+	hostPage := getBody(t, client, server.URL+"/admin/system", 200)
+	for _, label := range []string{"宿主机 CPU", "宿主机内存（右轴 MiB）", "CPA 套件内存"} {
+		if !strings.Contains(hostPage, label) {
+			t.Fatal("ESXi labels missing", label)
+		}
+	}
+	s.Cfg.HostMetricsPath = ""
 	limited := saved
 	limited.MemoryMiB = 768
 	s.Resources.SetPolicy(limited)
 	hot := m
 	hot.At, hot.AvailableMiB = time.Now(), 100
+	hotUsed := 800.0
+	hot.SuiteUsedMiB = &hotUsed
 	s.Resources.UpdateMetrics(hot, hot.At)
 	if view := s.resourceView(t.Context()); view.StateClass != "danger" || !strings.Contains(view.State, "暂停新请求") || !strings.Contains(view.StateHelp, "自动接收新请求") {
 		t.Fatalf("missing resource error presentation: %+v", view)

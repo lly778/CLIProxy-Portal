@@ -19,6 +19,10 @@ type AntigravityQuotaWindow struct {
 	ResetAt, ObservedAt time.Time
 }
 
+// Match CPAMP's Antigravity Hub client. Older CLI user agents receive a
+// reduced summary that omits Gemini's five-hour and weekly buckets.
+const antigravityQuotaUserAgent = "antigravity/hub/2.23.0 darwin/arm64"
+
 // FetchAntigravityQuota uses CPA's credential-injecting proxy. Neither tokens
 // nor credential-file contents are downloaded by the portal.
 func (c *Client) FetchAntigravityQuota(ctx context.Context, file AuthFile, observedAt time.Time) ([]AntigravityQuotaWindow, error) {
@@ -34,6 +38,7 @@ func (c *Client) FetchAntigravityQuota(ctx context.Context, file AuthFile, obser
 	}
 	data, _ := json.Marshal(map[string]string{"project": project})
 	var lastErr error = errors.New("Antigravity 未返回可用额度")
+	var collected []AntigravityQuotaWindow
 	for _, action := range []string{"retrieveUserQuotaSummary", "fetchAvailableModels"} {
 		for _, host := range []string{"daily-cloudcode-pa.googleapis.com", "daily-cloudcode-pa.sandbox.googleapis.com", "cloudcode-pa.googleapis.com"} {
 			if ctx.Err() != nil {
@@ -41,9 +46,12 @@ func (c *Client) FetchAntigravityQuota(ctx context.Context, file AuthFile, obser
 			}
 			body, _ := json.Marshal(map[string]any{"authIndex": file.AuthIndex, "method": http.MethodPost,
 				"url": "https://" + host + "/v1internal:" + action, "data": string(data),
-				"header": map[string]string{"Authorization": "Bearer $TOKEN$", "Content-Type": "application/json", "User-Agent": "antigravity/cli/1.0.13 (aidev_client; os_type=darwin; arch=arm64)"}})
+				"header": map[string]string{"Authorization": "Bearer $TOKEN$", "Content-Type": "application/json", "User-Agent": antigravityQuotaUserAgent}})
 			response, err := c.do(ctx, http.MethodPost, pathAPICall, body, c.adminHeader)
 			if err != nil {
+				if len(collected) > 0 {
+					return collected, nil
+				}
 				return nil, err
 			}
 			var envelope struct {
@@ -61,6 +69,9 @@ func (c *Client) FetchAntigravityQuota(ctx context.Context, file AuthFile, obser
 			if status < 200 || status >= 300 {
 				lastErr = &HTTPError{Operation: "Antigravity quota", StatusCode: status}
 				if status == 401 || status == 429 {
+					if len(collected) > 0 {
+						return collected, nil
+					}
 					return nil, lastErr
 				}
 				continue
@@ -71,11 +82,55 @@ func (c *Client) FetchAntigravityQuota(ctx context.Context, file AuthFile, obser
 				continue
 			}
 			if windows := buildAntigravityQuotaWindows(payload, observedAt); len(windows) > 0 {
-				return windows, nil
+				collected = mergeAntigravityQuotaWindows(collected, windows)
+				if action == "fetchAvailableModels" || (hasAntigravityFamily(collected, "claude-gpt") && hasAntigravityFamily(collected, "gemini")) {
+					return collected, nil
+				}
+				// A valid summary can omit Gemini. Query the model catalog for
+				// missing families instead of treating a partial summary as complete.
+				break
 			}
 		}
 	}
+	if len(collected) > 0 {
+		return collected, nil
+	}
 	return nil, lastErr
+}
+
+func antigravityFamily(w AntigravityQuotaWindow) string {
+	name := strings.ToLower(w.GroupID + " " + w.Label)
+	if strings.Contains(name, "gemini") {
+		return "gemini"
+	}
+	if strings.Contains(name, "claude") || strings.Contains(name, "gpt") || strings.Contains(name, "3p") {
+		return "claude-gpt"
+	}
+	return w.GroupID
+}
+
+func hasAntigravityFamily(windows []AntigravityQuotaWindow, family string) bool {
+	for _, w := range windows {
+		if antigravityFamily(w) == family {
+			return true
+		}
+	}
+	return false
+}
+
+// Preserve native summary periods. Model-level quota fills only absent families;
+// it cannot replace a weekly limit or invent a duration for an unknown period.
+func mergeAntigravityQuotaWindows(existing, incoming []AntigravityQuotaWindow) []AntigravityQuotaWindow {
+	known := map[string]bool{}
+	for _, w := range existing {
+		known[antigravityFamily(w)] = true
+	}
+	for _, w := range incoming {
+		if !known[antigravityFamily(w)] {
+			existing = append(existing, w)
+		}
+	}
+	return existing
 }
 
 func antigravityFraction(raw map[string]any) (float64, bool) {
@@ -128,10 +183,6 @@ func buildAntigravityQuotaWindows(payload map[string]any, now time.Time) []Antig
 			}
 		}
 	}
-	if len(result) > 0 {
-		sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
-		return result
-	}
 	// Match CPA Manager Plus's shared Claude/Gemini model grouping. Tab-only
 	// inventory is excluded; absent fractions remain unknown, never 100%.
 	models := objectValue(payload, "models")
@@ -154,9 +205,9 @@ func buildAntigravityQuotaWindows(payload map[string]any, now time.Time) []Antig
 		search := strings.ToLower(id + " " + textValue(model, "displayName", "display_name"))
 		key, label := "", ""
 		if strings.Contains(search, "claude") || strings.Contains(search, "gpt") {
-			key, label = "claude-gpt", "Claude"
+			key, label = "claude-gpt", "Claude / GPT · 模型额度"
 		} else if strings.Contains(search, "gemini") {
-			key, label = "gemini", "Gemini"
+			key, label = "gemini", "Gemini · 模型额度"
 		} else {
 			continue
 		}
@@ -180,9 +231,10 @@ func buildAntigravityQuotaWindows(payload map[string]any, now time.Time) []Antig
 		groups[key] = g
 	}
 	for _, key := range []string{"claude-gpt", "gemini"} {
-		if g, ok := groups[key]; ok {
+		if g, ok := groups[key]; ok && !hasAntigravityFamily(result, key) {
 			result = append(result, g)
 		}
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }

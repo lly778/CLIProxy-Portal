@@ -94,3 +94,20 @@ func TestQuotaDisplayLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestModelQuotaGroupsDoNotInventGeminiWeeklyOrFiveHourWindows(t *testing.T) {
+	groups := groupAccountQuotaViews([]webui.UpstreamAccountQuotaView{
+		{Label: "Claude / GPT · 5H", RemainingPercent: 40},
+		{Label: "Claude / GPT · 7D", RemainingPercent: 80},
+		{Label: "Gemini · 模型额度", RemainingPercent: 90},
+	})
+	if len(groups) != 2 || groups[1].Label != "Gemini" || len(groups[1].Quotas) != 1 || groups[1].Quotas[0].Label != "模型额度" {
+		t.Fatal("model quota missing or period invented", groups)
+	}
+	columns := groupPoolQuotaViews([]webui.QuotaGroupView{
+		{Label: "Claude / GPT · 5 小时额度"}, {Label: "Claude / GPT · 周额度"}, {Label: "Gemini · 模型额度"},
+	})
+	if len(columns) != 2 || len(columns[1]) != 1 || columns[1][0].Label != "Gemini · 模型额度" {
+		t.Fatal("shared model quota cannot retain separate family", columns)
+	}
+}

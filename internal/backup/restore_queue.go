@@ -175,6 +175,9 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 		if job.Mode == RebuildRestoreMode {
 			s.Message = "CPA、CPAMP 已重建，门户及 CPAMP 数据库、data.key、管理密钥、config.yaml 和 auths 已恢复；请重新登录"
 		}
+		if _, err := os.Stat(filepath.Join(work, "files", filepath.FromSlash(backupSettingsName))); err == nil {
+			s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置；新服务器或仓库变化时需重新确认凭据并启用自动备份"
+		}
 	}
 	if err = writeJSON(filepath.Join(dir, "restore-status.json"), s); err != nil {
 		return err

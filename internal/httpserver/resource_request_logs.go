@@ -39,7 +39,7 @@ func resourceRequestEvent(e domain.AuditEvent) cpamp.EventRow {
 		switch detail.Message {
 		case "全局并发已满", "用户并发已满":
 			detail.StatusCode = 429
-		case "整机内存达到总上限", "CPU 持续繁忙", "交互记录待处理过多", "资源监测未连接":
+		case "整机内存达到总上限", "CPU 持续繁忙", "CPA套件内存达到上限", "CPA 套件内存达到上限", "CPA套件 CPU 持续繁忙", "CPA 套件 CPU 持续繁忙", "交互记录待处理过多", "资源监测未连接":
 			detail.StatusCode = 503
 		}
 	}

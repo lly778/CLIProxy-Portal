@@ -1,0 +1,6 @@
+# Apply to the upstream CPA/CPAMP Compose project. Keep its approved base file.
+services:
+  cli-proxy-api:
+    cgroup_parent: "${PORTAL_RESOURCE_CGROUP_PARENT:-cliproxy.slice}"
+  cpa-manager-plus:
+    cgroup_parent: "${PORTAL_RESOURCE_CGROUP_PARENT:-cliproxy.slice}"

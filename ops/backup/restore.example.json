@@ -20,5 +20,6 @@
   "manager_repository": "seakee/cpa-manager-plus",
   "manager_key_file": "/root/cpa-manager-plus/secrets/cpamp-admin-key",
   "cpa_key_file": "/root/cpa-manager-plus/secrets/cpa-management-key",
-  "portal_manager_key_file": "/root/cliproxy-portal/secrets/cpamp_admin_key"
+  "portal_manager_key_file": "/root/cliproxy-portal/secrets/cpamp_admin_key",
+  "resource_cgroup_parent": "cliproxy.slice"
 }

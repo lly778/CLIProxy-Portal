@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"cliproxy-portal/internal/resourcecontrol"
 )
 
 const DatabaseRestoreMode = "replace-portal-database"
@@ -40,6 +42,14 @@ type PortalRestorePolicy struct {
 	ManagerKeyFile       string `json:"manager_key_file"`
 	CPAKeyFile           string `json:"cpa_key_file"`
 	PortalManagerKeyFile string `json:"portal_manager_key_file"`
+	ResourceCgroupParent string `json:"resource_cgroup_parent,omitempty"`
+}
+
+func (p PortalRestorePolicy) resourceCgroupParent() string {
+	if p.ResourceCgroupParent != "" {
+		return p.ResourceCgroupParent
+	}
+	return resourcecontrol.DefaultCgroupParent
 }
 
 type portalController interface {
@@ -67,6 +77,7 @@ type restoreTarget struct {
 	Exists  bool   `json:"exists"`
 }
 type databaseTransaction struct {
+	BackupSettings    bool            `json:"backup_settings,omitempty"`
 	Mode              string          `json:"mode"`
 	Phase             string          `json:"phase"`
 	Rollback          string          `json:"rollback"`
@@ -77,6 +88,7 @@ type databaseTransaction struct {
 
 var generatedDir = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 var containerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$`)
+var cgroupParentName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,90}\.slice$`)
 
 func LoadRestorePolicy(file string) (PortalRestorePolicy, error) {
 	var p PortalRestorePolicy
@@ -120,6 +132,9 @@ func (p PortalRestorePolicy) validate(mode string) error {
 		return errors.New("门户恢复服务或本机健康检查无效")
 	}
 	if mode == RebuildRestoreMode {
+		if !cgroupParentName.MatchString(p.resourceCgroupParent()) {
+			return errors.New("CPA 套件资源统计父级必须是批准的 systemd slice")
+		}
 		for _, name := range []string{p.UpstreamContainer, p.ManagerContainer, p.ProjectName, p.UpstreamService, p.ManagerService, p.ManagerVolume} {
 			if !containerName.MatchString(name) {
 				return errors.New("后台重建服务配置不完整")
@@ -173,10 +188,19 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 			return "", err
 		}
 	}
-	if err := restoreSpace(p.targets(selected), restored, dir); err != nil {
+	_, settingsErr := readBackupSettings(filepath.Join(restored, filepath.FromSlash(backupSettingsName)))
+	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
+		return "", settingsErr
+	}
+	hasSettings := settingsErr == nil
+	targets, err := restoreTargets(p, dir, selected, hasSettings)
+	if err != nil {
 		return "", err
 	}
-	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: p.targets(selected)}
+	if err := restoreSpace(targets, restored, dir); err != nil {
+		return "", err
+	}
+	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: targets, BackupSettings: hasSettings}
 	if selected == RebuildRestoreMode {
 		deployment, ok := service.(deploymentController)
 		if !ok {
@@ -248,6 +272,11 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 		}
 		if target.Kind == "manager-database" {
 			if err = checkManagerDatabase(ctx, candidate); err != nil {
+				return "", err
+			}
+		}
+		if target.Kind == "backup-settings" {
+			if err = prepareBackupSettings(dir, candidate); err != nil {
 				return "", err
 			}
 		}
@@ -473,7 +502,10 @@ func recoverDatabaseTransaction(ctx context.Context, dir string, p PortalRestore
 	if err := p.validate(j.Mode); err != nil {
 		return err
 	}
-	targets := p.targets(j.Mode)
+	targets, err := restoreTargets(p, dir, j.Mode, j.BackupSettings)
+	if err != nil {
+		return err
+	}
 	if len(targets) != len(j.Targets) || !generatedDir.MatchString(j.Rollback) || !strings.HasPrefix(j.Rollback, "restore-rollback-") {
 		return errors.New("恢复事务目标无效")
 	}

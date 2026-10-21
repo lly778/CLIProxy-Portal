@@ -55,6 +55,7 @@ func validateSources(sources []Source) error {
 	allowed := map[string]bool{"portal/data/portal.db": true, "upstream/cliproxyapi/config.yaml": true, "upstream/cliproxyapi/auths": true, "portal/secrets/portal_app_secret": true, "portal/secrets/cpamp_admin_key": true, "portal/.env": true, "portal/compose.prebuilt.yaml": true, "portal/compose.gateway.yaml": true, "upstream/compose.yaml": true, "upstream/.env": true, "upstream/secrets/cpamp-admin-key": true, "upstream/secrets/cpa-management-key": true, "upstream/versions.json": true}
 	seen := map[string]bool{}
 	allowed[managerDatabaseName], allowed[managerDataKeyName] = true, true
+	allowed[backupSettingsName] = true
 	for _, source := range sources {
 		if seen[source.Name] || !allowed[source.Name] {
 			return errors.New("备份来源不可重复或超出灾备范围")
@@ -156,6 +157,11 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		}
 		if err = ctx.Err(); err != nil {
 			return err
+		}
+		if name == backupSettingsName {
+			if _, err = readBackupSettings(src); err != nil {
+				return err
+			}
 		}
 		// Recheck the next file after earlier snapshots have consumed space.
 		// Source sizes (and WAL) can also grow after the runner's preflight.
@@ -577,6 +583,9 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 		}
 	}
 	// Manifest verification above already quick_checked the restored database.
+	if _, settingsErr := readBackupSettings(filepath.Join(dir, filepath.FromSlash(backupSettingsName))); settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
+		return settingsErr
+	}
 	if err = validateManagerBackupIntegrity(ctx, dir, false, false); err != nil {
 		return err
 	}

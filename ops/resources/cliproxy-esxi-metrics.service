@@ -1,0 +1,22 @@
+[Unit]
+Description=Read ESXi host CPU and memory statistics for CLIProxy Portal
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+LoadCredential=esxi.json:/etc/cliproxy-esxi/esxi.json
+ExecStart=/usr/bin/python3 -u /root/cliproxy-portal/ops/collect-esxi-metrics.py --config %d/esxi.json --output /root/cliproxy-portal/data/esxi-metrics.json
+Restart=on-failure
+RestartSec=10
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/root/cliproxy-portal/data
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

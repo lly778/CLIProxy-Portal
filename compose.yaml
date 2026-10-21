@@ -3,6 +3,7 @@ services:
     build: .
     container_name: cliproxy-portal
     restart: unless-stopped
+    cgroup_parent: "${PORTAL_RESOURCE_CGROUP_PARENT:-cliproxy.slice}"
     ports:
       - "18080:18080"
     extra_hosts:
@@ -10,6 +11,8 @@ services:
     environment:
       PORTAL_LISTEN_ADDR: ":18080"
       PORTAL_DATABASE_PATH: "/data/portal.db"
+      PORTAL_RESOURCE_CGROUP_PATH: "/run/cliproxy-suite"
+      PORTAL_HOST_METRICS_PATH: "${PORTAL_HOST_METRICS_PATH:-}"
       PORTAL_EXTERNAL_URL: "${PORTAL_EXTERNAL_URL:-http://localhost:18080}"
       CPA_API_BASE_URL: "${CPA_API_BASE_URL:-http://localhost:8317}"
       CPA_UPSTREAM_URL: "${CPA_UPSTREAM_URL:-}"
@@ -22,6 +25,7 @@ services:
       PORTAL_REGISTRATION_OPEN: "true"
       PORTAL_TRUST_PROXY_HEADERS: "false"
     volumes:
+      - ${PORTAL_RESOURCE_CGROUP_HOST_PATH:-/sys/fs/cgroup/cliproxy.slice}:/run/cliproxy-suite:ro
       - portal-data:/data
       - ./secrets/cpamp_admin_key:/run/secrets/cpamp_admin_key:ro
       - ./secrets/portal_app_secret:/run/secrets/portal_app_secret:ro

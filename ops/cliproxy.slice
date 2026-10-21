@@ -1,0 +1,9 @@
+[Unit]
+Description=CLIProxy Portal, CPA and CPAMP resource accounting
+
+[Slice]
+CPUAccounting=true
+MemoryAccounting=true
+
+[Install]
+WantedBy=slices.target

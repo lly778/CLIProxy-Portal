@@ -6,4 +6,5 @@ type ResourceView struct {
 	Policy                                                                                                               resourcecontrol.Policy
 	Mode, State, StateClass, CPU, Memory, Available, Active, Processing, Rejected, Observed, Updated, Warning, StateHelp string
 	Fresh                                                                                                                bool
+	ESXi                                                                                                                 bool
 }

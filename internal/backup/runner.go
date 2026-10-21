@@ -182,6 +182,11 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 			}
 		}
 		g := newClient(token)
+		settingsSource, e := snapshotBackupSettings(c, work)
+		if e != nil {
+			return e
+		}
+		sources = append(sources, settingsSource)
 		if e = g.CheckPrivate(ctx, c.Repository); e != nil {
 			return e
 		}
@@ -221,6 +226,9 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		archive, _, e := createArchive(ctx, sources, work, key, images, freeze, stages)
 		if e != nil {
 			return e
+		}
+		if e = os.Remove(settingsSource.Path); e != nil {
+			return errors.New("无法清理临时备份设置快照")
 		}
 		// Prove decryption, hashes and SQLite integrity before uploading.
 		finishVerify := stages.start("local_verify")

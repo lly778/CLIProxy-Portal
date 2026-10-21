@@ -5,8 +5,8 @@
 <div class="grid grid-2 section-gap overview-card-grid"><section class="card overview-resource-card" data-overview-resources>
     <div class="section-head compact"><h2>资源占用</h2><a class="text-link" href="/admin/system#resources">详情 →</a></div>
     <div class="metric-list">
-      <div><span>整机 CPU</span><strong data-overview-resource="CPU">{{.Resources.CPU}}</strong></div>
-      <div><span>已用 / 总内存</span><strong data-overview-resource="Memory">{{.Resources.Memory}}</strong></div>
+      <div><span>{{if .Resources.ESXi}}宿主机 CPU{{else}}整机 CPU{{end}}</span><strong data-overview-resource="CPU">{{.Resources.CPU}}</strong></div>
+      <div><span>CPA 套件内存</span><strong data-overview-resource="Memory">{{.Resources.Memory}}</strong></div>
       <div><span>正在处理的请求</span><strong data-overview-resource="Active">{{.Resources.Active}}</strong></div>
     </div>
     <p class="muted small"><span data-overview-resource="Available">{{.Resources.Available}}</span> · <span data-overview-resource="Mode">{{.Resources.Mode}}</span></p>

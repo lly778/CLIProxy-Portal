@@ -17,6 +17,10 @@ func requestLogMessage(message string) string {
 		return "Server memory limit reached"
 	case "CPU 持续繁忙":
 		return "Server CPU limit exceeded"
+	case "CPA套件内存达到上限", "CPA 套件内存达到上限":
+		return "CPA suite memory limit reached"
+	case "CPA套件 CPU 持续繁忙", "CPA 套件 CPU 持续繁忙":
+		return "CPA suite CPU limit exceeded"
 	case "资源监测未连接":
 		return "Resource monitor unavailable"
 	case "请求超过大小上限":

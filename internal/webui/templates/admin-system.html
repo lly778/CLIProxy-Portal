@@ -2,20 +2,20 @@
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>系统管理</h1><p class="muted">集中查看资源保护、存储占用、系统健康和系统日志。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
 <section class="section" id="resources" data-resource-panel>
-  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">统一监测整台服务器，按总 CPU、内存用量决定是否接收新模型请求。</p></div><div class="button-row"><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
+  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">监测{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 和门户、CPA、CPAMP 的合计内存，决定是否接收新模型请求。</p></div><div class="button-row"><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
   <div class="alert {{.Resources.StateClass}} resource-limit-alert" data-resource-limit-alert role="alert"{{if eq .Resources.State "正常"}} hidden{{end}}><strong data-resource-field="State">{{.Resources.State}}</strong><p data-resource-field="StateHelp">{{.Resources.StateHelp}}</p></div>
   <div class="resource-metrics">
     <article class="card"><span class="muted small">正在处理的请求</span><strong data-resource-field="Active">{{.Resources.Active}}</strong><span class="muted small">待完成工作 <span data-resource-field="Processing">{{.Resources.Processing}}</span></span></article>
-    <article class="card"><span class="muted small">整机 CPU</span><strong data-resource-field="CPU">{{.Resources.CPU}}</strong><span class="muted small">100% 表示整机满负载</span></article>
-    <article class="card"><span class="muted small">已用 / 总内存</span><strong data-resource-field="Memory">{{.Resources.Memory}}</strong><span class="muted small" data-resource-field="Available">{{.Resources.Available}}</span></article>
+    <article class="card"><span class="muted small">{{if .Resources.ESXi}}宿主机 CPU{{else}}整机 CPU{{end}}</span><strong data-resource-field="CPU">{{.Resources.CPU}}</strong><span class="muted small">100% 表示占满{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}全部 CPU</span></article>
+    <article class="card"><span class="muted small">CPA 套件内存</span><strong data-resource-field="Memory">{{.Resources.Memory}}</strong><span class="muted small" data-resource-field="Available">{{.Resources.Available}}</span></article>
     <article class="card"><span class="muted small">近 7 天内的保护记录</span><strong><span data-resource-field="Rejected">{{.Resources.Rejected}}</span> 次拒绝</strong><span class="muted small"><span data-resource-field="Observed">{{.Resources.Observed}}</span> 次观察放行</span></article>
   </div>
   <p class="muted small resource-monitor-status" aria-live="polite">监测更新：<span data-resource-field="Updated">{{.Resources.Updated}}</span> · <span data-resource-field="Mode">{{.Resources.Mode}}</span><span data-resource-poll-status></span></p>
   <div class="resource-history" data-resource-history>
-    <div class="resource-history-head"><h3>最近 60 分钟资源趋势</h3><span class="muted small">10 秒峰值 · 15 秒刷新</span></div>
+    <div class="resource-history-head"><h3>最近 60 分钟{{if .Resources.ESXi}}宿主机{{end}}资源趋势</h3><span class="muted small">10 秒峰值 · 15 秒刷新</span></div>
     <p class="muted small" data-resource-history-status role="status" hidden></p>
     <article class="card resource-chart" data-resource-chart>
-      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>已用内存（右轴 MiB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
+      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}套件{{end}}内存（右轴 MiB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
       <div class="resource-chart-stage" tabindex="0" role="group" aria-label="最近六十分钟 CPU 和内存趋势，可用左右方向键查看采样点"><svg class="resource-chart-svg" role="img" aria-label="等待 CPU 和内存监测数据"></svg><span class="resource-chart-empty" data-resource-chart-empty>正在收集监控数据</span><div class="resource-chart-tooltip" role="tooltip" hidden></div></div>
     </article>
     <noscript><p class="muted small">启用 JavaScript 后可查看资源趋势。</p></noscript>
@@ -30,10 +30,10 @@
         <div><label for="resource-global">全局最大并发</label><input id="resource-global" type="number" name="global" value="{{.Resources.Policy.Global}}" min="0" max="128" required></div>
         <div><label for="resource-user">每用户最大并发</label><input id="resource-user" type="number" name="per_user" value="{{.Resources.Policy.PerUser}}" min="0" max="128" required></div>
         <div><label for="resource-body">单个请求上限（MiB）</label><input id="resource-body" type="number" name="body_mib" value="{{.Resources.Policy.BodyMiB}}" min="0" max="128" required></div>
-        <div><label for="resource-cpu">CPU 总使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
-        <div><label for="resource-memory">内存总使用量上限（MiB）</label><input id="resource-memory" type="number" name="memory_mib" value="{{.Resources.Policy.MemoryMiB}}" min="0" max="1048576" required></div>
+        <div><label for="resource-cpu">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
+        <div><label for="resource-memory">CPA 套件内存使用量上限（MiB）</label><input id="resource-memory" type="number" name="memory_mib" value="{{.Resources.Policy.MemoryMiB}}" min="0" max="1048576" required></div>
       </div>
-      <p class="field-help">内存按整机总内存减可用内存计算，包含门户、CPA、CPAMP、隧道与其他后台任务。CPU 连续超过上限 15 秒或内存达到上限时暂停新请求，资源恢复稳定后自动放行。</p>
+      <p class="field-help">CPU 按{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}使用率判断，100% 表示全部核心满载。内存仅合计门户、CPA、CPAMP 三个组件，并扣除可回收的非活跃文件缓存。CPU 连续达到上限 15 秒或套件内存达到上限时暂停新请求。</p>
       <p class="field-help" data-resource-warning>{{.Resources.Warning}}</p>
       <div class="button-row resource-save-actions"><button class="button secondary" type="button" data-resource-close>取消</button><button class="button primary" type="submit">保存设置</button></div>
     </form>
@@ -71,7 +71,7 @@
     </form>
     <details class="backup-settings" {{if not .Backup.Configured}}open{{end}}>
       <summary>备份设置</summary>
-      <p class="field-help">设置 GitHub 私有仓库、访问令牌和每周自动备份计划。</p>
+      <p class="field-help">设置 GitHub 私有仓库、访问令牌和每周自动备份计划。仓库与计划随备份保存；GitHub 令牌和恢复密钥请单独保管。</p>
       <form method="post" action="/admin/system/backup/settings" data-backup-form>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <label for="backup-repository">GitHub 私有仓库</label><input id="backup-repository" type="text" name="repository" value="{{.Backup.Repository}}" placeholder="owner/repo" autocomplete="off" maxlength="140" required>
@@ -98,8 +98,8 @@
     <form method="post" action="/admin/system/backup/restore" enctype="multipart/form-data" data-backup-form>
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label for="backup-restore-password">验证管理员密码</label><input id="backup-restore-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
-      <label for="backup-restore-mode">恢复方式</label><select id="backup-restore-mode" name="restore_mode" required><option value="replace-portal-database">恢复：仅门户数据库</option><option value="rebuild-and-restore">重建并恢复：CPA、CPAMP 及完整数据</option></select>
-      <p class="muted small">“恢复”仅还原门户数据库，不变更上游服务配置。“重建并恢复”将下载备份中记录的指定版本镜像，依据部署参数重新部署 CPA 和 CPAMP、配置管理密钥，并还原门户数据库、CPA 的 config.yaml 与 auths，以及 CPAMP 数据库与 data.key。</p>
+      <label for="backup-restore-mode">恢复方式</label><select id="backup-restore-mode" name="restore_mode" required><option value="replace-portal-database">恢复：门户数据库及备份设置</option><option value="rebuild-and-restore">重建并恢复：CPA、CPAMP 及完整数据</option></select>
+      <p class="muted small">“恢复”还原门户数据库及备份设置，不变更上游服务配置。“重建并恢复”将下载备份中记录的指定版本镜像，依据部署参数重新部署 CPA 和 CPAMP、配置管理密钥，并还原门户数据库、CPA 的 config.yaml 与 auths，以及 CPAMP 数据库与 data.key。旧备份未包含备份设置时保留当前设置；新服务器或仓库变更后，需确认 GitHub 令牌和恢复密钥再启用自动备份。</p>
       <label class="backup-confirm"><input type="checkbox" name="confirm" value="replace-current-data" required>我确认执行所选恢复方式，并了解覆盖范围内备份之后的相关修改将丢失</label>
       {{if not .Backup.KeyReady}}<label for="backup-recovery-key">备份恢复密钥</label><input id="backup-recovery-key" type="password" name="recovery_key" autocomplete="off" minlength="64" maxlength="64" required>{{end}}
       <label for="backup-restore-file">加密备份文件</label><input id="backup-restore-file" type="file" name="backup_file" accept=".cbackup" required>

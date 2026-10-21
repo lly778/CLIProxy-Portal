@@ -8,6 +8,9 @@ import (
 
 const MiB int64 = 1 << 20
 
+const DefaultCgroupPath = "/run/cliproxy-suite"
+const DefaultCgroupParent = "cliproxy.slice"
+
 type Policy struct {
 	Revision   int64   `json:"revision"`
 	Mode       string  `json:"mode"`
@@ -35,10 +38,19 @@ type Metrics struct {
 	CPUPercent   float64   `json:"cpu_percent"`
 	TotalMiB     float64   `json:"total_mib"`
 	AvailableMiB float64   `json:"available_mib"`
+	SuiteUsedMiB *float64  `json:"suite_used_mib,omitempty"`
+	HostUsedMiB  *float64  `json:"host_used_mib,omitempty"`
+	HostTotalMiB float64   `json:"host_total_mib,omitempty"`
 	Error        string    `json:"error,omitempty"`
 }
 
-func (m Metrics) UsedMiB() float64 { return math.Max(0, m.TotalMiB-m.AvailableMiB) }
+func (m Metrics) UsedMiB() float64 {
+	if m.SuiteUsedMiB != nil {
+		return *m.SuiteUsedMiB
+	}
+	return math.Max(0, m.TotalMiB-m.AvailableMiB)
+}
 func (m Metrics) Fresh(now time.Time) bool {
-	return m.Error == "" && m.CPUCount > 0 && m.TotalMiB > 0 && m.AvailableMiB >= 0 && m.AvailableMiB <= m.TotalMiB && m.CPUPercent >= 0 && m.CPUPercent <= 100 && m.HostID != "" && !m.At.IsZero() && now.Sub(m.At) < 10*time.Second && now.Sub(m.At) > -5*time.Second
+	used := m.UsedMiB()
+	return m.Error == "" && m.CPUCount > 0 && m.TotalMiB > 0 && !math.IsInf(m.TotalMiB, 0) && m.AvailableMiB >= 0 && m.AvailableMiB <= m.TotalMiB && used >= 0 && used <= m.TotalMiB && m.CPUPercent >= 0 && m.CPUPercent <= 100 && m.HostID != "" && (m.HostID != "cpa-suite" || m.SuiteUsedMiB != nil) && !m.At.IsZero() && now.Sub(m.At) < 10*time.Second && now.Sub(m.At) > -5*time.Second
 }

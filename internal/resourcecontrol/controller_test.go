@@ -289,6 +289,36 @@ func TestPressureRequiresSustainedCPUAndStableRecovery(t *testing.T) {
 		t.Fatal("stale metrics admitted", r)
 	}
 }
+
+func TestMemoryRecoveryUsesProportionalBufferAndRestartsStableWait(t *testing.T) {
+	for _, tc := range []struct {
+		limit int64
+		want  float64
+	}{{8192, 7782.4}, {768, 729.6}, {500, 468}, {32, 16}} {
+		if got := memoryRecoveryThreshold(tc.limit); math.Abs(got-tc.want) > 0.000001 {
+			t.Fatalf("limit %d: recovery threshold %f, want %f", tc.limit, got, tc.want)
+		}
+	}
+	p := DefaultPolicy()
+	p.MemoryMiB = 8192
+	c := NewController(p)
+	base := time.Now().Add(-time.Minute)
+	for _, tc := range []struct {
+		second int
+		used   float64
+		paused bool
+	}{{0, 8192, true}, {2, 8160, true}, {10, 7800, true}, {12, 7782.4, true}, {18, 7800, true}, {20, 7770, true}, {28, 7770, true}, {30, 7770, false}} {
+		at := base.Add(time.Duration(tc.second) * time.Second)
+		m := goodMetrics(at)
+		m.HostID, m.TotalMiB, m.AvailableMiB = "cpa-suite", 16384, 10000
+		m.SuiteUsedMiB = &tc.used
+		c.UpdateMetrics(m, at)
+		if (c.paused != "") != tc.paused {
+			t.Fatalf("second %d, used %f: paused=%q", tc.second, tc.used, c.paused)
+		}
+	}
+}
+
 func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 	p := DefaultPolicy()
 	if p.Validate() != nil {

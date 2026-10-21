@@ -22,8 +22,7 @@ func upstreamAccountQuotaLabel(channel, label, period string) string {
 	return strings.NewReplacer("5 小时额度", "5H", "周额度", "7D", "月额度", "月").Replace(display)
 }
 
-// Group only explicitly labeled windows. Keep unknown/model-specific quota
-// formats as flat rows rather than inferring a period or merging their values.
+// Group explicitly labeled windows or model quota without inferring a period.
 func groupAccountQuotaViews(quotas []webui.UpstreamAccountQuotaView) []webui.UpstreamAccountQuotaGroupView {
 	var groups []webui.UpstreamAccountQuotaGroupView
 	indices := map[string]int{}
@@ -33,7 +32,7 @@ func groupAccountQuotaViews(quotas []webui.UpstreamAccountQuotaView) []webui.Ups
 			return nil
 		}
 		name, period := quota.Label[:at], quota.Label[at+len(" · "):]
-		if name == "" || (period != "5H" && period != "7D" && period != "月") {
+		if name == "" || (period != "5H" && period != "7D" && period != "月" && period != "模型额度") {
 			return nil
 		}
 		index, found := indices[name]
@@ -62,7 +61,7 @@ func groupPoolQuotaViews(quotas []webui.QuotaGroupView) [][]webui.QuotaGroupView
 			return nil
 		}
 		name, period := quota.Label[:at], quota.Label[at+len(" · "):]
-		if period != "5 小时额度" && period != "周额度" && period != "月额度" {
+		if period != "5 小时额度" && period != "周额度" && period != "月额度" && period != "模型额度" {
 			return nil
 		}
 		index, exists := indices[name]

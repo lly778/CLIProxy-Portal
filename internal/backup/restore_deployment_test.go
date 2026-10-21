@@ -89,7 +89,7 @@ func TestDatabaseDockerDriverNeverOperatesOnUpstreams(t *testing.T) {
 }
 
 func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
-	for _, scenario := range []string{"valid", "image", "missing-pins", "profile", "template", "ports", "environment", "key", "cpa-key", "config", "pull-failure"} {
+	for _, scenario := range []string{"valid", "image", "missing-pins", "profile", "template", "ports", "environment", "key", "cpa-key", "config", "pull-failure", "invalid-cgroup"} {
 		t.Run(scenario, func(t *testing.T) {
 			restored, p, images := deploymentFixture(t)
 			write := func(name, content string) {
@@ -105,6 +105,8 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 				images = map[string]string{}
 			case "profile":
 				p.ComposeSHA256 = strings.Repeat("0", 64)
+			case "invalid-cgroup":
+				p.ResourceCgroupParent = "../../system.slice"
 			case "template":
 				write("upstream/compose.yaml", "services: {}")
 			case "key":
@@ -171,6 +173,14 @@ func TestRebuildRequiresApprovedStructureAndPins(t *testing.T) {
 					if !bytes.Contains(data, []byte(image)) {
 						t.Fatal("image not pinned")
 					}
+				}
+				var account struct {
+					Services map[string]struct {
+						CgroupParent string `json:"cgroup_parent"`
+					} `json:"services"`
+				}
+				if json.Unmarshal(data, &account) != nil || account.Services[p.UpstreamService].CgroupParent != p.resourceCgroupParent() || account.Services[p.ManagerService].CgroupParent != p.resourceCgroupParent() {
+					t.Fatal("restore would leave the suite accounting cgroup")
 				}
 				if strings.Contains(joined, " pull ") {
 					pulls++
