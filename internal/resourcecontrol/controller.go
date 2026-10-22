@@ -109,7 +109,8 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 		c.recoverSince = time.Time{}
 		return
 	}
-	historyUsed, historyTotal := m.UsedMiB(), m.TotalMiB
+	// Trends show whole-machine memory; admission still uses suite memory.
+	historyUsed, historyTotal := m.TotalMiB-m.AvailableMiB, m.TotalMiB
 	if m.HostUsedMiB != nil {
 		historyUsed, historyTotal = *m.HostUsedMiB, m.HostTotalMiB
 	}

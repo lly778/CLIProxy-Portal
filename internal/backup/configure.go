@@ -130,7 +130,7 @@ func WithIdleState(dir string, fn func() error) error {
 	defer os.Remove(lock)
 	b, e1 := LoadStatus(dir)
 	r, e2 := LoadRestoreStatus(dir)
-	if e1 != nil || e2 != nil || b.Running || r.Running || Pending(dir) || RestorePending(dir) || DatabaseRecoveryPending(dir) || ManagerBackupPending(dir) {
+	if e1 != nil || e2 != nil || b.Running || r.Running || Pending(dir) || RestorePending(dir) || DatabaseRecoveryPending(dir) || ManagerBackupPending(dir) || HostRecoveryPending(dir) {
 		return errors.New("已有备份或恢复任务正在执行或等待执行")
 	}
 	return fn()

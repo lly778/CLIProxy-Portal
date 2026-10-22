@@ -55,12 +55,24 @@ func run() error {
 
 func backupCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: portal backup configure|key|check-restore|tick|restore")
+		return errors.New("用法: portal backup configure|key|install-host|check-restore|tick|restore")
 	}
 	fs := flag.NewFlagSet("backup "+args[0], flag.ContinueOnError)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 	switch args[0] {
+	case "install-host":
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return errors.New("install-host 不接受额外参数")
+		}
+		if err := backup.InstallHost(ctx); err != nil {
+			return err
+		}
+		fmt.Println("门户宿主机恢复后台已安装；可在门户上传备份并选择重建并恢复。尚未生成备份。")
+		return nil
 	case "configure":
 		dir := fs.String("state-dir", "", "门户共享备份状态目录")
 		repository := fs.String("repository", "", "专用私有仓库 owner/repo")

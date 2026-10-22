@@ -29,13 +29,31 @@ Linux 后台恢复策略已配置时，任务还会自动保存门户配套的 s
 
 重建模式在解密之前先检查全部必填后台字段、部署模板权限及批准的 SHA256。仅配置门户数据库恢复的主机，会直接列出 `restore.json` 缺失的字段，不再等完整解密后才报“后台重建服务配置不完整”。模板摘要缺失、格式错误或内容变化同样在解密前退出；普通恢复仍只要求门户数据库恢复配置。
 
-两种在线恢复都会还原备份设置（若包内包含），并与数据库置于同一恢复事务中；服务验证失败会一起回退。旧备份没有该快照时保留当前设置。当前 GitHub 令牌、恢复密钥和安装标识不被备份覆盖；新服务器生成新的安装标识，避免自动清理其他安装的历史备份。仅当目标仓库未变、当前令牌和已确认保存的恢复密钥仍存在时才恢复自动备份开关；新服务器、仓库变化或凭据缺失时先恢复仓库和计划，保持自动备份关闭，待管理员确认凭据并保存后启用。
+两种在线恢复都会还原备份设置（若包内包含），并与数据库置于同一恢复事务中；服务验证失败会一起回退。普通恢复沿用当前凭据。新版完整重建恢复会将配套凭据和本次使用的密钥一并纳入事务，备份仓库匹配且凭据成套时恢复自动备份开关。旧备份缺少凭据时保留原行为，需要当前凭据已准备好才启用计划。目标主机始终保留自己的安装标识；新机生成新标识，避免清理原服务器的历史备份。
 
-不备份 `usage-archives`、门户独立交互正文、普通日志、镜像文件、GitHub 令牌或备份恢复密钥。CPAMP 数据库内仍在线的请求记录、用量统计、价格、Key 别名及设置随快照保留；门户内部审计、计时样本也保留。CPAMP 数据库本身若存有敏感请求字段，它们仍属于加密数据库快照。重建恢复替换 CPAMP 数据库和 data.key，不合并新旧统计、不删除现有归档目录或 manager.lock。DNS、Cloudflare 隧道凭据、防火墙、Docker 和门户程序需另行准备。
+不备份 `usage-archives`、门户独立交互正文、普通日志、镜像文件或备份恢复密钥。GitHub、ESXi 及 Cloudflare 凭据在独立加密快照中保存。CPAMP 数据库内仍在线的请求记录、用量统计、价格、Key 别名及设置随快照保留；门户内部审计、计时样本也保留。重建恢复替换 CPAMP 数据库和 data.key，不合并新旧统计、不删除现有归档目录或 manager.lock。Docker/Compose、门户程序、DNS 和防火墙是新机安装前提，云端隧道域名路由仍由 Cloudflare 账户管理。
 
 本方案按要求排除归档文件，并非启用历史归档后的完整 CPAMP 归档灾备。如果数据库含已有归档任务/segment 索引，备份仍保留原始数据库，不擅自删除归档索引或 identity ledger；自动重建恢复会在停服前拒绝该包，提示管理员处理配套归档，避免重新启动缺少文件的维护任务。普通门户恢复不受影响。参考 [CPAMP 官方备份说明](https://seakee.github.io/CPA-Manager-Plus/docs/operations/backup.html)。
 
 ## 安装和批准部署档案
+
+### 默认部署的一键恢复
+
+Linux systemd 新服务器安装好 Docker/Compose，并将门户程序安装到 `/root/cliproxy-portal/dist/portal-linux-amd64` 后，以 root 执行：
+
+```sh
+sudo /root/cliproxy-portal/dist/portal-linux-amd64 backup install-host
+```
+
+该步骤属于门户安装：检查 Docker/Compose，缺少 Python 3 时通过系统 apt 安装，建立目录、默认后台策略与来源，安装并启用恢复队列服务/定时器、资源 slice 及日志采集任务；保留已有数据库、后台策略、备份计划和凭据，不提交任何备份请求。然后登录门户，上传 `.cbackup`、输入独立恢复密钥，选择“重建并恢复”。
+
+新机没有 CPA/CPAMP 时，程序只采用内置默认 Compose（与备份模板逐字及 SHA256 核对），校验固定镜像、环境变量和端口后建立部署目录、卷和上游服务；不用手工提取、填写服务名或 SHA256。内置模板支持项目 `cpamp`、CPA 8317 和 CPAMP 18317，以及默认 `/root/cliproxy-portal`、`/root/cpa-manager-plus` 路径。自定义部署仍按下文配置批准档案，不能把任意备份中的模板直接批准为 root 执行文件。
+
+新版备份的 `portal/backup/credentials.json` 自动包含 GitHub 令牌、存在的 `/etc/cliproxy-esxi/esxi.json` 凭据和证书指纹，以及 `/etc/cliproxy-cloudflared/tunnel-token` 或原 Cloudflare unit 中的 `--token`。快照与数据一同加密，错误与页面不显示秘密；恢复密钥不放入包内。凭据文件以 0600 安装，与数据库、备份计划在同一事务提交或回退。本次解密使用的密钥会被安全保留，供后续备份使用。普通数据库恢复不导入这些宿主机凭据。
+
+数据验证通过后，恢复流程会重新创建门户以刷新管理密钥的单文件挂载，再安装程序内置的备份任务、日志采集、资源 slice、ESXi 采集和隧道服务（相应凭据存在时）。缺少 cloudflared 时自动从 Cloudflare 官方 GitHub Release 下载当前架构附件并核对 API 提供的 SHA256；缺少有效摘要、下载失败或安装失败会保留 `.host-restore-pending`，后台继续重试，只重试配套安装，不再覆盖已提交的数据。完整恢复成功后重新登录，成功提示隐藏；缺失凭据的提醒继续显示。旧备份没有的凭据沿用目标当前配置，不猜测。
+
+### 自定义部署与人工检查
 
 示例对应门户 `/root/cliproxy-portal`、上游 `/root/cpa-manager-plus`。先核对实际路径、容器及 Compose 服务名，不要直接套用于其他部署。
 
@@ -106,9 +124,9 @@ Linux 新备份自动收集当前安装的以下门户任务及其 `.d/*.conf` �
 | `portal/host/systemd/cloudflared.service.example` | 检测到隧道服务定义时生成的不含令牌的 IPv4 服务模板；不复制原含令牌的命令行 |
 | `portal/backup/host-tasks.json` | 文件原目标路径、已启用状态及外部依赖提示 |
 
-提取并审核后，按 `host-tasks.json` 将 systemd 文件安装到目标主机的 `/etc/systemd/system/`、采集脚本安装到对应 `ops/` 路径；核对 `ExecStart`、`ReadWritePaths` 和原启用状态，执行 `systemctl daemon-reload`，再启用所需 timer、slice 及采集服务。在线数据库恢复和重建恢复不会自动安装或执行归档中的宿主机脚本与任务定义。未备份整套操作系统或 Docker/cloudflared 程序；它们仍需安装，Docker 镜像按已记录摘要重新下载。
+归档任务是人工审查参考。默认部署的“重建并恢复”自动安装程序内置的 systemd 单元和采集脚本，启用备份 timer、日志采集和资源 slice，并在具备凭据时启用 ESXi 采集与隧道。不会执行归档中上传的脚本或 unit。自定义手工迁移时才按 `host-tasks.json` 核对原路径和启用状态。没有备份整套操作系统或 Docker 程序，Docker 镜像按记录的摘要下载；cloudflared 的自动安装验证官方 SHA256。
 
-ESXi 服务只保存外部凭据文件路径，不包含 `/etc/cliproxy-esxi/esxi.json` 中的账号密码；新机需单独配置。隧道模板通过 `/etc/cliproxy-cloudflared/tunnel-token` 读取单独提供的凭据，安装时按实际 cloudflared 路径及隧道部署核对。其他门户任务若把令牌或密码直接写在 unit 的命令行/环境中，备份会拒绝并要求改用外部凭据文件；不会将这些秘密混入任务清单。
+任务参考文件不夹带凭据；ESXi 账号密码/证书指纹及隧道令牌由 `credentials.json` 单独加密保存，重建恢复自动写入批准的 0600 文件。旧隧道 unit 的 `--token` 只用于提取令牌，不复制其执行代码。其他门户任务若把令牌或密码直接写在 unit 中，仍会拒绝任务参考快照，要求改用外部凭据文件。
 
 安装策略后，新备份会自动从正在运行的两个上游镜像记录仓库摘要。未包含两项镜像摘要或 CPAMP usage.sqlite/data.key 的旧备份不能自动重建，仍可普通恢复。备份期间上游镜像摘要无法确认会失败；不要在凭据或模型配置变更途中备份，跨服务文件并非同一数据库事务。
 
@@ -173,4 +191,4 @@ ESXi 服务只保存外部凭据文件路径，不包含 `/etc/cliproxy-esxi/esx
   --output /root/recovered-portal
 ```
 
-检查得到的 `portal/`、`upstream/` 和 `manifest.json`，按实际路径准备门户应用密钥、数据库、连接密钥、部署参数及文件权限，清空旧 sessions/password_resets/sync_jobs。先完成门户和后台策略初始化，隔离对旧上游的访问，再使用“重建并恢复”重新部署 CPA/CPAMP。Docker、域名/隧道及网络需另外配置，GitHub 令牌和恢复密钥需重新设置。不要执行 `docker compose down -v` 或覆盖未经确认的现有数据。
+默认新机先运行门户程序的 `backup install-host`，再从门户选择“重建并恢复”；新版凭据和配套任务会一并恢复，旧会话与待执行同步任务会清理。自定义部署可先人工检查提取的 `portal/`、`upstream/` 和 `manifest.json`，按上文批准档案配置。恢复密钥仍须从服务器之外提供，DNS 和防火墙按新网络核对。不要执行 `docker compose down -v` 或覆盖未经确认的现有数据。

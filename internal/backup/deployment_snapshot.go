@@ -17,7 +17,7 @@ const sourcesSnapshotName = "portal/backup/sources.json"
 // instruction to overwrite the target host's approved execution policy.
 func snapshotDeploymentConfig(sources []Source, policy *PortalRestorePolicy, work string) ([]Source, error) {
 	for _, source := range sources {
-		if source.Name == restorePolicySnapshotName || source.Name == sourcesSnapshotName || source.Name == backupSettingsName || allowedHostTaskName(source.Name) {
+		if source.Name == restorePolicySnapshotName || source.Name == sourcesSnapshotName || source.Name == backupSettingsName || source.Name == credentialsSnapshotName || allowedHostTaskName(source.Name) {
 			return nil, errors.New("后台配置快照由备份任务自动生成，请勿写入 sources.json")
 		}
 	}

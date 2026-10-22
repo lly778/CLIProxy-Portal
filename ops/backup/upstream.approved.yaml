@@ -1,0 +1,51 @@
+services:
+  cli-proxy-api:
+    image: ${CPA_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${CPA_PORT}:8317"
+    volumes:
+      - ./cliproxyapi/config.yaml:/CLIProxyAPI/config.yaml
+      - ./cliproxyapi/auths:/root/.cli-proxy-api
+      - ./cliproxyapi/logs:/CLIProxyAPI/logs
+
+  cpa-manager-plus:
+    image: ${CPAMP_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${CPAMP_PORT}:18317"
+    environment:
+      HTTP_ADDR: "0.0.0.0:18317"
+      USAGE_DB_PATH: "/data/usage.sqlite"
+      CPA_MANAGER_DATA_KEY_PATH: "/data/data.key"
+      CPA_MANAGER_ADMIN_KEY_FILE: "/run/secrets/cpamp_admin_key"
+      CPA_UPSTREAM_URL: "http://cli-proxy-api:8317"
+      CPA_MANAGEMENT_KEY_FILE: "/run/secrets/cpa_management_key"
+      USAGE_COLLECTOR_MODE: "auto"
+      USAGE_RESP_QUEUE: "usage"
+      USAGE_RESP_POP_SIDE: "right"
+      USAGE_BATCH_SIZE: "100"
+      USAGE_POLL_INTERVAL_MS: "500"
+      USAGE_QUERY_LIMIT: "50000"
+      USAGE_CORS_ORIGINS: "*"
+    volumes:
+      - cpa-manager-plus-data:/data
+    secrets:
+      - cpamp_admin_key
+      - cpa_management_key
+    depends_on:
+      - cli-proxy-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18317/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  cpa-manager-plus-data:
+
+secrets:
+  cpamp_admin_key:
+    file: ./secrets/cpamp-admin-key
+  cpa_management_key:
+    file: ./secrets/cpa-management-key

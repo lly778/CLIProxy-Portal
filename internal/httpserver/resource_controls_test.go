@@ -161,7 +161,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		SampleSeconds int                            `json:"sample_seconds"`
 		Points        []resourcecontrol.HistoryPoint `json:"points"`
 	}
-	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 120 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
+	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 516 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
 		t.Fatalf("history did not return the current rolling hour: %s, %v", historyBody, e)
 	}
 	// ESXi changes CPU and host availability/history, but not the suite card.

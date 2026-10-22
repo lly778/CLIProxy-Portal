@@ -38,6 +38,28 @@ func TestHistoryKeepsBriefPeaksAndExpiresWhileIdle(t *testing.T) {
 	}
 }
 
+func TestHostMemoryTrendDoesNotChangeSuiteAdmission(t *testing.T) {
+	p := DefaultPolicy()
+	p.Mode = "enforce"
+	p.MemoryMiB = 768
+	c := NewController(p)
+	now := time.Now()
+	suite := 120.0
+	m := goodMetrics(now)
+	m.HostID = "cpa-suite"
+	m.TotalMiB = 926
+	m.AvailableMiB = 100
+	m.SuiteUsedMiB = &suite
+	c.UpdateMetrics(m, now)
+	points := c.History(now)
+	if len(points) != 1 || points[0].UsedMiB != 826 {
+		t.Fatalf("history did not use whole-machine memory: %+v", points)
+	}
+	if c.Snapshot().Paused != "" {
+		t.Fatal("whole-machine memory was used for suite admission")
+	}
+}
+
 func TestRestoredHistoryRejectsInvalidDataAndDoesNotFillGaps(t *testing.T) {
 	now := time.Now().UTC().Truncate(HistoryInterval)
 	c := NewController(DefaultPolicy())

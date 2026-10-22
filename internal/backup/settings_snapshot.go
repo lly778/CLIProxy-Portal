@@ -60,7 +60,7 @@ func readBackupSettings(file string) (portableBackupSettings, error) {
 	return v, nil
 }
 
-func prepareBackupSettings(dir, candidate string) error {
+func prepareBackupSettings(dir, candidate string, restoredCredentials ...bool) error {
 	v, err := readBackupSettings(candidate)
 	if err != nil {
 		return err
@@ -80,9 +80,15 @@ func prepareBackupSettings(dir, candidate string) error {
 	_, keyErr := ReadKey(filepath.Join(dir, "recovery.key"))
 	_, tokenErr := LoadToken(dir)
 	ready := c.Repository == v.Repository && c.KeySaved && keyErr == nil && tokenErr == nil
+	if len(restoredCredentials) > 0 && restoredCredentials[0] {
+		ready = true
+		c.KeySaved = true
+	}
 	c.Enabled = v.Enabled && ready
 	c.Repository, c.Hour, c.Minute, c.Weekday, c.Retain = v.Repository, v.Hour, v.Minute, v.Weekday, v.Retain
-	c.KeySaved = c.KeySaved && keyErr == nil
+	if len(restoredCredentials) == 0 || !restoredCredentials[0] {
+		c.KeySaved = c.KeySaved && keyErr == nil
+	}
 	// Fresh installations can import preferences before separately setting their
 	// credentials. Scheduling remains disabled until the operator confirms them.
 	return writeJSON(candidate, c)

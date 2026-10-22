@@ -111,6 +111,12 @@ func (d *dockerPortal) validateProfile() error {
 // alter mounts, commands, ports or container privilege configuration.
 func (d *dockerPortal) Prepare(ctx context.Context, restored string) error {
 	reportRestorePhase(ctx, "validate_deployment")
+	if _, err := os.Lstat(d.policy.ComposeFile); errors.Is(err, os.ErrNotExist) && d.policy.Bootstrap != "" {
+		reportRestorePhase(ctx, "bootstrap_host")
+		if err := d.bootstrapDeployment(ctx, restored); err != nil {
+			return err
+		}
+	}
 	if err := d.validateProfile(); err != nil {
 		return err
 	}
@@ -215,21 +221,38 @@ func (d *dockerPortal) compiledServices(ctx context.Context, envFile string) (ma
 }
 
 func (d *dockerPortal) OriginalDeployment(ctx context.Context) (deploymentState, error) {
+	if d.policy.defaultHostLayout() {
+		info, err := d.inspect(ctx)
+		if err != nil {
+			return deploymentState{}, err
+		}
+		for _, item := range info.Env {
+			if strings.HasPrefix(item, "PORTAL_HOST_METRICS_PATH=") {
+				d.portalHostMetrics = strings.TrimPrefix(item, "PORTAL_HOST_METRICS_PATH=")
+			}
+		}
+	}
 	names, err := d.containerNames(ctx)
 	if err != nil {
 		return deploymentState{}, err
 	}
 	if !names[d.policy.UpstreamContainer] && !names[d.policy.ManagerContainer] {
-		return deploymentState{Images: d.images, Missing: true}, nil
+		return deploymentState{Images: d.images, Missing: true, HostMetricsPath: d.portalHostMetrics}, nil
 	}
 	if !names[d.policy.UpstreamContainer] || !names[d.policy.ManagerContainer] {
 		return deploymentState{}, errors.New("上游部署不完整，请管理员先确认残留容器")
 	}
 	images, err := captureImagesWith(ctx, d.policy, d.output)
-	return deploymentState{Images: images}, err
+	return deploymentState{Images: images, HostMetricsPath: d.portalHostMetrics}, err
 }
 
-func (d *dockerPortal) DesiredDeployment() deploymentState { return deploymentState{Images: d.images} }
+func (d *dockerPortal) DesiredDeployment() deploymentState {
+	path := d.portalHostMetrics
+	if d.hostESXi {
+		path = "/data/esxi-metrics.json"
+	}
+	return deploymentState{Images: d.images, HostMetricsPath: path}
+}
 
 func (d *dockerPortal) RestoreDeployment(state deploymentState) error {
 	if err := validateImages(d.policy, state.Images); err != nil {
@@ -238,6 +261,8 @@ func (d *dockerPortal) RestoreDeployment(state deploymentState) error {
 	d.images = state.Images
 	d.rebuild = true
 	d.rollbackMissing = state.Missing
+	d.hostESXi = false
+	d.portalHostMetrics = state.HostMetricsPath
 	return nil
 }
 

@@ -8,8 +8,9 @@ import (
 	"errors"
 )
 
-// Keep host CPU + suite memory separate from earlier host-only/suite-only data.
-const resourceHistoryKey = "resource_history_host_cpu_suite_memory_v1"
+// Keep Linux whole-machine CPU + memory separate from earlier suite-memory
+// series and legacy host data whose memory accounting may differ.
+const resourceHistoryKey = "resource_history_linux_host_v1"
 
 func (s *Store) ResourceHistory(ctx context.Context) ([]resourcecontrol.HistoryPoint, error) {
 	return s.ResourceHistoryForScope(ctx, "")

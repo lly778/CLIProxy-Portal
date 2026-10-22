@@ -57,6 +57,7 @@ func validateSources(sources []Source) error {
 	allowed[managerDatabaseName], allowed[managerDataKeyName] = true, true
 	allowed[backupSettingsName] = true
 	allowed[restorePolicySnapshotName], allowed[sourcesSnapshotName] = true, true
+	allowed[credentialsSnapshotName] = true
 	for _, source := range sources {
 		if seen[source.Name] || (!allowed[source.Name] && !allowedHostTaskName(source.Name)) {
 			return errors.New("备份来源不可重复或超出灾备范围")
@@ -259,6 +260,9 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		}
 	}
 	if err = validateDeploymentSnapshot(stage); err != nil {
+		return "", m, err
+	}
+	if _, err = readCredentials(stage); err != nil {
 		return "", m, err
 	}
 	finishSnapshot()
@@ -598,6 +602,9 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 		return err
 	}
 	if err = validateDeploymentSnapshot(dir); err != nil {
+		return err
+	}
+	if _, err = readCredentials(dir); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(filepath.Join(dir, "upstream/cliproxyapi/auths")); err != nil || !info.IsDir() {

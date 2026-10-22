@@ -24,6 +24,7 @@ type RestoreStatus struct {
 	Phase          string    `json:"phase,omitempty"`
 	PhaseStartedAt time.Time `json:"phase_started_at,omitempty"`
 	FailedPhase    string    `json:"failed_phase,omitempty"`
+	Warning        string    `json:"warning,omitempty"`
 }
 
 type restoreRequest struct {
@@ -179,6 +180,11 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 	}
 	if jobErr == nil {
 		controller := newController(policy, job.Mode)
+		driver, realHost := controller.(*dockerPortal)
+		if realHost {
+			driver.recoveryKeyFile = filepath.Join(request, "recovery.key")
+		}
+		autoHost := realHost && job.Mode == RebuildRestoreMode && policy.defaultHostLayout()
 		if job.Mode == RebuildRestoreMode {
 			reportRestorePhase(ctx, "validate_deployment")
 			preparer, ok := controller.(interface {
@@ -188,10 +194,31 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 				jobErr = errors.New("后台重建任务未配置")
 			} else {
 				jobErr = preparer.Prepare(ctx, filepath.Join(work, "files"))
+				if realHost && jobErr == nil {
+					policy = driver.policy
+				}
 			}
+		}
+		if jobErr == nil && autoHost {
+			jobErr = prepareHostRestore(dir, policy, filepath.Join(work, "files"))
 		}
 		if jobErr == nil {
 			s.Rollback, jobErr = replacePortalDatabase(ctx, dir, filepath.Join(work, "files"), policy, controller, job.Mode)
+		}
+		if jobErr == nil && autoHost {
+			// Preserve the rollback label while the durable host installation is
+			// completed. It can retry without retaining the decrypted archive.
+			_ = writeJSON(filepath.Join(dir, "restore-status.json"), s)
+			jobErr = resumeHostRestore(ctx, dir)
+			if jobErr != nil {
+				return jobErr
+			}
+			if completed, err := LoadRestoreStatus(dir); err == nil {
+				s.Warning = completed.Warning
+			}
+		}
+		if jobErr != nil && autoHost && !DatabaseRecoveryPending(dir) {
+			_ = os.RemoveAll(filepath.Join(dir, hostRestoreName))
 		}
 	}
 	s.Running, s.FinishedAt = false, time.Now().UTC()
@@ -206,9 +233,16 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 		s.Message = "门户数据库已恢复，服务健康；请重新登录"
 		if job.Mode == RebuildRestoreMode {
 			s.Message = "CPA、CPAMP 已重建，门户及 CPAMP 数据库、data.key、管理密钥、config.yaml 和 auths 已恢复；请重新登录"
+			if policy.defaultHostLayout() {
+				s.Message += "；宿主机配套任务已自动安装并启用"
+			}
 		}
 		if _, err := os.Stat(filepath.Join(work, "files", filepath.FromSlash(backupSettingsName))); err == nil {
-			s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置；新服务器或仓库变化时需重新确认凭据并启用自动备份"
+			if _, err := os.Stat(filepath.Join(work, "files", filepath.FromSlash(credentialsSnapshotName))); err == nil && job.Mode == RebuildRestoreMode {
+				s.Message += "；备份设置和配套凭据已恢复，后续备份沿用本次恢复密钥"
+			} else {
+				s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置；新服务器或仓库变化时需重新确认凭据并启用自动备份"
+			}
 		}
 	}
 	s.PhaseStartedAt = s.FinishedAt

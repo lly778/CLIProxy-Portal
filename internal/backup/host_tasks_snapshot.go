@@ -64,9 +64,9 @@ func snapshotHostTasks(p PortalRestorePolicy, sources []Source, work string) ([]
 // units or host credentials, and never execute archived task definitions.
 func collectHostTaskSources(portalRoot, unitDir, work string) ([]Source, error) {
 	inventory := hostTaskInventory{Version: 1, Prerequisites: []string{
-		"先安装 Docker/Compose、Python 3、门户程序；使用隧道时另行安装 cloudflared。",
-		"核对原路径和任务内容后安装 systemd 文件，daemon-reload 后按原启用状态启动。",
-		"GitHub 令牌、备份恢复密钥、ESXi 凭据及 Cloudflare Tunnel 凭据不在此任务快照内，需单独配置。",
+		"安装 Docker/Compose 和门户时运行 backup install-host；重建并恢复会自动安装内置配套任务。",
+		"任务快照作为迁移参考；自动安装使用门户程序内置的任务和采集脚本。",
+		"GitHub、ESXi 及隧道凭据位于加密 credentials.json；备份恢复密钥必须单独保管。",
 	}}
 	var sources []Source
 	add := func(name, target string, data []byte, enabled bool) error {

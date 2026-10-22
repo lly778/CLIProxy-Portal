@@ -49,6 +49,11 @@ func loadRestorePolicyForMode(file, mode string) (PortalRestorePolicy, error) {
 		return p, err
 	}
 	if mode == RebuildRestoreMode {
+		if p.Bootstrap == autoBootstrap && p.defaultHostLayout() {
+			if _, statErr := os.Lstat(p.ComposeFile); errors.Is(statErr, os.ErrNotExist) {
+				return p, nil // Only the program's built-in template can bootstrap.
+			}
+		}
 		err = (&dockerPortal{policy: p}).validateProfile()
 	}
 	return p, err

@@ -16,4 +16,4 @@ CPUQuota=50%
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/root/cliproxy-portal/data /root/cliproxy-portal/secrets /root/cpa-manager-plus -/var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data
+ReadWritePaths=/root/cliproxy-portal/data /root/cliproxy-portal/secrets /root/cliproxy-portal/ops /root/cpa-manager-plus -/var/lib/docker/volumes/cpamp_cpa-manager-plus-data/_data /etc/cliproxy-portal-backup /etc/systemd/system /etc/cliproxy-esxi /etc/cliproxy-cloudflared /usr/local/bin

@@ -76,6 +76,9 @@ func (s *Server) backupView() webui.BackupView {
 	if !restore.Successful() {
 		v.RestoreMessage, v.RestoreRollback = restore.Message, restore.Rollback
 	}
+	if restore.Warning != "" {
+		v.Warning = restore.Warning
+	}
 	if backup.DatabaseRecoveryPending(dir) {
 		v.Running = true
 		v.Warning = "数据库恢复事务尚未完成，请检查后台任务"
@@ -83,6 +86,10 @@ func (s *Server) backupView() webui.BackupView {
 	if backup.ManagerBackupPending(dir) {
 		v.Running = true
 		v.Warning = "CPAMP 快照暂停尚未结束，后台任务将恢复服务；请勿同时恢复数据库"
+	}
+	if backup.HostRecoveryPending(dir) {
+		v.Running = true
+		v.Warning = "数据已恢复，宿主机配套任务正在安装或等待后台重试"
 	}
 	if restore.Running {
 		v.Running = true
@@ -95,7 +102,7 @@ func (s *Server) backupView() webui.BackupView {
 	if !v.Running && (seen.IsZero() || time.Since(seen) > 3*time.Minute) {
 		v.Warning = "宿主机备份任务未连接，请检查后台任务"
 	}
-	if v.Running {
+	if v.Running && !backup.HostRecoveryPending(dir) {
 		if _, err := os.Stat(filepath.Join(dir, "runner.lock")); err != nil {
 			v.Warning = "任务可能异常中断，请检查后台状态"
 		}
@@ -132,7 +139,7 @@ func (s *Server) backupIdle() bool {
 	b, e1 := backup.LoadStatus(dir)
 	r, e2 := backup.LoadRestoreStatus(dir)
 	_, lockErr := os.Stat(filepath.Join(dir, "runner.lock"))
-	return e1 == nil && e2 == nil && !b.Running && !r.Running && !backup.Pending(dir) && !backup.RestorePending(dir) && !backup.DatabaseRecoveryPending(dir) && !backup.ManagerBackupPending(dir) && os.IsNotExist(lockErr)
+	return e1 == nil && e2 == nil && !b.Running && !r.Running && !backup.Pending(dir) && !backup.RestorePending(dir) && !backup.DatabaseRecoveryPending(dir) && !backup.ManagerBackupPending(dir) && !backup.HostRecoveryPending(dir) && os.IsNotExist(lockErr)
 }
 
 func (s *Server) backupSettingsAuthorize(w http.ResponseWriter, r *http.Request) bool {

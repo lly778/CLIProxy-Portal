@@ -4,7 +4,7 @@
   {"path":"/root/cliproxy-portal/secrets/cpamp_admin_key","name":"portal/secrets/cpamp_admin_key","required":true},
   {"path":"/root/cliproxy-portal/.env","name":"portal/.env","required":true},
   {"path":"/root/cliproxy-portal/compose.prebuilt.yaml","name":"portal/compose.prebuilt.yaml","required":true},
-  {"path":"/root/cliproxy-portal/compose.gateway.yaml","name":"portal/compose.gateway.yaml","required":true},
+  {"path":"/root/cliproxy-portal/compose.gateway.yaml","name":"portal/compose.gateway.yaml","required":false},
   {"path":"/root/cpa-manager-plus/compose.yaml","name":"upstream/compose.yaml","required":true},
   {"path":"/root/cpa-manager-plus/.env","name":"upstream/.env","required":true},
   {"path":"/root/cpa-manager-plus/secrets/cpamp-admin-key","name":"upstream/secrets/cpamp-admin-key","required":true},

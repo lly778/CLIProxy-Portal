@@ -43,6 +43,7 @@ type PortalRestorePolicy struct {
 	CPAKeyFile           string `json:"cpa_key_file"`
 	PortalManagerKeyFile string `json:"portal_manager_key_file"`
 	ResourceCgroupParent string `json:"resource_cgroup_parent,omitempty"`
+	Bootstrap            string `json:"bootstrap,omitempty"`
 }
 
 func (p PortalRestorePolicy) resourceCgroupParent() string {
@@ -60,8 +61,9 @@ type portalController interface {
 }
 
 type deploymentState struct {
-	Images  map[string]string `json:"images,omitempty"`
-	Missing bool              `json:"missing,omitempty"`
+	Images          map[string]string `json:"images,omitempty"`
+	Missing         bool              `json:"missing,omitempty"`
+	HostMetricsPath string            `json:"host_metrics_path,omitempty"`
 }
 type deploymentController interface {
 	OriginalDeployment(context.Context) (deploymentState, error)
@@ -77,13 +79,14 @@ type restoreTarget struct {
 	Exists  bool   `json:"exists"`
 }
 type databaseTransaction struct {
-	BackupSettings    bool            `json:"backup_settings,omitempty"`
-	Mode              string          `json:"mode"`
-	Phase             string          `json:"phase"`
-	Rollback          string          `json:"rollback"`
-	Targets           []restoreTarget `json:"targets"`
-	Deployment        deploymentState `json:"deployment"`
-	DesiredDeployment deploymentState `json:"desired_deployment"`
+	BackupSettings    bool                `json:"backup_settings,omitempty"`
+	Mode              string              `json:"mode"`
+	Phase             string              `json:"phase"`
+	Rollback          string              `json:"rollback"`
+	Targets           []restoreTarget     `json:"targets"`
+	Deployment        deploymentState     `json:"deployment"`
+	DesiredDeployment deploymentState     `json:"desired_deployment"`
+	Credentials       restoredCredentials `json:"credentials,omitempty"`
 }
 
 var generatedDir = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -205,10 +208,21 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 	if err != nil {
 		return "", err
 	}
+	var credentials restoredCredentials
+	if driver, ok := service.(credentialRestoreController); ok && selected == RebuildRestoreMode {
+		credentials, err = driver.prepareCredentials(restored, dir, p)
+		if err != nil {
+			return "", err
+		}
+		targets = append(targets, credentialTargets(dir, credentials)...)
+		if err := validateAdditionalTargets(targets); err != nil {
+			return "", err
+		}
+	}
 	if err := restoreSpace(targets, restored, dir); err != nil {
 		return "", err
 	}
-	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: targets, BackupSettings: hasSettings}
+	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: targets, BackupSettings: hasSettings, Credentials: credentials}
 	if selected == RebuildRestoreMode {
 		deployment, ok := service.(deploymentController)
 		if !ok {
@@ -285,7 +299,7 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 			}
 		}
 		if target.Kind == "backup-settings" {
-			if err = prepareBackupSettings(dir, candidate); err != nil {
+			if err = prepareBackupSettings(dir, candidate, credentials.GitHub && credentials.Key); err != nil {
 				return "", err
 			}
 		}
@@ -371,6 +385,12 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 		err = persistDatabaseTransaction(transaction, committed)
 		if err == nil {
 			j = committed
+			// Keep the durable host plan until its installation has succeeded.
+			// A failed marker write leaves the committed transaction for retry.
+			if err := markHostRestoreReady(dir); err != nil {
+				keep = true
+				return j.Rollback, errors.New("数据已提交，宿主机安装状态待后台恢复")
+			}
 			return j.Rollback, nil
 		}
 	}
@@ -525,6 +545,10 @@ func recoverDatabaseTransaction(ctx context.Context, dir string, p PortalRestore
 	if err != nil {
 		return err
 	}
+	targets = append(targets, credentialTargets(dir, j.Credentials)...)
+	if err := validateAdditionalTargets(targets); err != nil {
+		return err
+	}
 	if len(targets) != len(j.Targets) || !generatedDir.MatchString(j.Rollback) || !strings.HasPrefix(j.Rollback, "restore-rollback-") {
 		return errors.New("恢复事务目标无效")
 	}
@@ -545,6 +569,9 @@ func recoverDatabaseTransaction(ctx context.Context, dir string, p PortalRestore
 	message := "上次恢复异常中断，已回退原数据并启动服务"
 	switch j.Phase {
 	case "committed":
+		if err := markHostRestoreReady(dir); err != nil {
+			return err
+		}
 		if j.Mode == RebuildRestoreMode {
 			deployment, ok := service.(deploymentController)
 			if !ok {

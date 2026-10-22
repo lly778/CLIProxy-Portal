@@ -64,6 +64,9 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 			return &dockerPortal{policy: p, rebuild: mode == RebuildRestoreMode}
 		})
 	}
+	if HostRecoveryPending(dir) {
+		return resumeHostTick(ctx, dir)
+	}
 	c, err := LoadConfig(dir)
 	if err != nil {
 		return errors.New("备份设置无法读取")
@@ -231,6 +234,15 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		if e != nil {
 			return e
 		}
+		hostEtc := ""
+		if snapshotPolicy != nil {
+			hostEtc = "/etc"
+		}
+		credentialSource, e := snapshotCredentials(dir, work, c.Repository, hostEtc)
+		if e != nil {
+			return e
+		}
+		deploymentSources = append(deploymentSources, credentialSource)
 		if snapshotPolicy != nil {
 			hostSources, err := snapshotHostTasks(*snapshotPolicy, sources, work)
 			if err != nil {

@@ -12,10 +12,11 @@
   </div>
   <p class="muted small resource-monitor-status" aria-live="polite">监测更新：<span data-resource-field="Updated">{{.Resources.Updated}}</span> · <span data-resource-field="Mode">{{.Resources.Mode}}</span><span data-resource-poll-status></span></p>
   <div class="resource-history" data-resource-history>
-    <div class="resource-history-head"><h3>最近 60 分钟{{if .Resources.ESXi}}宿主机{{end}}资源趋势</h3><span class="muted small">10 秒峰值 · 15 秒刷新</span></div>
+    <div class="resource-history-head"><h3>最近 60 分钟{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}资源趋势</h3><span class="muted small">10 秒峰值 · 15 秒刷新</span></div>
+    <p class="muted small">{{if .Resources.ESXi}}曲线展示 ESXi 物理宿主机的 CPU 和已用内存。{{else}}曲线展示 Linux 整机的 CPU 和已用内存，已用内存按总内存减可用内存计算。{{end}}内存保护仍按 CPA 套件用量判断。</p>
     <p class="muted small" data-resource-history-status role="status" hidden></p>
     <article class="card resource-chart" data-resource-chart>
-      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}套件{{end}}内存（右轴 MiB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
+      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存（右轴 MiB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
       <div class="resource-chart-stage" tabindex="0" role="group" aria-label="最近六十分钟 CPU 和内存趋势，可用左右方向键查看采样点"><svg class="resource-chart-svg" role="img" aria-label="等待 CPU 和内存监测数据"></svg><span class="resource-chart-empty" data-resource-chart-empty>正在收集监控数据</span><div class="resource-chart-tooltip" role="tooltip" hidden></div></div>
     </article>
     <noscript><p class="muted small">启用 JavaScript 后可查看资源趋势。</p></noscript>
@@ -71,7 +72,7 @@
     </form>
     <details class="backup-settings" {{if not .Backup.Configured}}open{{end}}>
       <summary>备份设置</summary>
-      <p class="field-help">设置 GitHub 私有仓库、访问令牌和每周自动备份计划。仓库与计划随备份保存；GitHub 令牌和恢复密钥请单独保管。</p>
+      <p class="field-help">设置 GitHub 私有仓库、访问令牌和每周自动备份计划。仓库、计划及 GitHub、隧道、ESXi 凭据随加密备份保存；恢复密钥须在服务器之外单独保管。</p>
       <form method="post" action="/admin/system/backup/settings" data-backup-form>
         <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
         <label for="backup-repository">GitHub 私有仓库</label><input id="backup-repository" type="text" name="repository" value="{{.Backup.Repository}}" placeholder="owner/repo" autocomplete="off" maxlength="140" required>
@@ -99,7 +100,7 @@
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label for="backup-restore-password">验证管理员密码</label><input id="backup-restore-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
       <label for="backup-restore-mode">恢复方式</label><select id="backup-restore-mode" name="restore_mode" required><option value="replace-portal-database">恢复：门户数据库及备份设置</option><option value="rebuild-and-restore">重建并恢复：CPA、CPAMP 及完整数据</option></select>
-      <p class="muted small">“恢复”还原门户数据库及备份设置，不变更上游服务配置。“重建并恢复”将下载备份中记录的指定版本镜像，依据部署参数重新部署 CPA 和 CPAMP、配置管理密钥，并还原门户数据库、CPA 的 config.yaml 与 auths，以及 CPAMP 数据库与 data.key。旧备份未包含备份设置时保留当前设置；新服务器或仓库变更后，需确认 GitHub 令牌和恢复密钥再启用自动备份。</p>
+      <p class="muted small">“恢复”仅还原门户数据库及备份设置。“重建并恢复”还会下载指定版本镜像，重建 CPA、CPAMP 并恢复完整数据及管理密钥，自动安装备份定时任务、资源统计和采集服务，还原加密包中的 GitHub、隧道及 ESXi 凭据。新服务器安装 Docker 和门户时须完成宿主机初始化；内置部署可自动准备目录和配置。旧备份缺少的凭据沿用当前配置，缺少的外部凭据会明确提示。备份恢复密钥始终需单独保管。</p>
       <label class="backup-confirm"><input type="checkbox" name="confirm" value="replace-current-data" required>我确认执行所选恢复方式，并了解覆盖范围内备份之后的相关修改将丢失</label>
       {{if not .Backup.KeyReady}}<label for="backup-recovery-key">备份恢复密钥</label><input id="backup-recovery-key" type="password" name="recovery_key" autocomplete="off" minlength="64" maxlength="64" required>{{end}}
       <label for="backup-restore-file">加密备份文件</label><input id="backup-restore-file" type="file" name="backup_file" accept=".cbackup" required>

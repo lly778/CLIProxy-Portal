@@ -12,6 +12,8 @@ import (
 // a status write failure must not interrupt a data switch or its rollback.
 var restorePhases = map[string]string{
 	"preflight":           "检查恢复请求与后台策略",
+	"bootstrap_host":      "准备新服务器的部署目录和批准配置",
+	"install_host":        "安装并启用宿主机任务、采集服务及隧道",
 	"decrypt":             "解密并解压备份",
 	"verify_archive":      "校验备份清单、文件及数据库",
 	"validate_deployment": "核对 CPA / CPAMP 部署模板、镜像版本与管理配置",

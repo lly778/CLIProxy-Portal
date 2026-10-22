@@ -13,11 +13,15 @@ import (
 )
 
 type dockerPortal struct {
-	policy          PortalRestorePolicy
-	rebuild         bool
-	images          map[string]string
-	rollbackMissing bool
-	execute         func(context.Context, ...string) ([]byte, error)
+	policy            PortalRestorePolicy
+	rebuild           bool
+	images            map[string]string
+	rollbackMissing   bool
+	execute           func(context.Context, ...string) ([]byte, error)
+	recoveryKeyFile   string
+	installer         *hostInstaller
+	hostESXi          bool
+	portalHostMetrics string
 }
 type portalInspection struct {
 	State struct {
@@ -140,6 +144,9 @@ func (d *dockerPortal) Start(ctx context.Context) error {
 		}
 	}
 	reportRestorePhase(ctx, "start_portal")
+	if d.rebuild && d.policy.defaultHostLayout() {
+		return d.recreatePortal(ctx)
+	}
 	if _, err := d.output(ctx, "start", d.policy.Container); err != nil {
 		return errors.New("门户启动失败")
 	}
