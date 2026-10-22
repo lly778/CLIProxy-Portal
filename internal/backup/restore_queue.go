@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -39,16 +38,7 @@ func (s RestoreStatus) Successful() bool {
 	if s.Running || s.FinishedAt.IsZero() || s.FailedPhase != "" {
 		return false
 	}
-	if s.Phase != "" {
-		return s.Phase == "complete"
-	}
-	// Compatibility with status files written before explicit phases existed.
-	for _, prefix := range []string{"门户数据库已恢复，服务健康", "CPA、CPAMP 已重建，", "恢复已完成，服务健康"} {
-		if strings.HasPrefix(s.Message, prefix) {
-			return true
-		}
-	}
-	return false
+	return s.Phase == "complete"
 }
 
 func LoadRestoreStatus(dir string) (RestoreStatus, error) {
@@ -237,12 +227,10 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 				s.Message += "；宿主机配套任务已自动安装并启用"
 			}
 		}
-		if _, err := os.Stat(filepath.Join(work, "files", filepath.FromSlash(backupSettingsName))); err == nil {
-			if _, err := os.Stat(filepath.Join(work, "files", filepath.FromSlash(credentialsSnapshotName))); err == nil && job.Mode == RebuildRestoreMode {
-				s.Message += "；备份设置和配套凭据已恢复，后续备份沿用本次恢复密钥"
-			} else {
-				s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置；新服务器或仓库变化时需重新确认凭据并启用自动备份"
-			}
+		if job.Mode == RebuildRestoreMode {
+			s.Message += "；备份设置和配套凭据已恢复，后续备份沿用本次恢复密钥"
+		} else {
+			s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置"
 		}
 	}
 	s.PhaseStartedAt = s.FinishedAt

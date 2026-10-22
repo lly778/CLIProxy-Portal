@@ -24,7 +24,7 @@ func TestStreamRestoreRejectsLateAuthenticationAndGzipFailures(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	archive, _, err := Create(t.Context(), sources, work, key)
+	archive, _, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

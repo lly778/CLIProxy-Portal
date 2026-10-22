@@ -70,7 +70,7 @@ func captureImagesWith(ctx context.Context, p PortalRestorePolicy, output func(c
 
 func validateImages(p PortalRestorePolicy, images map[string]string) error {
 	if len(images) != 2 {
-		return errors.New("备份未记录两个上游的固定镜像版本，不能重建；可使用普通数据库恢复")
+		return errors.New("备份未记录两个上游的固定镜像版本")
 	}
 	for _, entry := range []struct{ role, repository string }{{"cpa", p.UpstreamRepository}, {"cpamp", p.ManagerRepository}} {
 		if entry.repository == "" || !imageDigest.MatchString(images[entry.role]) || !strings.HasPrefix(images[entry.role], entry.repository+"@sha256:") {

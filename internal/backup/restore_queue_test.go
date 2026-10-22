@@ -14,7 +14,7 @@ func TestQueuedRestoreDoesNotTouchLiveDataOrRequireGitHub(t *testing.T) {
 	work := filepath.Join(dir, "archive")
 	_ = os.Mkdir(work, 0o700)
 	key := bytes.Repeat([]byte{7}, 32)
-	archive, _, err := Create(t.Context(), sources, work, key)
+	archive, _, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

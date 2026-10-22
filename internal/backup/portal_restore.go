@@ -79,7 +79,6 @@ type restoreTarget struct {
 	Exists  bool   `json:"exists"`
 }
 type databaseTransaction struct {
-	BackupSettings    bool                `json:"backup_settings,omitempty"`
 	Mode              string              `json:"mode"`
 	Phase             string              `json:"phase"`
 	Rollback          string              `json:"rollback"`
@@ -199,12 +198,10 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 			return "", err
 		}
 	}
-	_, settingsErr := readBackupSettings(filepath.Join(restored, filepath.FromSlash(backupSettingsName)))
-	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
-		return "", settingsErr
+	if _, err := readBackupSettings(filepath.Join(restored, filepath.FromSlash(backupSettingsName))); err != nil {
+		return "", errors.New("备份设置快照缺失或无效")
 	}
-	hasSettings := settingsErr == nil
-	targets, err := restoreTargets(p, dir, selected, hasSettings)
+	targets, err := restoreTargets(p, dir, selected)
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +219,7 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 	if err := restoreSpace(targets, restored, dir); err != nil {
 		return "", err
 	}
-	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: targets, BackupSettings: hasSettings, Credentials: credentials}
+	j := databaseTransaction{Mode: selected, Phase: "preparing", Targets: targets, Credentials: credentials}
 	if selected == RebuildRestoreMode {
 		deployment, ok := service.(deploymentController)
 		if !ok {
@@ -541,7 +538,7 @@ func recoverDatabaseTransaction(ctx context.Context, dir string, p PortalRestore
 	if err := p.validate(j.Mode); err != nil {
 		return err
 	}
-	targets, err := restoreTargets(p, dir, j.Mode, j.BackupSettings)
+	targets, err := restoreTargets(p, dir, j.Mode)
 	if err != nil {
 		return err
 	}

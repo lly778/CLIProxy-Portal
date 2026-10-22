@@ -41,7 +41,7 @@ func TestQueuedRestoreRejectsSymlinkFiles(t *testing.T) {
 	request := filepath.Join(dir, "request")
 	_ = os.Mkdir(request, 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "live.key"), []byte("live-secret"), 0o600)
-	_ = os.WriteFile(filepath.Join(request, "backup.cbackup"), []byte("CPBACK01"), 0o600)
+	_ = os.WriteFile(filepath.Join(request, "backup.cbackup"), []byte(magic), 0o600)
 	_ = writeJSON(filepath.Join(request, "request.json"), restoreRequest{Version: 2, Mode: DatabaseRestoreMode})
 	if err := os.Symlink(filepath.Join(dir, "live.key"), filepath.Join(request, "recovery.key")); err != nil {
 		t.Fatal(err)

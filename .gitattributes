@@ -1,0 +1,2 @@
+# The built-in approved template must have the same bytes on every build host.
+ops/backup/upstream.approved.yaml text eol=lf

@@ -35,9 +35,7 @@ func TestBackupViewHidesSuccessfulRestoreButRetainsFailures(t *testing.T) {
 		running, finished, hidden bool
 	}{
 		{"completed", "complete", "恢复成功；请重新登录", false, true, true},
-		{"legacy-rebuild", "", "CPA、CPAMP 已重建，门户及 CPAMP 数据库已恢复；请重新登录", false, true, true},
-		{"legacy-database", "", "门户数据库已恢复，服务健康；请重新登录", false, true, true},
-		{"legacy-committed", "", "恢复已完成，服务健康；请重新登录", false, true, true},
+		{"unstructured-status", "", "门户数据库已恢复，服务健康；请重新登录", false, true, false},
 		{"running", "download_images", "正在下载 CPA / CPAMP 指定版本镜像", true, false, false},
 		{"failed", "failed", "恢复失败：已回退原数据及服务", false, true, false},
 		{"interrupted", "", "上次恢复异常中断，已回退原数据并启动服务", false, true, false},

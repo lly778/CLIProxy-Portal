@@ -149,6 +149,7 @@ func restoreFixture(t *testing.T) (string, string, PortalRestorePolicy) {
 	}
 	digest := sha256.Sum256(compose)
 	p.ComposeSHA256 = hex.EncodeToString(digest[:])
+	archivedSettings(t, restored)
 	return state, restored, p
 }
 
@@ -362,7 +363,7 @@ func TestQueuedDatabaseRestoreAndOldConsentRejection(t *testing.T) {
 	work := t.TempDir()
 	sources := []Source{{Path: filepath.Join(restored, "portal/data/portal.db"), Name: "portal/data/portal.db", SQLite: true, Required: true}, {Path: filepath.Join(restored, "upstream/cliproxyapi/config.yaml"), Name: "upstream/cliproxyapi/config.yaml", Required: true}, {Path: filepath.Join(restored, "upstream/cliproxyapi/auths"), Name: "upstream/cliproxyapi/auths", Directory: true, Required: true}}
 	key := bytes.Repeat([]byte{7}, 32)
-	archive, _, err := Create(t.Context(), sources, work, key)
+	archive, _, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

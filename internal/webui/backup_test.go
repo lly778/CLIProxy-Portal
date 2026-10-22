@@ -18,7 +18,7 @@ func TestBackupSectionHasTwoActionsAndSettingsInsideDialog(t *testing.T) {
 		if err := r.Execute(&out, PageAdminSystem, v); err != nil {
 			t.Fatal(err)
 		}
-		html := out.String()
+		html := strings.ReplaceAll(out.String(), "\r\n", "\n")
 		start := strings.Index(html, `id="backup"`)
 		storage := strings.Index(html, `id="storage"`)
 		if storage < 0 || start < 0 {

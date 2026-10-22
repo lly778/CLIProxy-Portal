@@ -142,21 +142,18 @@ func TestGitHubPrivateUploadDownloadVerificationAndScopedRetention(t *testing.T)
 	}
 }
 
-func TestRetentionOrdersMixedNamingByBackupTime(t *testing.T) {
+func TestRetentionOrdersCurrentBackupsAndIgnoresOtherFormats(t *testing.T) {
 	f, g := fakeClient(t)
 	c := Config{Repository: "owner/private", Instance: "0123456789abcdef", Retain: 3}
-	for i, prefix := range []string{legacyReleaseTagPrefix, releaseTagPrefix, legacyReleaseTagPrefix, releaseTagPrefix} {
-		marker, name := releaseMarker, archiveName
-		if prefix == legacyReleaseTagPrefix {
-			marker, name = legacyReleaseMarker, legacyArchiveName
-		}
-		f.rows = append(f.rows, release{ID: int64(i + 1), Tag: fmt.Sprintf("%s%s-2026100%dT030000Z-abcdef12", prefix, c.Instance, i+1), Body: marker + "\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: name, State: "uploaded", Size: 10}}})
+	for i := 0; i < 4; i++ {
+		f.rows = append(f.rows, release{ID: int64(i + 1), Tag: fmt.Sprintf("%s%s-2026100%dT030000Z-abcdef12", releaseTagPrefix, c.Instance, i+1), Body: releaseMarker + "\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: archiveName, State: "uploaded", Size: 10}}})
 	}
 	newest := releaseTagPrefix + c.Instance + "-20261005T030000Z-abcdef12"
 	f.rows = append(f.rows, release{ID: 5, Tag: newest, Body: releaseMarker + "\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: archiveName, State: "uploaded", Size: 10}}})
 	for _, r := range []release{
 		{ID: 10, Tag: releaseTagPrefix + c.Instance + "-20260901T030000Z-abcdef12", Body: "software release", Assets: []asset{{Name: archiveName, State: "uploaded", Size: 10}}},
-		{ID: 11, Tag: legacyReleaseTagPrefix + c.Instance + "-20260902T030000Z-abcdef12", Body: legacyReleaseMarker + "\nInstance: other\n", Assets: []asset{{Name: legacyArchiveName, State: "uploaded", Size: 10}}},
+		{ID: 11, Tag: "portal-light-" + c.Instance + "-20260902T030000Z-abcdef12", Body: "CLIProxy Portal lightweight backup v1" + "\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: "lightweight.cbackup", State: "uploaded", Size: 10}}},
+		{ID: 13, Tag: releaseTagPrefix + c.Instance + "-20260902T040000Z-abcdef12", Body: "CLIProxy Portal backup v1\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: archiveName, State: "uploaded", Size: 10}}},
 		{ID: 12, Tag: releaseTagPrefix + c.Instance + "-20260903T030000Z-abcdef12", Body: releaseMarker + "\nInstance: " + c.Instance + "\n", Assets: []asset{{Name: archiveName, State: "new", Size: 10}}},
 	} {
 		f.rows = append(f.rows, r)
@@ -165,7 +162,7 @@ func TestRetentionOrdersMixedNamingByBackupTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(f.deleted) != 4 || !strings.HasSuffix(f.deleted[0], "/2") || !strings.HasSuffix(f.deleted[2], "/1") {
-		t.Fatalf("mixed prefixes must retain dates 5, 4, 3, not sort by prefix: %v", f.deleted)
+		t.Fatalf("must retain dates 5, 4, 3 and ignore other formats: %v", f.deleted)
 	}
 	f.deleted = nil
 	if err := g.Retain(t.Context(), c, releaseTagPrefix+c.Instance+"-20261006T030000Z-abcdef12"); err == nil || len(f.deleted) != 0 {
@@ -213,7 +210,7 @@ func TestRunnerManualAndWeeklyJobsPersistSuccessAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourcesFile := filepath.Join(t.TempDir(), "sources.json")
-	if err = writeJSON(sourcesFile, sources); err != nil {
+	if err = runnerSources(t, sourcesFile, sources); err != nil {
 		t.Fatal(err)
 	}
 	f, g := fakeClient(t)
@@ -280,7 +277,7 @@ func TestRunnerReleasesVerifiedDatabasesBeforeUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourcesFile := filepath.Join(t.TempDir(), "sources.json")
-	if err := writeJSON(sourcesFile, sources); err != nil {
+	if err := runnerSources(t, sourcesFile, sources); err != nil {
 		t.Fatal(err)
 	}
 	f, g := fakeClient(t)

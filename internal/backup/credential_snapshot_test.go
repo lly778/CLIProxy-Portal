@@ -41,7 +41,7 @@ func TestEncryptedBackupIncludesCredentialsButNotRecoveryKey(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	archive, manifest, err := Create(t.Context(), append(sources, source), work, key)
+	archive, manifest, err := Create(t.Context(), archiveSources(t, append(sources, source)), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

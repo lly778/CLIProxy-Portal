@@ -45,7 +45,7 @@ func credentialTargets(dir string, flags restoredCredentials) []restoreTarget {
 func prepareCredentialTargets(restored, dir, keyFile string, p PortalRestorePolicy) (restoredCredentials, error) {
 	var flags restoredCredentials
 	v, err := readCredentials(restored)
-	if err != nil || v == nil {
+	if err != nil {
 		return flags, err
 	}
 	if !p.defaultHostLayout() {

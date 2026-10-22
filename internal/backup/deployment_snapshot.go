@@ -16,12 +16,15 @@ const sourcesSnapshotName = "portal/backup/sources.json"
 // unrelated credentials. The snapshots are migration references, never an
 // instruction to overwrite the target host's approved execution policy.
 func snapshotDeploymentConfig(sources []Source, policy *PortalRestorePolicy, work string) ([]Source, error) {
+	if policy == nil {
+		return nil, errors.New("备份必须配置后台恢复策略")
+	}
 	for _, source := range sources {
 		if source.Name == restorePolicySnapshotName || source.Name == sourcesSnapshotName || source.Name == backupSettingsName || source.Name == credentialsSnapshotName || allowedHostTaskName(source.Name) {
 			return nil, errors.New("后台配置快照由备份任务自动生成，请勿写入 sources.json")
 		}
 	}
-	if policy != nil && (policy.UpstreamContainer != "" || policy.ManagerContainer != "") {
+	if policy.UpstreamContainer != "" || policy.ManagerContainer != "" {
 		if err := (&dockerPortal{policy: *policy}).validateProfile(); err != nil {
 			return nil, err
 		}
@@ -49,9 +52,6 @@ func snapshotDeploymentConfig(sources []Source, policy *PortalRestorePolicy, wor
 		{sourcesSnapshotName, "backup-sources.json", sources},
 		{restorePolicySnapshotName, "backup-restore-policy.json", policy},
 	} {
-		if snapshot.name == restorePolicySnapshotName && policy == nil {
-			continue
-		}
 		file := filepath.Join(work, snapshot.file)
 		if err := writeJSON(file, snapshot.value); err != nil {
 			return nil, err
@@ -68,21 +68,13 @@ func validateDeploymentSnapshot(dir string) error {
 	var sources []Source
 	sourceFile := filepath.Join(dir, filepath.FromSlash(sourcesSnapshotName))
 	if err := readDeploymentSnapshot(sourceFile, &sources); err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
+		return errors.New("备份来源清单缺失或无效")
 	} else if err := validateSources(sources); err != nil {
 		return errors.New("备份来源清单无效")
 	}
 	var p PortalRestorePolicy
 	if err := readDeploymentSnapshot(filepath.Join(dir, filepath.FromSlash(restorePolicySnapshotName)), &p); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil // Backups made before configuration snapshots remain valid.
-		}
-		return err
-	}
-	if sources == nil {
-		return errors.New("备份包含恢复策略但缺少配套来源清单")
+		return errors.New("备份恢复策略清单缺失或无效")
 	}
 	if p.UpstreamContainer == "" && p.ManagerContainer == "" {
 		return nil // An explicitly database-only installation has no rebuild profile.

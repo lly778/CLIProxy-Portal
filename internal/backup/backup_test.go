@@ -90,11 +90,11 @@ func TestSnapshotArchiveRestoreIncludesWALAndOriginalSecrets(t *testing.T) {
 	key := bytes.Repeat([]byte{4}, 32)
 	keyFile := filepath.Join(dir, "recovery.key")
 	_ = os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600)
-	file, manifest, err := Create(t.Context(), sources, work, key)
+	file, manifest, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manifest.Kind != manifestKind || filepath.Base(file) != archiveName || len(manifest.Entries) != 3 {
+	if manifest.Kind != manifestKind || filepath.Base(file) != archiveName || len(manifest.Entries) != 7 {
 		t.Fatalf("manifest=%+v", manifest)
 	}
 	b, _ := os.ReadFile(file)
@@ -170,7 +170,7 @@ func TestSnapshotArchiveRestoreIncludesWALAndOriginalSecrets(t *testing.T) {
 	}
 }
 
-func TestRestoreSupportsOldNamingButRejectsUnknownManifestKinds(t *testing.T) {
+func TestRestoreRejectsUnsupportedManifestKinds(t *testing.T) {
 	sources, dir := fixture(t)
 	work := filepath.Join(dir, "work")
 	if err := os.Mkdir(work, 0700); err != nil {
@@ -181,7 +181,7 @@ func TestRestoreSupportsOldNamingButRejectsUnknownManifestKinds(t *testing.T) {
 	if err := os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	file, _, err := Create(t.Context(), sources, work, key)
+	file, _, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestRestoreSupportsOldNamingButRejectsUnknownManifestKinds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{legacyManifestKind, "unknown"} {
+	for _, kind := range []string{"lightweight", "unknown", "v1"} {
 		t.Run(kind, func(t *testing.T) {
 			var decrypted bytes.Buffer
 			if err := Decrypt(&decrypted, bytes.NewReader(encrypted), key); err != nil {
@@ -222,6 +222,9 @@ func TestRestoreSupportsOldNamingButRejectsUnknownManifestKinds(t *testing.T) {
 						t.Fatal(err)
 					}
 					m.Kind = kind
+					if kind == "v1" {
+						m.Kind, m.Version = manifestKind, 1
+					}
 					body, err = json.Marshal(m)
 					if err != nil {
 						t.Fatal(err)
@@ -244,17 +247,13 @@ func TestRestoreSupportsOldNamingButRejectsUnknownManifestKinds(t *testing.T) {
 			if err := Encrypt(&renamed, &compressed, key); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(t.TempDir(), legacyArchiveName)
+			path := filepath.Join(t.TempDir(), archiveName)
 			if err := os.WriteFile(path, renamed.Bytes(), 0600); err != nil {
 				t.Fatal(err)
 			}
 			out := filepath.Join(t.TempDir(), "restored")
 			err = Restore(t.Context(), path, keyFile, out)
-			if kind == legacyManifestKind {
-				if err != nil {
-					t.Fatalf("old backup must remain restorable: %v", err)
-				}
-			} else if err == nil {
+			if err == nil {
 				t.Fatal("unknown manifest kind accepted")
 			} else if _, err := os.Stat(out); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("invalid manifest published restored files")

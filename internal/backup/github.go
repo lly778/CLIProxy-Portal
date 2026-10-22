@@ -240,7 +240,7 @@ func (g *GitHub) Retain(ctx context.Context, c Config, newestTag string) error {
 	if err := g.CheckPrivate(ctx, c.Repository); err != nil {
 		return err
 	}
-	pattern := regexp.MustCompile(`^(?:` + regexp.QuoteMeta(releaseTagPrefix) + `|` + regexp.QuoteMeta(legacyReleaseTagPrefix) + `)` + regexp.QuoteMeta(c.Instance) + `-([0-9]{8}T[0-9]{6}Z)-[a-f0-9]{8}$`)
+	pattern := regexp.MustCompile(`^` + regexp.QuoteMeta(releaseTagPrefix) + regexp.QuoteMeta(c.Instance) + `-([0-9]{8}T[0-9]{6}Z)-[a-f0-9]{8}$`)
 	if !pattern.MatchString(newestTag) {
 		return errors.New("当前备份标识无效，已跳过旧备份清理")
 	}
@@ -255,13 +255,13 @@ func (g *GitHub) Retain(ctx context.Context, c Config, newestTag string) error {
 		}
 		for _, r := range rows {
 			match := pattern.FindStringSubmatch(r.Tag)
-			marked := strings.HasPrefix(r.Body, releaseMarker+"\nInstance: "+c.Instance+"\n") || strings.HasPrefix(r.Body, legacyReleaseMarker+"\nInstance: "+c.Instance+"\n")
+			marked := strings.HasPrefix(r.Body, releaseMarker+"\nInstance: "+c.Instance+"\n")
 			if r.ID <= 0 || r.Draft || len(match) != 2 || !marked {
 				continue
 			}
 			complete := false
 			for _, a := range r.Assets {
-				if (a.Name == archiveName || a.Name == legacyArchiveName) && a.State == "uploaded" && a.Size > 0 {
+				if a.Name == archiveName && a.State == "uploaded" && a.Size > 0 {
 					complete = true
 				}
 			}

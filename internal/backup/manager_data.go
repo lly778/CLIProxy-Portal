@@ -42,7 +42,7 @@ func validateManagerBackupIntegrity(ctx context.Context, dir string, required, i
 		return nil // Older packages can still restore only the portal database.
 	}
 	if dbErr != nil || keyErr != nil {
-		return errors.New("备份缺少成套 CPAMP 数据库和 data.key；旧备份可使用普通门户恢复")
+		return errors.New("备份缺少成套 CPAMP 数据库和 data.key")
 	}
 	info, err := os.Lstat(key)
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 4096 {

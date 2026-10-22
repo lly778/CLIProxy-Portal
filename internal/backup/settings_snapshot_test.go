@@ -23,7 +23,7 @@ func TestRunnerArchiveIncludesPortableBackupSettingsWithoutCredentials(t *testin
 		t.Fatal(err)
 	}
 	sourcesFile := filepath.Join(t.TempDir(), "sources.json")
-	if err := writeJSON(sourcesFile, sources); err != nil {
+	if err := runnerSources(t, sourcesFile, sources); err != nil {
 		t.Fatal(err)
 	}
 	if err := Request(dir); err != nil {
@@ -122,25 +122,25 @@ func TestBackupSettingsRestoreAndRollbackAreOneTransaction(t *testing.T) {
 	}
 }
 
-func TestBackupSettingsFreshRestoreAndOldArchives(t *testing.T) {
-	for _, included := range []bool{true, false} {
-		state, restored, p := restoreFixture(t)
-		if included {
-			archivedSettings(t, restored)
-		}
-		if _, err := replacePortalDatabase(t.Context(), state, restored, p, &restoreService{}); err != nil {
-			t.Fatal(err)
-		}
-		c, err := LoadConfig(state)
-		if err != nil || c.Enabled || c.KeySaved {
-			t.Fatal("fresh installation scheduled backup without credentials", c, err)
-		}
-		if included && (c.Repository != "owner/private" || c.Hour != 4 || c.Minute != 35 || c.Retain != 7 || !instancePattern.MatchString(c.Instance)) {
-			t.Fatal("fresh restore lost portable settings", c)
-		}
-		if !included && c.Repository != "" {
-			t.Fatal("old archive invented backup settings", c)
-		}
+func TestFreshRestoreImportsSettingsButRequiresCurrentCredentials(t *testing.T) {
+	state, restored, p := restoreFixture(t)
+	if _, err := replacePortalDatabase(t.Context(), state, restored, p, &restoreService{}); err != nil {
+		t.Fatal(err)
+	}
+	c, err := LoadConfig(state)
+	if err != nil || c.Enabled || c.KeySaved || c.Repository != "owner/private" || c.Hour != 4 || c.Minute != 35 || c.Retain != 7 || !instancePattern.MatchString(c.Instance) {
+		t.Fatal("fresh restore lost preferences or scheduled without credentials", c, err)
+	}
+}
+
+func TestMissingBackupSettingsRejectedBeforeStoppingServices(t *testing.T) {
+	state, restored, p := restoreFixture(t)
+	if err := os.Remove(filepath.Join(restored, filepath.FromSlash(backupSettingsName))); err != nil {
+		t.Fatal(err)
+	}
+	svc := &restoreService{}
+	if _, err := replacePortalDatabase(t.Context(), state, restored, p, svc); err == nil || svc.stops != 0 {
+		t.Fatal("incomplete backup accepted or services stopped", err)
 	}
 }
 

@@ -10,8 +10,8 @@ import (
 
 const backupSettingsName = "portal/backup/settings.json"
 
-// Portable preferences exclude tokens, keys and the installation identity used
-// to scope remote retention. A restored installation keeps its own credentials.
+// Portable preferences exclude secrets (stored in the separate encrypted
+// credential snapshot) and the installation identity used to scope retention.
 type portableBackupSettings struct {
 	Version    int    `json:"version"`
 	Enabled    bool   `json:"enabled"`
@@ -60,7 +60,7 @@ func readBackupSettings(file string) (portableBackupSettings, error) {
 	return v, nil
 }
 
-func prepareBackupSettings(dir, candidate string, restoredCredentials ...bool) error {
+func prepareBackupSettings(dir, candidate string, restoredCredentials bool) error {
 	v, err := readBackupSettings(candidate)
 	if err != nil {
 		return err
@@ -80,13 +80,13 @@ func prepareBackupSettings(dir, candidate string, restoredCredentials ...bool) e
 	_, keyErr := ReadKey(filepath.Join(dir, "recovery.key"))
 	_, tokenErr := LoadToken(dir)
 	ready := c.Repository == v.Repository && c.KeySaved && keyErr == nil && tokenErr == nil
-	if len(restoredCredentials) > 0 && restoredCredentials[0] {
+	if restoredCredentials {
 		ready = true
 		c.KeySaved = true
 	}
 	c.Enabled = v.Enabled && ready
 	c.Repository, c.Hour, c.Minute, c.Weekday, c.Retain = v.Repository, v.Hour, v.Minute, v.Weekday, v.Retain
-	if len(restoredCredentials) == 0 || !restoredCredentials[0] {
+	if !restoredCredentials {
 		c.KeySaved = c.KeySaved && keyErr == nil
 	}
 	// Fresh installations can import preferences before separately setting their
@@ -98,11 +98,8 @@ func backupSettingsTarget(dir string) restoreTarget {
 	return restoreTarget{Path: filepath.Join(dir, "config.json"), Archive: backupSettingsName, Kind: "backup-settings"}
 }
 
-func restoreTargets(p PortalRestorePolicy, dir, mode string, settings bool) ([]restoreTarget, error) {
+func restoreTargets(p PortalRestorePolicy, dir, mode string) ([]restoreTarget, error) {
 	targets := p.targets(mode)
-	if !settings {
-		return targets, nil
-	}
 	target := backupSettingsTarget(dir)
 	if !filepath.IsAbs(target.Path) || filepath.Clean(target.Path) != target.Path {
 		return nil, errors.New("备份设置目标目录无效")

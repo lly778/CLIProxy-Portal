@@ -32,11 +32,7 @@ func prepareHostRestore(dir string, p PortalRestorePolicy, restored string) erro
 	if err != nil {
 		return err
 	}
-	plan := hostRestorePlan{Version: 1, Policy: p}
-	if v != nil {
-		plan.ESXi = v.ESXi != nil
-		plan.Tunnel = v.CloudflareToken != ""
-	}
+	plan := hostRestorePlan{Version: 1, Policy: p, ESXi: v.ESXi != nil, Tunnel: v.CloudflareToken != ""}
 	// Archived units and scripts are references only. The pending record holds
 	// no credentials and installation always uses compiled-in program assets.
 	path := filepath.Join(dir, hostRestoreName)

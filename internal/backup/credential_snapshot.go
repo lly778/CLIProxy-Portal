@@ -127,10 +127,25 @@ func readCredentials(restored string) (*credentialSnapshot, error) {
 	var v credentialSnapshot
 	err := readDeploymentSnapshot(filepath.Join(restored, filepath.FromSlash(credentialsSnapshotName)), &v)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, errors.New("备份缺少配套凭据快照")
 	}
 	if err != nil || v.validate() != nil {
 		return nil, errors.New("加密备份中的凭据快照无效")
 	}
 	return &v, nil
+}
+
+func validateBackupMetadata(dir string) error {
+	settings, err := readBackupSettings(filepath.Join(dir, filepath.FromSlash(backupSettingsName)))
+	if err != nil {
+		return errors.New("备份设置快照缺失或无效")
+	}
+	credentials, err := readCredentials(dir)
+	if err != nil {
+		return err
+	}
+	if settings.Repository != credentials.Repository {
+		return errors.New("备份设置和 GitHub 凭据的仓库不一致")
+	}
+	return nil
 }

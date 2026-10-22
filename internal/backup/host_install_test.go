@@ -78,7 +78,7 @@ func TestHostInstallationRetryDoesNotClaimDataRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareHostRestore(state, p, t.TempDir()); err != nil {
+	if err := prepareHostRestore(state, p, credentialDirectory(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := markHostRestoreReady(state); err != nil {
@@ -114,7 +114,7 @@ func TestUncommittedHostPlanNeverInstallsTasks(t *testing.T) {
 	state := t.TempDir()
 	_ = os.Chmod(state, 0o700)
 	p, _ := defaultRestorePolicy()
-	if err := prepareHostRestore(state, p, t.TempDir()); err != nil {
+	if err := prepareHostRestore(state, p, credentialDirectory(t)); err != nil {
 		t.Fatal(err)
 	}
 	h, commands := testHostInstaller(t)

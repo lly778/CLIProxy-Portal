@@ -75,7 +75,7 @@ func TestManagerSnapshotIncludesCommittedWALAndDataKeyNotArchives(t *testing.T) 
 		t.Fatal(err)
 	}
 	paused := false
-	file, manifest, err := createArchive(t.Context(), sources, work, key, nil, func(collect func() error) error {
+	file, manifest, err := createArchive(t.Context(), archiveSources(t, sources), work, key, nil, func(collect func() error) error {
 		paused = true
 		err := collect()
 		paused = false
@@ -287,7 +287,7 @@ func TestManagerLargeSnapshotCompressionRoundTrip(t *testing.T) {
 	if err = os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	file, _, err := Create(t.Context(), sources, work, key)
+	file, _, err := Create(t.Context(), archiveSources(t, sources), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

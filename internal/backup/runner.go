@@ -235,7 +235,7 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 			return e
 		}
 		hostEtc := ""
-		if snapshotPolicy != nil {
+		if snapshotPolicy != nil && snapshotPolicy.defaultHostLayout() {
 			hostEtc = "/etc"
 		}
 		credentialSource, e := snapshotCredentials(dir, work, c.Repository, hostEtc)

@@ -100,7 +100,7 @@
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       <label for="backup-restore-password">验证管理员密码</label><input id="backup-restore-password" type="password" name="admin_password" autocomplete="current-password" required maxlength="1024">
       <label for="backup-restore-mode">恢复方式</label><select id="backup-restore-mode" name="restore_mode" required><option value="replace-portal-database">恢复：门户数据库及备份设置</option><option value="rebuild-and-restore">重建并恢复：CPA、CPAMP 及完整数据</option></select>
-      <p class="muted small">“恢复”仅还原门户数据库及备份设置。“重建并恢复”还会下载指定版本镜像，重建 CPA、CPAMP 并恢复完整数据及管理密钥，自动安装备份定时任务、资源统计和采集服务，还原加密包中的 GitHub、隧道及 ESXi 凭据。新服务器安装 Docker 和门户时须完成宿主机初始化；内置部署可自动准备目录和配置。旧备份缺少的凭据沿用当前配置，缺少的外部凭据会明确提示。备份恢复密钥始终需单独保管。</p>
+      <p class="muted small">“恢复”仅还原门户数据库及备份设置。“重建并恢复”还会下载指定版本镜像，重建 CPA、CPAMP 并恢复完整数据及管理密钥，自动安装备份定时任务、资源统计和采集服务，还原加密包中的 GitHub、隧道及 ESXi 凭据。新服务器安装 Docker 和门户时须完成宿主机初始化；内置部署可自动准备目录和配置。仅支持当前 v2 备份，配置清单、备份设置及凭据快照缺失时拒绝恢复；未配置的 ESXi 或隧道任务会明确提示。备份恢复密钥始终需单独保管。</p>
       <label class="backup-confirm"><input type="checkbox" name="confirm" value="replace-current-data" required>我确认执行所选恢复方式，并了解覆盖范围内备份之后的相关修改将丢失</label>
       {{if not .Backup.KeyReady}}<label for="backup-recovery-key">备份恢复密钥</label><input id="backup-recovery-key" type="password" name="recovery_key" autocomplete="off" minlength="64" maxlength="64" required>{{end}}
       <label for="backup-restore-file">加密备份文件</label><input id="backup-restore-file" type="file" name="backup_file" accept=".cbackup" required>

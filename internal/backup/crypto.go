@@ -10,7 +10,7 @@ import (
 )
 
 const chunkSize = 64 << 10
-const magic = "CPBACK01"
+const magic = "CPBACK02"
 
 // Each frame authenticates its index and the random per-file nonce prefix.
 // An authenticated empty terminal frame detects truncation and missing EOF.

@@ -38,7 +38,7 @@ func TestDeploymentConfigSurvivesEncryptedBackupWithoutChangingHostPolicy(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	archive, manifest, err := Create(t.Context(), append(append([]Source{}, sources...), snapshots...), work, key)
+	archive, manifest, err := Create(t.Context(), archiveSources(t, append(append([]Source{}, sources...), snapshots...)), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}

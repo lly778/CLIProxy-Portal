@@ -132,7 +132,7 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 	}
 	finishSnapshot := stages.start("snapshot")
 	defer finishSnapshot()
-	m := Manifest{Version: 1, Kind: manifestKind, CreatedAt: time.Now().UTC()}
+	m := Manifest{Version: manifestVersion, Kind: manifestKind, CreatedAt: time.Now().UTC()}
 	m.Images = images
 	if err := validateSources(sources); err != nil {
 		return "", m, err
@@ -262,7 +262,7 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 	if err = validateDeploymentSnapshot(stage); err != nil {
 		return "", m, err
 	}
-	if _, err = readCredentials(stage); err != nil {
+	if err = validateBackupMetadata(stage); err != nil {
 		return "", m, err
 	}
 	finishSnapshot()
@@ -563,7 +563,7 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 	if err = decrypted.finish(); err != nil {
 		return err
 	}
-	if !manifestSeen || manifest.Version != 1 || !supportedManifestKind(manifest.Kind) || len(manifest.Entries) != len(entries) || len(entries) == 0 {
+	if !manifestSeen || manifest.Version != manifestVersion || manifest.Kind != manifestKind || len(manifest.Entries) != len(entries) || len(entries) == 0 {
 		return errors.New("备份清单版本或文件数量无效")
 	}
 	reportRestorePhase(ctx, "verify_archive")
@@ -595,16 +595,13 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 		}
 	}
 	// Manifest verification above already quick_checked the restored database.
-	if _, settingsErr := readBackupSettings(filepath.Join(dir, filepath.FromSlash(backupSettingsName))); settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
-		return settingsErr
-	}
 	if err = validateManagerBackupIntegrity(ctx, dir, false, false); err != nil {
 		return err
 	}
 	if err = validateDeploymentSnapshot(dir); err != nil {
 		return err
 	}
-	if _, err = readCredentials(dir); err != nil {
+	if err = validateBackupMetadata(dir); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(filepath.Join(dir, "upstream/cliproxyapi/auths")); err != nil || !info.IsDir() {

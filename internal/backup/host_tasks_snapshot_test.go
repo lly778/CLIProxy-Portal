@@ -77,7 +77,7 @@ func TestHostTasksAndScriptsSurviveBackupWithSeparateTunnelCredentials(t *testin
 	if err = os.WriteFile(keyFile, []byte(hex.EncodeToString(key)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	archive, _, err := Create(t.Context(), append(sources, hostSources...), work, key)
+	archive, _, err := Create(t.Context(), archiveSources(t, append(sources, hostSources...)), work, key)
 	if err != nil {
 		t.Fatal(err)
 	}
