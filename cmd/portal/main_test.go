@@ -21,6 +21,15 @@ func TestGatewayDoesNotImposeConnectionDeadlines(t *testing.T) {
 	}
 }
 
+func TestBackupRestoreCheckRequiresExplicitExistingPolicy(t *testing.T) {
+	if err := backupCommand([]string{"check-restore"}); err == nil || !strings.Contains(err.Error(), "--restore-config") {
+		t.Fatalf("missing policy: %v", err)
+	}
+	if err := backupCommand([]string{"check-restore", "--restore-config", filepath.Join(t.TempDir(), "missing.json")}); err == nil {
+		t.Fatal("missing policy accepted")
+	}
+}
+
 func TestGatewayMaintenanceKeepsOldStructuredCapture(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)

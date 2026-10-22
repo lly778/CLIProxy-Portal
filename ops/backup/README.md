@@ -23,6 +23,8 @@ GitHub 管理 API 同样在请求前关闭空闲连接，小型管理请求限 3
 
 恢复任务将阶段、阶段开始时间及提示写入 `restore-status.json`：请求与策略检查、解密解压、清单及数据库校验、部署核对与镜像下载（仅重建）、数据卷准备（仅重建）、目标和磁盘检查、数据暂存、停服、回退快照、数据替换、服务启动/重建及健康检查。失败结果保留出错阶段，自动回退单独提示；进度报告失败不会中断数据切换或回退。页面运行时约每五秒刷新，停服期间保留旧页面等待服务恢复；目前不报告镜像下载百分比或速度。恢复成功后重新登录，成功长提示及回退路径不再显示（兼容旧状态文件）；失败及异常回退提示保留，后台状态与回退副本不因隐藏提示而删除。
 
+重建模式在解密之前先检查全部必填后台字段、部署模板权限及批准的 SHA256。仅配置门户数据库恢复的主机，会直接列出 `restore.json` 缺失的字段，不再等完整解密后才报“后台重建服务配置不完整”。模板摘要缺失、格式错误或内容变化同样在解密前退出；普通恢复仍只要求门户数据库恢复配置。
+
 两种在线恢复都会还原备份设置（若包内包含），并与数据库置于同一恢复事务中；服务验证失败会一起回退。旧备份没有该快照时保留当前设置。当前 GitHub 令牌、恢复密钥和安装标识不被备份覆盖；新服务器生成新的安装标识，避免自动清理其他安装的历史备份。仅当目标仓库未变、当前令牌和已确认保存的恢复密钥仍存在时才恢复自动备份开关；新服务器、仓库变化或凭据缺失时先恢复仓库和计划，保持自动备份关闭，待管理员确认凭据并保存后启用。
 
 不备份 `usage-archives`、门户独立交互正文、普通日志、镜像文件、GitHub 令牌或备份恢复密钥。CPAMP 数据库内仍在线的请求记录、用量统计、价格、Key 别名及设置随快照保留；门户内部审计、计时样本也保留。CPAMP 数据库本身若存有敏感请求字段，它们仍属于加密数据库快照。重建恢复替换 CPAMP 数据库和 data.key，不合并新旧统计、不删除现有归档目录或 manager.lock。DNS、Cloudflare 隧道凭据、防火墙、Docker 和门户程序需另行准备。
@@ -50,10 +52,30 @@ sudo docker volume create cpamp_cpa-manager-plus-data
 sudo install -m 644 ops/backup/cliproxy-portal-backup.service /etc/systemd/system/
 sudo install -m 644 ops/backup/cliproxy-portal-backup.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+# 安装完成后先做只读检查；命令失败时补齐配置，不要提交重建恢复。
+sudo /root/cliproxy-portal/dist/portal-linux-amd64 backup check-restore \
+  --restore-config /etc/cliproxy-portal-backup/restore.json
 sudo systemctl enable --now cliproxy-portal-backup.timer
 ```
 
 重建使用管理员批准的 Compose，而不执行任意上传的部署文件。备份中的 Compose 必须与批准模板完全一致；展开 .env 后的端口、挂载、命令、环境及权限结构也必须与后台档案一致。镜像仅接受批准仓库的 `@sha256` 固定摘要，不自动追踪 latest。模板或结构改变需管理员先审查和重新批准。管理密钥文件可恢复，但门户/CPAMP 的密钥必须相同，CPA 配置中的管理密钥必须匹配。
+
+`backup check-restore` 默认检查重建模式：必填配置、模板权限及 SHA256、各目标的真实父目录、Compose 展开结果、CPAMP 数据卷声明、门户挂载和已有上游容器归属。它允许两个上游容器均不存在，拒绝只存在其中一个的残留部署；不下载镜像、创建卷、停服或覆盖数据，也不访问 GitHub。检查普通恢复时加 `--mode replace-portal-database`。检查通过只表示服务器准备就绪，备份本身的认证、模板兼容性、固定镜像摘要和数据库校验仍在实际恢复时执行。
+
+### 新服务器只有备份文件时
+
+先安装门户程序和 Docker，再完成上面的后台配置。若原批准模板只保存在加密包内，可用独立恢复密钥将备份解密到一个**全新的 root 私有目录**供管理员审查：
+
+```sh
+sudo install -d -m 700 /root/portal-restore-review
+sudo /root/cliproxy-portal/dist/portal-linux-amd64 backup restore \
+  --file /root/backup.cbackup --key-file /root/portal-recovery.key \
+  --output /root/portal-restore-review/files
+```
+
+该命令只提取并校验，不启动包内服务。审查提取目录内 `upstream/compose.yaml` 和 `upstream/.env` 的挂载、端口、环境及权限后，将批准文件按实际路径安装，并用 `sha256sum /root/cpa-manager-plus/compose.yaml` 得到摘要，填写 `restore.json` 的 `compose_sha256`；服务名、容器名、项目、镜像仓库、健康地址、密钥目标及卷路径也必须全部填写。先建立目标父目录及批准的数据卷，再运行 `backup check-restore`，通过后从门户选择“重建并恢复”。提取目录包含明文密钥，完成后清理。
+
+备份提供原部署资料，目标服务器的管理员负责批准这些资料；程序不会把上传包中的 Compose 自动批准为可执行配置，也不会为缺失字段猜测服务器路径。
 
 安装策略后，新备份会自动从正在运行的两个上游镜像记录仓库摘要。未包含两项镜像摘要或 CPAMP usage.sqlite/data.key 的旧备份不能自动重建，仍可普通恢复。备份期间上游镜像摘要无法确认会失败；不要在凭据或模型配置变更途中备份，跨服务文件并非同一数据库事务。
 

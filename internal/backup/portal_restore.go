@@ -132,12 +132,19 @@ func (p PortalRestorePolicy) validate(mode string) error {
 		return errors.New("门户恢复服务或本机健康检查无效")
 	}
 	if mode == RebuildRestoreMode {
+		if err := p.requireRebuildFields(); err != nil {
+			return err
+		}
 		if !cgroupParentName.MatchString(p.resourceCgroupParent()) {
 			return errors.New("CPA 套件资源统计父级必须是批准的 systemd slice")
 		}
-		for _, name := range []string{p.UpstreamContainer, p.ManagerContainer, p.ProjectName, p.UpstreamService, p.ManagerService, p.ManagerVolume} {
-			if !containerName.MatchString(name) {
-				return errors.New("后台重建服务配置不完整")
+		for _, field := range []struct{ name, value string }{
+			{"upstream_container", p.UpstreamContainer}, {"manager_container", p.ManagerContainer},
+			{"project_name", p.ProjectName}, {"upstream_service", p.UpstreamService},
+			{"manager_service", p.ManagerService}, {"manager_volume", p.ManagerVolume},
+		} {
+			if !containerName.MatchString(field.value) {
+				return fmt.Errorf("后台重建配置字段 %s 格式无效，请检查 restore.json", field.name)
 			}
 		}
 		parent := filepath.Dir(p.ManagerDatabase)

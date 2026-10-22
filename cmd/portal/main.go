@@ -55,7 +55,7 @@ func run() error {
 
 func backupCommand(args []string) error {
 	if len(args) == 0 {
-		return errors.New("用法: portal backup configure|key|tick|restore")
+		return errors.New("用法: portal backup configure|key|check-restore|tick|restore")
 	}
 	fs := flag.NewFlagSet("backup "+args[0], flag.ContinueOnError)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -96,6 +96,22 @@ func backupCommand(args []string) error {
 			return err
 		}
 		fmt.Println("恢复密钥已导出；请另行保管，不要仅留在原服务器。")
+		return nil
+	case "check-restore":
+		policy := fs.String("restore-config", "", "宿主机恢复策略 restore.json")
+		mode := fs.String("mode", backup.RebuildRestoreMode, "rebuild-and-restore 或 replace-portal-database")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if *policy == "" || fs.NArg() != 0 {
+			return errors.New("请指定 --restore-config")
+		}
+		checkCtx, checkCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer checkCancel()
+		if err := backup.CheckRestorePolicy(checkCtx, *policy, *mode); err != nil {
+			return err
+		}
+		fmt.Println("后台恢复配置检查通过；尚未下载镜像、停服或替换数据。备份文件兼容性仍会在恢复时单独检查。")
 		return nil
 	case "tick":
 		dir := fs.String("state-dir", "", "门户共享备份状态目录")

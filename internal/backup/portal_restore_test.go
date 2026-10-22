@@ -3,7 +3,9 @@ package backup
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -141,6 +143,12 @@ func restoreFixture(t *testing.T) (string, string, PortalRestorePolicy) {
 			t.Fatal(err)
 		}
 	}
+	compose, err := os.ReadFile(p.ComposeFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(compose)
+	p.ComposeSHA256 = hex.EncodeToString(digest[:])
 	return state, restored, p
 }
 

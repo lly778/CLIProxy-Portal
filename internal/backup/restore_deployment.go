@@ -96,7 +96,11 @@ func (d *dockerPortal) validateProfile() error {
 		return errors.New("后台部署文件无法读取或过大")
 	}
 	digest := sha256.Sum256(data)
-	if len(d.policy.ComposeSHA256) != 64 || d.policy.ComposeSHA256 != hex.EncodeToString(digest[:]) {
+	approvedDigest, decodeErr := hex.DecodeString(d.policy.ComposeSHA256)
+	if decodeErr != nil || len(approvedDigest) != sha256.Size {
+		return errors.New("后台重建配置 compose_sha256 必须填写已审核 Compose 模板的 64 位 SHA256；请检查 restore.json")
+	}
+	if d.policy.ComposeSHA256 != hex.EncodeToString(digest[:]) {
 		return errors.New("部署模板与后台批准的模板不一致，请管理员确认")
 	}
 	return nil

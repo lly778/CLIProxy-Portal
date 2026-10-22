@@ -171,7 +171,7 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 	}
 	var policy PortalRestorePolicy
 	if jobErr == nil {
-		policy, jobErr = LoadRestorePolicy(policyFile)
+		policy, jobErr = loadRestorePolicyForMode(policyFile, job.Mode)
 	}
 	if jobErr == nil {
 		reportRestorePhase(ctx, "decrypt")

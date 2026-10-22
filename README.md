@@ -277,6 +277,8 @@ CPA 套件指门户、CPA、CPAMP 三个容器。内存统计使用共同 cgroup
 
 备份由宿主机 runner 执行，门户只负责配置与提交请求，不需要挂载 Docker socket 或上游目录。**仅启动门户容器不会安装定时备份任务**；先按 [备份与恢复部署说明](ops/backup/README.md) 配置来源、恢复策略和 systemd 任务。
 
+新服务器选择“重建并恢复”前，先运行 `portal backup check-restore --restore-config /etc/cliproxy-portal-backup/restore.json`，只读核对完整重建配置、已批准模板及 SHA256、目标目录和容器/数据卷配置。仅有门户数据库恢复配置时不能重建上游；缺失项会在解密前列出，按部署说明补齐后重试。
+
 备份后台未连接等状态异常显示为备份面板内的黄色提示条，任务失败原因写在“备份状态”中；提交校验或管理员密码验证失败时显示错误页面。
 
 ### 备份设置
