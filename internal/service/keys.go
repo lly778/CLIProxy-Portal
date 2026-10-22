@@ -267,16 +267,17 @@ func (k *Keys) runQuotaRefresh(client interface {
 		if !ok {
 			continue
 		}
+		rowKey := strings.TrimSpace(file.Name) + "\x00" + strings.TrimSpace(file.AuthIndex)
 		windows, err := codex.FetchCodexQuota(ctx, file, k.Now())
 		if err == nil {
-			k.putRefreshedQuota(strings.TrimSpace(file.Name)+"\x00"+strings.TrimSpace(file.AuthIndex), windows)
+			k.putRefreshedQuota(rowKey, windows)
 			succeeded++
+		} else {
+			k.dropRefreshedQuota(rowKey)
 		}
 	}
 	failed := len(eligible) - succeeded
-	if succeeded > 0 {
-		k.invalidateQuota()
-	}
+	k.invalidateQuota()
 	message := fmt.Sprintf("已刷新 %d 个账号", succeeded)
 	if failed > 0 {
 		message = fmt.Sprintf("已刷新 %d 个账号，%d 个失败", succeeded, failed)
@@ -332,6 +333,8 @@ func quotaRefreshWindowFresh(window cpamp.CodexQuotaWindow, now time.Time, ttl t
 // refreshCurrentCodexQuota reads current provider values through CPAMP's
 // read-only API proxy when the 30-minute quota cache is stale. This keeps page
 // loads current without issuing duplicate provider requests on every visit.
+// The shared client refresh also clears stale CPA cooldowns after confirming
+// live quota availability, just as it does for a manual refresh.
 func (k *Keys) refreshCurrentCodexQuota(ctx context.Context, client interface {
 	FetchCodexQuota(context.Context, cpamp.AuthFile, time.Time) ([]cpamp.CodexQuotaWindow, error)
 }, files []cpamp.AuthFile, now time.Time) int {

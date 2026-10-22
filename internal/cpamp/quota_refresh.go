@@ -12,16 +12,19 @@ import (
 )
 
 const (
-	pathAPICall   = "/v0/management/api-call"
-	codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
+	pathAPICall    = "/v0/management/api-call"
+	pathResetQuota = "/v0/management/reset-quota"
+	codexUsageURL  = "https://chatgpt.com/backend-api/wham/usage"
 )
 
 var ErrNoQuotaWindows = errors.New("cpamp returned no supported Codex quota windows")
 
 // FetchCodexQuota asks CPA for one credential's current Codex quota through
-// CPAMP's read-only api-call proxy. It deliberately bypasses CPAMP's persisted
+// CPAMP's api-call proxy. It deliberately bypasses CPAMP's persisted
 // quota snapshots so lifecycle boundary normalization cannot replace the
-// provider's current reset_at value.
+// provider's current reset_at value. Both manual and automatic refreshes also
+// clear stale routing cooldowns when the live provider response confirms that
+// this enabled credential has usable quota again.
 func (c *Client) FetchCodexQuota(ctx context.Context, file AuthFile, observedAt time.Time) ([]CodexQuotaWindow, error) {
 	authIndex := strings.TrimSpace(file.AuthIndex)
 	if authIndex == "" {
@@ -74,7 +77,82 @@ func (c *Client) FetchCodexQuota(ctx context.Context, file AuthFile, observedAt 
 	if len(windows) == 0 {
 		return nil, ErrNoQuotaWindows
 	}
+	if !file.Disabled && strings.EqualFold(strings.TrimSpace(file.Provider), "codex") &&
+		(file.Unavailable || len(file.Cooldowns) > 0 || strings.EqualFold(strings.TrimSpace(file.Status), "error")) &&
+		codexQuotaAllowsRouting(payload) {
+		if err := c.resetCodexQuotaCooldown(ctx, authIndex); err != nil {
+			// Do not report a successful refresh while routing remains blocked.
+			return nil, fmt.Errorf("cpamp quota refreshed but cooldown reset failed: %w", err)
+		}
+	}
 	return windows, nil
+}
+
+// codexQuotaAllowsRouting requires explicit live availability. Percentages
+// alone, cached reset times, and missing provider flags never lift a cooldown.
+func codexQuotaAllowsRouting(payload map[string]any) bool {
+	rateLimit := objectValue(payload, "rate_limit", "rateLimit")
+	allowed, hasAllowed := rateLimit["allowed"].(bool)
+	reached, hasReached := rateLimit["limit_reached"].(bool)
+	if !hasReached {
+		reached, hasReached = rateLimit["limitReached"].(bool)
+	}
+	if !hasAllowed || !allowed || !hasReached || reached {
+		return false
+	}
+	windowCount := 0
+	for _, keys := range [][]string{{"primary_window", "primaryWindow"}, {"secondary_window", "secondaryWindow"}} {
+		window := objectValue(rateLimit, keys...)
+		if window == nil {
+			continue
+		}
+		used, ok := numberValue(window, "used_percent", "usedPercent")
+		if !ok || math.IsNaN(used) || math.IsInf(used, 0) || used < 0 || used >= 100 {
+			return false
+		}
+		windowCount++
+	}
+	// A credential-wide reset also clears model cooldowns. Keep them intact
+	// when the provider reports an exhausted additional model quota.
+	for _, key := range []string{"additional_rate_limits", "additionalRateLimits"} {
+		raw, exists := payload[key]
+		if !exists || raw == nil {
+			continue
+		}
+		limits, ok := raw.([]any)
+		if !ok {
+			return false
+		}
+		for _, item := range limits {
+			entry, ok := item.(map[string]any)
+			if !ok || !codexQuotaAllowsRouting(entry) {
+				return false
+			}
+		}
+	}
+	return windowCount > 0
+}
+
+func (c *Client) resetCodexQuotaCooldown(ctx context.Context, authIndex string) error {
+	requestBody, err := json.Marshal(map[string]string{"auth_index": authIndex})
+	if err != nil {
+		return errors.New("cpamp cooldown reset request encoding failed")
+	}
+	body, err := c.do(ctx, http.MethodPost, pathResetQuota, requestBody, c.adminHeader)
+	if err != nil {
+		return err
+	}
+	var result struct {
+		Status    string `json:"status"`
+		AuthIndex string `json:"auth_index"`
+	}
+	if err := decodeJSON(pathResetQuota, body, &result); err != nil {
+		return err
+	}
+	if result.Status != "ok" || result.AuthIndex != authIndex {
+		return errors.New("cpamp cooldown reset was not confirmed for the requested credential")
+	}
+	return nil
 }
 
 func decodeNestedObject(raw json.RawMessage) (map[string]any, error) {
