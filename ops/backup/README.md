@@ -37,6 +37,60 @@ Linux 后台恢复策略已配置时，任务还会自动保存门户配套的 s
 
 本方案按要求排除归档文件，并非启用历史归档后的完整 CPAMP 归档灾备。如果数据库含已有归档任务/segment 索引，备份仍保留原始数据库，不擅自删除归档索引或 identity ledger；自动重建恢复会在停服前拒绝该包，提示管理员处理配套归档，避免重新启动缺少文件的维护任务。普通门户恢复不受影响。参考 [CPAMP 官方备份说明](https://seakee.github.io/CPA-Manager-Plus/docs/operations/backup.html)。
 
+## 加密包目录结构
+
+GitHub Release 上传单个加密附件 `backup.cbackup`。以下为默认完整部署在解密后的目录示意，不是服务器运行目录，也不代表仓库中已有历史附件已被重新生成：
+
+```text
+备份根目录/
+├── manifest.json                    # v2 清单、文件 SHA256、上游固定镜像摘要
+├── portal/
+│   ├── .env
+│   ├── compose.prebuilt.yaml
+│   ├── compose.gateway.yaml         # 按来源配置和文件存在情况收录
+│   ├── data/
+│   │   └── portal.db                # 一致性快照，包含资源保护等门户设置
+│   ├── secrets/
+│   │   ├── portal_app_secret
+│   │   └── cpamp_admin_key
+│   ├── backup/
+│   │   ├── settings.json            # 备份计划、仓库与保留份数
+│   │   ├── sources.json             # 备份来源清单
+│   │   ├── restore.json             # 后台恢复策略
+│   │   ├── credentials.json         # GitHub 令牌及已配置的 ESXi、隧道凭据
+│   │   └── host-tasks.json          # Linux 宿主机任务参考清单
+│   └── host/
+│       ├── ops/
+│       │   ├── collect-host-log-metrics.py
+│       │   └── collect-esxi-metrics.py
+│       └── systemd/
+│           ├── cliproxy.slice
+│           ├── cliproxy-portal-backup.service
+│           ├── cliproxy-portal-backup.timer
+│           ├── cliproxy-portal-log-metrics.service
+│           ├── cliproxy-portal-log-metrics.timer
+│           ├── cliproxy-esxi-metrics.service
+│           ├── cloudflared.service.example
+│           └── <上述任务名>.d/*.conf
+└── upstream/
+    ├── compose.yaml
+    ├── .env
+    ├── versions.json                # 按来源配置和文件存在情况收录
+    ├── secrets/
+    │   ├── cpamp-admin-key
+    │   └── cpa-management-key
+    ├── cliproxyapi/
+    │   ├── config.yaml
+    │   └── auths/                   # 上游授权文件，可为空目录
+    └── cpamp/
+        ├── usage.sqlite            # 一致性数据库快照
+        └── data.key                # 与 usage.sqlite 配套
+```
+
+`portal/host/` 只收录实际安装的允许任务、覆盖文件及相应采集脚本；检测到原隧道服务定义时生成不含令牌的 `cloudflared.service.example`。这些参考文件不直接作为恢复程序执行，自动安装使用当前门户程序内置资源。`credentials.json` 必须存在，其中 ESXi 和隧道字段仅在已配置时保存。
+
+包内不含备份恢复密钥 `recovery.key`、Docker 镜像、门户二进制、普通日志、`usage-archives/` 或门户独立交互正文。`portal/backup/runtime/` 是恢复时在私有工作目录中生成的凭据暂存目录，不属于原备份内容；普通恢复补存的密钥来自本次成功解密所用密钥，不是从备份包中读取。
+
 ## 安装和批准部署档案
 
 ### 默认部署的一键恢复
