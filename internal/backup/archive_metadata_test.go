@@ -3,6 +3,7 @@ package backup
 import (
 	"bytes"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -49,8 +50,23 @@ func credentialDirectory(t *testing.T) string {
 
 func runnerSources(t *testing.T, file string, sources []Source) error {
 	t.Helper()
-	if err := writeJSON(filepath.Join(filepath.Dir(file), "restore.json"), PortalRestorePolicy{Database: sources[0].Path, Container: "test-portal", HealthURL: "http://127.0.0.1:18080/healthz"}); err != nil {
+	policyFile := filepath.Join(filepath.Dir(file), "restore.json")
+	if err := writeJSON(policyFile, PortalRestorePolicy{Database: sources[0].Path, Container: "test-portal", HealthURL: "http://127.0.0.1:18080/healthz"}); err != nil {
 		return err
+	}
+	if err := os.Chmod(policyFile, 0o600); err != nil {
+		return err
+	}
+	// A Linux runner can discover installed collector units. Keep their source
+	// files inside the temporary fixture rather than depending on host scripts.
+	ops := filepath.Join(filepath.Dir(filepath.Dir(sources[0].Path)), "ops")
+	if err := os.MkdirAll(ops, 0o700); err != nil {
+		return err
+	}
+	for _, name := range []string{"collect-host-log-metrics.py", "collect-esxi-metrics.py"} {
+		if err := os.WriteFile(filepath.Join(ops, name), []byte("# Test collector reference; never executed.\n"), 0o600); err != nil {
+			return err
+		}
 	}
 	return writeJSON(file, sources)
 }
