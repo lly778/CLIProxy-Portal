@@ -230,7 +230,7 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 		if job.Mode == RebuildRestoreMode {
 			s.Message += "；备份设置和配套凭据已恢复，后续备份沿用本次恢复密钥"
 		} else {
-			s.Message += "；备份设置已恢复，GitHub 令牌和恢复密钥沿用当前配置"
+			s.Message += "；备份设置已恢复，GitHub 令牌沿用当前配置；已有恢复密钥保持不变，缺失时保留本次恢复使用的密钥"
 		}
 	}
 	s.PhaseStartedAt = s.FinishedAt

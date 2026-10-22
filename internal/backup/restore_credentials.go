@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 )
 
@@ -16,6 +17,44 @@ type restoredCredentials struct {
 
 type credentialRestoreController interface {
 	prepareCredentials(string, string, PortalRestorePolicy) (restoredCredentials, error)
+}
+
+type recoveryKeyRestoreController interface {
+	prepareRecoveryKey(string, string) (bool, error)
+}
+
+func (d *dockerPortal) prepareRecoveryKey(restored, dir string) (bool, error) {
+	return prepareMissingRecoveryKey(restored, dir, d.recoveryKeyFile)
+}
+
+// A database-only restore keeps the installation's existing key. On a fresh
+// installation, retain the key that actually decrypted this backup instead of
+// leaving imported backup settings without a downloadable recovery key.
+// Stage it as a regular transaction target so failure or interruption rolls
+// it back together with the database and settings, before the job is removed.
+func prepareMissingRecoveryKey(restored, dir, keyFile string) (bool, error) {
+	target := filepath.Join(dir, "recovery.key")
+	info, err := os.Lstat(target)
+	if err == nil {
+		if !info.Mode().IsRegular() {
+			return false, errors.New("当前恢复密钥必须是普通文件")
+		}
+		if _, err := ReadKey(target); err != nil {
+			return false, errors.New("当前恢复密钥无法读取或格式无效，不能自动更换")
+		}
+		return false, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return false, errors.New("当前恢复密钥无法检查")
+	}
+	key, err := ReadKey(keyFile)
+	if err != nil {
+		return false, errors.New("无法保留本次恢复使用的备份密钥")
+	}
+	if err := atomicWrite(filepath.Join(restored, "portal/backup/runtime/recovery.key"), []byte(hex.EncodeToString(key)+"\n"), 0o600); err != nil {
+		return false, errors.New("恢复密钥无法暂存")
+	}
+	return true, nil
 }
 
 func (d *dockerPortal) prepareCredentials(restored, dir string, p PortalRestorePolicy) (restoredCredentials, error) {

@@ -211,10 +211,15 @@ func replacePortalDatabase(ctx context.Context, dir, restored string, p PortalRe
 		if err != nil {
 			return "", err
 		}
-		targets = append(targets, credentialTargets(dir, credentials)...)
-		if err := validateAdditionalTargets(targets); err != nil {
+	} else if driver, ok := service.(recoveryKeyRestoreController); ok && selected == DatabaseRestoreMode {
+		credentials.Key, err = driver.prepareRecoveryKey(restored, dir)
+		if err != nil {
 			return "", err
 		}
+	}
+	targets = append(targets, credentialTargets(dir, credentials)...)
+	if err := validateAdditionalTargets(targets); err != nil {
+		return "", err
 	}
 	if err := restoreSpace(targets, restored, dir); err != nil {
 		return "", err
