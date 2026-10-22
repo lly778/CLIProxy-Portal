@@ -50,6 +50,9 @@ func credentialDirectory(t *testing.T) string {
 
 func runnerSources(t *testing.T, file string, sources []Source) error {
 	t.Helper()
+	if err := os.Chmod(filepath.Dir(file), 0o700); err != nil {
+		return err
+	}
 	policyFile := filepath.Join(filepath.Dir(file), "restore.json")
 	if err := writeJSON(policyFile, PortalRestorePolicy{Database: sources[0].Path, Container: "test-portal", HealthURL: "http://127.0.0.1:18080/healthz"}); err != nil {
 		return err
