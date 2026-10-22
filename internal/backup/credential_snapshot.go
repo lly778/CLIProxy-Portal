@@ -40,7 +40,7 @@ func (v credentialSnapshot) validate() error {
 		if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" ||
 			e.Username == "" || len(e.Username) > 1024 || e.Password == "" || len(e.Password) > 4096 ||
 			!regexp.MustCompile(`^[a-fA-F0-9]{64}$`).MatchString(strings.ReplaceAll(e.Fingerprint, ":", "")) {
-			return errors.New("备份 ESXi 凭据或证书指纹格式无效")
+			return errors.New("备份宿主机监测凭据或证书指纹格式无效")
 		}
 	}
 	if v.CloudflareToken != "" && (len(v.CloudflareToken) < 32 || len(v.CloudflareToken) > 16384 || !tunnelTokenValue.MatchString(v.CloudflareToken)) {
@@ -63,15 +63,15 @@ func snapshotCredentials(dir, work, repository, hostEtc string) (Source, error) 
 	esxiFile := filepath.Join(hostEtc, "cliproxy-esxi/esxi.json")
 	if _, err := os.Lstat(esxiFile); err == nil {
 		if trustedHostFile(esxiFile) != nil {
-			return Source{}, errors.New("ESXi 凭据文件权限不安全")
+			return Source{}, errors.New("宿主机监测凭据文件权限不安全")
 		}
 		var e esxiCredentials
 		if readDeploymentSnapshot(esxiFile, &e) != nil {
-			return Source{}, errors.New("ESXi 凭据文件无法读取")
+			return Source{}, errors.New("宿主机监测凭据文件无法读取")
 		}
 		v.ESXi = &e
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return Source{}, errors.New("ESXi 凭据文件无法检查")
+		return Source{}, errors.New("宿主机监测凭据文件无法检查")
 	}
 	tunnelFile := filepath.Join(hostEtc, "cliproxy-cloudflared/tunnel-token")
 	if _, err := os.Lstat(tunnelFile); err == nil {

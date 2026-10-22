@@ -21,7 +21,7 @@ type externalMetrics struct {
 func applyExternalMetrics(m Metrics, path string, now time.Time) (Metrics, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return m, errors.New("ESXi 宿主机监测数据不可用")
+		return m, errors.New("物理宿主机监测数据不可用")
 	}
 	var v externalMetrics
 	if len(b) > 16384 || json.Unmarshal(b, &v) != nil || v.Source != "esxi" ||
@@ -30,7 +30,7 @@ func applyExternalMetrics(m Metrics, path string, now time.Time) (Metrics, error
 		*v.CPUPercent < 0 || *v.CPUPercent > 100 || math.IsNaN(*v.CPUPercent) || math.IsInf(*v.CPUPercent, 0) ||
 		v.HostTotalMiB <= 0 || math.IsInf(v.HostTotalMiB, 0) || math.IsNaN(v.HostTotalMiB) ||
 		*v.HostUsedMiB < 0 || *v.HostUsedMiB > v.HostTotalMiB || math.IsNaN(*v.HostUsedMiB) {
-		return m, errors.New("ESXi 宿主机监测数据无效或已过期")
+		return m, errors.New("物理宿主机监测数据无效或已过期")
 	}
 	m.CPUPercent, m.CPUCount = *v.CPUPercent, v.CPUCount
 	m.HostUsedMiB, m.HostTotalMiB = v.HostUsedMiB, v.HostTotalMiB

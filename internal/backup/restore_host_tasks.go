@@ -134,7 +134,7 @@ func resumeHostRestoreWith(ctx context.Context, dir string, installer hostInstal
 	status.Message = "CPA、CPAMP 及数据已恢复，宿主机任务和配套凭据已还原；请重新登录"
 	var missing []string
 	if !plan.ESXi {
-		missing = append(missing, "备份未含 ESXi 凭据，保留当前监测配置")
+		missing = append(missing, "备份未含宿主机监测凭据，保留当前监测配置")
 	}
 	if !plan.Tunnel {
 		missing = append(missing, "备份未含隧道凭据，保留当前入口配置")
