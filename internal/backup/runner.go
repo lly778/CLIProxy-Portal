@@ -202,17 +202,18 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		if e != nil {
 			return e
 		}
-		sources = append(sources, settingsSource)
 		if e = g.CheckPrivate(ctx, c.Repository); e != nil {
 			return e
 		}
 		var images map[string]string
 		var policy PortalRestorePolicy
+		var snapshotPolicy *PortalRestorePolicy
 		if _, statErr := os.Lstat(policyFile); statErr == nil {
 			p, err := LoadRestorePolicy(policyFile)
 			if err != nil {
 				return err
 			}
+			snapshotPolicy = &p
 			if p.UpstreamContainer != "" || p.ManagerContainer != "" {
 				if err = p.validate(RebuildRestoreMode); err != nil {
 					return err
@@ -226,6 +227,19 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		} else if !os.IsNotExist(statErr) {
 			return errors.New("后台重建策略无法读取")
 		}
+		deploymentSources, e := snapshotDeploymentConfig(sources, snapshotPolicy, work)
+		if e != nil {
+			return e
+		}
+		if snapshotPolicy != nil {
+			hostSources, err := snapshotHostTasks(*snapshotPolicy, sources, work)
+			if err != nil {
+				return err
+			}
+			deploymentSources = append(deploymentSources, hostSources...)
+		}
+		sources = append(sources, settingsSource)
+		sources = append(sources, deploymentSources...)
 		manager, e := managerSources(sources, policy)
 		if e != nil {
 			return e
@@ -245,6 +259,11 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 		}
 		if e = os.Remove(settingsSource.Path); e != nil {
 			return errors.New("无法清理临时备份设置快照")
+		}
+		for _, source := range deploymentSources {
+			if e = os.Remove(source.Path); e != nil {
+				return errors.New("无法清理临时部署配置快照")
+			}
 		}
 		// Prove decryption, hashes and SQLite integrity before uploading.
 		finishVerify := stages.start("local_verify")

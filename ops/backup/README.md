@@ -10,6 +10,10 @@ GitHub 管理 API 同样在请求前关闭空闲连接，小型管理请求限 3
 
 备份包含门户 SQLite 和 CPAMP `usage.sqlite` 一致性快照、CPAMP `data.key`、CPA 的 `config.yaml` 和 `auths`，以及用于重新部署的 Compose、`.env`、管理密钥及门户应用密钥。来源由受保护的 `sources.json` 列出，限定允许的文件名称，不允许网页选择任意服务器文件。宿主机任务还会自动生成 `portal/backup/settings.json`，保存仓库地址、自动备份开关、星期、时分和保留份数，无需改动 sources.json。该快照不包含 GitHub 令牌、恢复密钥、密钥保存确认或安装标识。必须来源缺失、链接或读取失败时，不会发布成功备份。
 
+任务也会自动保存 `portal/backup/sources.json`；配置了后台恢复策略时同时保存 `portal/backup/restore.json`，记录实际容器名、Compose 服务名、项目、数据卷、数据库/密钥目标、镜像仓库、健康检查地址及已批准的模板 SHA256。无需在来源配置里手动添加这些生成文件。完整重建策略下，所有重建目标都必须作为对应路径的必需来源列入；不能遗漏、改为可选或指向另一文件。模板权限/批准摘要会在备份前检查，暂存后的模板及配置清单再次比对摘要；不一致时拒绝生成成功备份。两份清单与数据一起加密并进入文件 SHA256 清单，作为新服务器迁移资料，不自动覆盖目标主机当前的后台执行策略。旧备份缺少这些清单时仍可使用原有恢复方式。
+
+Linux 后台恢复策略已配置时，任务还会自动保存门户配套的 systemd 定义、定时器、覆盖配置和采集脚本，见下文“宿主机配套任务”。这些文件同样不需要手动加入 sources.json。
+
 `data.key` 用于解密 CPAMP 数据库保存的 CPA 连接凭据，不是登录管理密钥，也不是加密备份包的恢复密钥；它必须与 `usage.sqlite` 成套保留。宿主机核对 CPAMP 的卷、数据库及密钥路径后暂停 CPAMP，取完快照立即恢复并检查容器健康；压缩、加密、验证和上传在恢复运行之后执行。门户和 CPA 不因备份暂停。SQLite `VACUUM INTO` 包含已提交的 WAL 数据，因此备份包使用独立数据库快照，不另外复制在线 WAL/SHM。
 
 | 操作 | 覆盖内容 | 服务处理 |
@@ -73,9 +77,38 @@ sudo /root/cliproxy-portal/dist/portal-linux-amd64 backup restore \
   --output /root/portal-restore-review/files
 ```
 
-该命令只提取并校验，不启动包内服务。审查提取目录内 `upstream/compose.yaml` 和 `upstream/.env` 的挂载、端口、环境及权限后，将批准文件按实际路径安装，并用 `sha256sum /root/cpa-manager-plus/compose.yaml` 得到摘要，填写 `restore.json` 的 `compose_sha256`；服务名、容器名、项目、镜像仓库、健康地址、密钥目标及卷路径也必须全部填写。先建立目标父目录及批准的数据卷，再运行 `backup check-restore`，通过后从门户选择“重建并恢复”。提取目录包含明文密钥，完成后清理。
+该命令只提取并校验，不启动包内服务。新版备份的 `portal/backup/restore.json` 和 `portal/backup/sources.json` 已保存完整后台清单，同路径迁移无需重新逐项填写；先核对原路径、卷和容器名适用于目标服务器，再采用这两份清单。审查提取目录内 `upstream/compose.yaml` 和 `upstream/.env` 的挂载、端口、环境及权限后，将批准文件按实际路径安装；`restore.json` 已记录模板的批准 SHA256，`sha256sum` 可再次核对。旧备份没有后台清单时才需要按示例补齐字段和摘要。先建立目标父目录及批准的数据卷，再运行 `backup check-restore`，通过后从门户选择“重建并恢复”。提取目录包含明文密钥，完成后清理。
+
+下例仅用于已核对、采用默认同路径的新主机：
+
+```sh
+sudo install -d -m 700 /etc/cliproxy-portal-backup /root/cpa-manager-plus
+sudo install -m 600 /root/portal-restore-review/files/portal/backup/restore.json /etc/cliproxy-portal-backup/restore.json
+sudo install -m 600 /root/portal-restore-review/files/portal/backup/sources.json /etc/cliproxy-portal-backup/sources.json
+sudo install -m 600 /root/portal-restore-review/files/upstream/compose.yaml /root/cpa-manager-plus/compose.yaml
+sudo install -m 600 /root/portal-restore-review/files/upstream/.env /root/cpa-manager-plus/.env
+# 按清单建立其余目标父目录、批准的数据卷，并安装下文的宿主机任务。
+```
 
 备份提供原部署资料，目标服务器的管理员负责批准这些资料；程序不会把上传包中的 Compose 自动批准为可执行配置，也不会为缺失字段猜测服务器路径。
+
+### 宿主机配套任务
+
+Linux 新备份自动收集当前安装的以下门户任务及其 `.d/*.conf` 覆盖文件；文件不存在则不虚构已安装状态，存在但权限不安全或无法读取时备份失败：
+
+| 归档位置 | 内容 |
+| --- | --- |
+| `portal/host/systemd/cliproxy-portal-backup.service` / `.timer` | 宿主机备份与恢复后台、每分钟检查任务 |
+| `portal/host/systemd/cliproxy.slice` | 三个容器的资源统计父级 |
+| `portal/host/systemd/cliproxy-portal-log-metrics.service` / `.timer` | 日志大小采集任务 |
+| `portal/host/systemd/cliproxy-esxi-metrics.service` | 已安装时的 ESXi 指标采集任务 |
+| `portal/host/ops/collect-host-log-metrics.py` / `collect-esxi-metrics.py` | 对应已安装采集任务的脚本 |
+| `portal/host/systemd/cloudflared.service.example` | 检测到隧道服务定义时生成的不含令牌的 IPv4 服务模板；不复制原含令牌的命令行 |
+| `portal/backup/host-tasks.json` | 文件原目标路径、已启用状态及外部依赖提示 |
+
+提取并审核后，按 `host-tasks.json` 将 systemd 文件安装到目标主机的 `/etc/systemd/system/`、采集脚本安装到对应 `ops/` 路径；核对 `ExecStart`、`ReadWritePaths` 和原启用状态，执行 `systemctl daemon-reload`，再启用所需 timer、slice 及采集服务。在线数据库恢复和重建恢复不会自动安装或执行归档中的宿主机脚本与任务定义。未备份整套操作系统或 Docker/cloudflared 程序；它们仍需安装，Docker 镜像按已记录摘要重新下载。
+
+ESXi 服务只保存外部凭据文件路径，不包含 `/etc/cliproxy-esxi/esxi.json` 中的账号密码；新机需单独配置。隧道模板通过 `/etc/cliproxy-cloudflared/tunnel-token` 读取单独提供的凭据，安装时按实际 cloudflared 路径及隧道部署核对。其他门户任务若把令牌或密码直接写在 unit 的命令行/环境中，备份会拒绝并要求改用外部凭据文件；不会将这些秘密混入任务清单。
 
 安装策略后，新备份会自动从正在运行的两个上游镜像记录仓库摘要。未包含两项镜像摘要或 CPAMP usage.sqlite/data.key 的旧备份不能自动重建，仍可普通恢复。备份期间上游镜像摘要无法确认会失败；不要在凭据或模型配置变更途中备份，跨服务文件并非同一数据库事务。
 

@@ -56,8 +56,9 @@ func validateSources(sources []Source) error {
 	seen := map[string]bool{}
 	allowed[managerDatabaseName], allowed[managerDataKeyName] = true, true
 	allowed[backupSettingsName] = true
+	allowed[restorePolicySnapshotName], allowed[sourcesSnapshotName] = true, true
 	for _, source := range sources {
-		if seen[source.Name] || !allowed[source.Name] {
+		if seen[source.Name] || (!allowed[source.Name] && !allowedHostTaskName(source.Name)) {
 			return errors.New("备份来源不可重复或超出灾备范围")
 		}
 		seen[source.Name] = true
@@ -210,6 +211,9 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 				if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 					return errors.New("备份目录不能是符号链接")
 				}
+				if err := os.MkdirAll(filepath.Join(stage, filepath.FromSlash(source.Name)), 0o700); err != nil {
+					return err
+				}
 				err = filepath.WalkDir(source.Path, func(p string, d os.DirEntry, walkErr error) error {
 					if walkErr != nil {
 						return walkErr
@@ -253,6 +257,9 @@ func createArchive(ctx context.Context, sources []Source, dir string, key []byte
 		if err = validateManagerBackupIntegrity(ctx, stage, false, false); err != nil {
 			return "", m, err
 		}
+	}
+	if err = validateDeploymentSnapshot(stage); err != nil {
+		return "", m, err
 	}
 	finishSnapshot()
 	finishCompression := stages.start("compress_encrypt")
@@ -588,6 +595,9 @@ func Restore(ctx context.Context, file, keyFile, output string) error {
 		return settingsErr
 	}
 	if err = validateManagerBackupIntegrity(ctx, dir, false, false); err != nil {
+		return err
+	}
+	if err = validateDeploymentSnapshot(dir); err != nil {
 		return err
 	}
 	if info, err := os.Lstat(filepath.Join(dir, "upstream/cliproxyapi/auths")); err != nil || !info.IsDir() {

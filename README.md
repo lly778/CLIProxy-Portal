@@ -279,6 +279,8 @@ CPA 套件指门户、CPA、CPAMP 三个容器。内存统计使用共同 cgroup
 
 新服务器选择“重建并恢复”前，先运行 `portal backup check-restore --restore-config /etc/cliproxy-portal-backup/restore.json`，只读核对完整重建配置、已批准模板及 SHA256、目标目录和容器/数据卷配置。仅有门户数据库恢复配置时不能重建上游；缺失项会在解密前列出，按部署说明补齐后重试。
 
+新备份会自动包含后台恢复策略、备份来源清单，以及 Linux 门户配套的 systemd 任务、定时器、资源 slice 和采集脚本；完整重建配置和必需来源会在备份时核对。提取后可用于准备新服务器，避免逐项重填服务名、数据卷及模板 SHA256。任务原路径和启用状态见包内 `portal/backup/host-tasks.json`。Docker/cloudflared 程序及 GitHub、恢复密钥、ESXi、隧道等外部凭据仍需另行准备，详见部署说明。
+
 备份后台未连接等状态异常显示为备份面板内的黄色提示条，任务失败原因写在“备份状态”中；提交校验或管理员密码验证失败时显示错误页面。
 
 ### 备份设置

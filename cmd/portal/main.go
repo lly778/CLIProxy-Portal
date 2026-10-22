@@ -138,6 +138,12 @@ func backupCommand(args []string) error {
 			return err
 		}
 		fmt.Println("备份校验通过，已恢复到新目录；尚未启动任何服务。")
+		if _, err := os.Stat(filepath.Join(*output, "portal/backup/restore.json")); err == nil {
+			fmt.Println("后台恢复策略及来源清单已提取到 portal/backup/restore.json 和 sources.json；新服务器核对部署模板及目标路径后可采用，无需重新手填全部字段。")
+		}
+		if _, err := os.Stat(filepath.Join(*output, "portal/backup/host-tasks.json")); err == nil {
+			fmt.Println("宿主机配套任务和采集脚本已提取到 portal/host/；原路径与启用状态见 portal/backup/host-tasks.json，核对后另行安装。")
+		}
 		return nil
 	default:
 		return errors.New("未知备份命令")

@@ -52,6 +52,10 @@ func TestRunnerArchiveIncludesPortableBackupSettingsWithoutCredentials(t *testin
 			t.Fatal("nonportable credential or identity included", forbidden)
 		}
 	}
+	var savedSources []Source
+	if err := readJSON(filepath.Join(output, filepath.FromSlash(sourcesSnapshotName)), &savedSources); err != nil || len(savedSources) != len(sources) {
+		t.Fatal("runner did not include configured sources automatically", savedSources, err)
+	}
 }
 
 func archivedSettings(t *testing.T, restored string) {
