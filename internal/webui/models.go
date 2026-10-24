@@ -665,6 +665,7 @@ type AdminSystemView struct {
 	Messages     []NoticeView
 	AuditError   string
 	Entries      []AuditView
+	Shown        string
 	Total        string
 }
 

@@ -745,8 +745,17 @@ func (s *Store) Audit(ctx context.Context, e domain.AuditEvent) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO audit_logs(actor_user_id,actor_label,action,target_user_id,target_label,detail,ip,created_at_ms) VALUES(NULLIF(?,''),?,?,NULLIF(?,''),?,?,?,?)`, e.ActorUserID, e.ActorLabel, e.Action, e.TargetID, e.TargetLabel, e.Detail, e.IP, timeMS(e.CreatedAt))
 	return err
 }
+
+const visibleAuditFilter = `action NOT IN ('quota.refresh','resource.rejected','resource.observed')`
+
+func (s *Store) CountAudit(ctx context.Context) (int64, error) {
+	var total int64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM audit_logs WHERE `+visibleAuditFilter).Scan(&total)
+	return total, err
+}
+
 func (s *Store) ListAudit(ctx context.Context, limit, offset int) ([]domain.AuditEvent, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE action NOT IN ('quota.refresh','resource.rejected','resource.observed') ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,COALESCE(actor_user_id,''),actor_label,action,COALESCE(target_user_id,''),target_label,detail,ip,created_at_ms FROM audit_logs WHERE `+visibleAuditFilter+` ORDER BY id DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
 		return nil, err
 	}

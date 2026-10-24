@@ -164,6 +164,13 @@ func TestListAuditSkipsQuotaRefreshBeforeLimit(t *testing.T) {
 	if len(got) != 2 || got[0].Action != "user.approve" || got[1].Action != "key.issue" {
 		t.Fatalf("visible audit events = %#v", got)
 	}
+	shown, err := s.ListAudit(ctx, 1, 0)
+	if err != nil || len(shown) != 1 {
+		t.Fatal("audit page limit failed", err)
+	}
+	if total, err := s.CountAudit(ctx); err != nil || total != 2 {
+		t.Fatal("audit total included hidden events or was capped by the visible page", total, err)
+	}
 }
 
 func TestPasswordResetSingleUse(t *testing.T) {

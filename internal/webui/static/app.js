@@ -870,6 +870,18 @@
     });
   });
 
+  document.querySelectorAll("[data-usage-range-filter]").forEach(function (form) {
+    var select = form.querySelector("select[name='range']");
+    if (!select) return;
+    var dateFields = form.querySelectorAll("[data-usage-custom-date]");
+    function syncCustomDates() {
+      var custom = select.value === "custom";
+      dateFields.forEach(function (field) { field.hidden = !custom; });
+    }
+    select.addEventListener("change", syncCustomDates);
+    syncCustomDates();
+  });
+
   document.querySelectorAll("[data-user-sort]").forEach(function (select) {
     select.addEventListener("change", function () {
       if (!select.form) return;

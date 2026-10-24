@@ -1182,7 +1182,17 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 		s.Logger.Error("list audit log", "error", auditErr)
 	} else {
 		v.Entries = s.auditViews(r.Context(), items)
-		v.Total = strconv.Itoa(len(items))
+		v.Shown = strconv.Itoa(len(v.Entries))
+		total := int64(len(items))
+		if len(items) == 100 {
+			var countErr error
+			total, countErr = s.Store.CountAudit(r.Context())
+			if countErr != nil {
+				v.AuditError = "系统日志总数暂时不可用"
+				s.Logger.Error("count audit log", "error", countErr)
+			}
+		}
+		v.Total = compactNumber(total)
 	}
 	_ = s.UI.Render(w, webui.PageAdminSystem, v)
 }
