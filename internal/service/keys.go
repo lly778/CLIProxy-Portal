@@ -30,6 +30,9 @@ type Keys struct {
 	QuotaCacheTTL      time.Duration
 	cacheMu            sync.Mutex
 	cache              map[string]analyticsCache
+	analyticsFlights   map[string]*analyticsFlight
+	actualModelMu      sync.Mutex
+	actualModels       map[string]*actualModelSnapshot
 	quota              quotaPoolCache
 	refreshMu          sync.Mutex
 	refresh            QuotaRefreshStatus
@@ -669,23 +672,23 @@ func (k *Keys) upsertAlias(ctx context.Context, hash, alias string) error {
 }
 
 func (k *Keys) Usage(ctx context.Context, userID string, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
-	return k.usage(ctx, userID, from, to, events, false)
+	return k.usage(ctx, userID, from, to, events, false, false)
+}
+
+// UserOverviewUsage reads only the summary, status timeline and small request
+// preview displayed on the account overview. It never walks model history.
+func (k *Keys) UserOverviewUsage(ctx context.Context, userID string, from, to time.Time) (cpamp.AnalyticsResponse, error) {
+	return k.usage(ctx, userID, from, to, 10, false, true)
 }
 
 // RefreshUsage bypasses the portal cache once and replaces its entry with the
 // latest CPAMP response. Subsequent ordinary page loads still use CacheTTL.
 func (k *Keys) RefreshUsage(ctx context.Context, userID string, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
-	return k.usage(ctx, userID, from, to, events, true)
+	return k.usage(ctx, userID, from, to, events, true, false)
 }
 
-func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, events int, refresh bool) (cpamp.AnalyticsResponse, error) {
+func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, events int, refresh, overview bool) (cpamp.AnalyticsResponse, error) {
 	granularity := usageGranularity(from, to)
-	cacheKey := fmt.Sprintf("user:%s:%d:%d:%d:%s", userID, from.Unix()/60, to.Unix()/60, events, granularity)
-	if !refresh {
-		if value, ok := k.cached(cacheKey); ok {
-			return value, nil
-		}
-	}
 	hashes, err := k.hashesForUser(ctx, userID)
 	if err != nil {
 		return cpamp.AnalyticsResponse{}, err
@@ -693,15 +696,26 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	if len(hashes) == 0 {
 		return cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}}, nil
 	}
-	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, Granularity: granularity}}
-	req.Include.EventsPage = &cpamp.EventsPage{Limit: actualModelPageSize}
-	value, err := k.CPAMP.Analytics(ctx, req)
-	if err == nil {
-		value = k.actualModelUsage(ctx, req, value, events)
-		value = usageStatusFromTimeline(value)
-		k.putCache(cacheKey, value)
+	profile, pageSize := "usage", actualModelPageSize
+	if overview {
+		profile, pageSize = "overview", events
 	}
-	return value, err
+	cacheKey := fmt.Sprintf("user:%s:%s:%s:%s", userID, security.SHA256(strings.Join(hashes, ",")), profile, analyticsRangeKey(k.Now(), from, to))
+	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
+		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, Granularity: granularity, EventsPage: &cpamp.EventsPage{Limit: pageSize}}}
+		if !overview {
+			req.Include.EventsPage.Limit = k.actualModelInitialPageSize(req, refresh)
+		}
+		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		if err != nil {
+			return cpamp.AnalyticsResponse{}, err
+		}
+		if !overview {
+			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
+		}
+		return usageStatusFromTimeline(value), nil
+	})
+	return analyticsPreview(value, events), err
 }
 
 // usageStatusFromTimeline avoids CPAMP's filtered daily-rollup status counts.
@@ -735,24 +749,45 @@ func usageStatusFromTimeline(value cpamp.AnalyticsResponse) cpamp.AnalyticsRespo
 }
 
 func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
-	// Minute-level cache reuse must never cross the hourly/daily boundary.
-	// Ranges a few nanoseconds apart can select different upstream aggregates.
+	return k.globalUsage(ctx, from, to, events, false, false)
+}
+
+func (k *Keys) RefreshGlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
+	return k.globalUsage(ctx, from, to, events, false, true)
+}
+
+// GlobalOverviewUsage reads ranking totals without model history or a timeline.
+// The overview requests its latest eight events independently.
+func (k *Keys) GlobalOverviewUsage(ctx context.Context, from, to time.Time) (cpamp.AnalyticsResponse, error) {
+	return k.globalUsage(ctx, from, to, 0, true, false)
+}
+
+func (k *Keys) globalUsage(ctx context.Context, from, to time.Time, events int, overview, refresh bool) (cpamp.AnalyticsResponse, error) {
 	granularity := usageGranularity(from, to)
-	cacheKey := fmt.Sprintf("global:%d:%d:%d:%s", from.Unix()/60, to.Unix()/60, events, granularity)
-	if value, ok := k.cached(cacheKey); ok {
-		return value, nil
+	profile := "usage"
+	if overview {
+		profile = "overview"
 	}
-	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, ModelStats: true, APIKeyStats: true, Granularity: granularity}}
-	req.Include.EventsPage = &cpamp.EventsPage{Limit: actualModelPageSize}
-	value, err := k.CPAMP.Analytics(ctx, req)
-	if err == nil {
-		value = k.actualModelUsage(ctx, req, value, events)
+	cacheKey := fmt.Sprintf("global:%s:%s", profile, analyticsRangeKey(k.Now(), from, to))
+	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
+		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, APIKeyStats: true, Granularity: granularity}}
+		if !overview {
+			req.Include.Timeline = true
+			req.Include.EventsPage = &cpamp.EventsPage{Limit: k.actualModelInitialPageSize(req, refresh)}
+		}
+		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		if err != nil {
+			return cpamp.AnalyticsResponse{}, err
+		}
+		if !overview {
+			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
+		}
 		// Preserve the request-status summary used by CPAMP's timeline and
 		// request logs. Per-key aggregates are only for usage rankings; their
 		// success/failure counts may disagree even when total calls match.
-		k.putCache(cacheKey, value)
-	}
-	return value, err
+		return value, nil
+	})
+	return analyticsPreview(value, events), err
 }
 
 // GlobalRequests returns the latest sanitized model-request metadata across
@@ -776,28 +811,30 @@ func (k *Keys) globalRequests(ctx context.Context, limit int, refresh bool) (cpa
 	}
 	now := k.Now()
 	from := now.AddDate(-10, 0, 0)
-	cacheKey := fmt.Sprintf("global-requests:%d:%d", now.Unix()/60, limit)
-	if !refresh {
-		if value, ok := k.cached(cacheKey); ok && value.Events != nil {
-			return *value.Events, nil
+	cacheKey := fmt.Sprintf("global-requests:%d", limit)
+	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
+		req := cpamp.AnalyticsRequest{
+			FromMS: from.UnixMilli(), ToMS: now.UnixMilli(), NowMS: now.UnixMilli(), TimeZone: "Asia/Shanghai",
+			Include: cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: limit}},
 		}
-	}
-	req := cpamp.AnalyticsRequest{
-		FromMS: from.UnixMilli(), ToMS: now.UnixMilli(), NowMS: now.UnixMilli(), TimeZone: "Asia/Shanghai",
-		Include: cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: limit}},
-	}
-	value, err := k.CPAMP.Analytics(ctx, req)
+		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		if err != nil {
+			return cpamp.AnalyticsResponse{}, err
+		}
+		if value.Events == nil {
+			return cpamp.AnalyticsResponse{}, errors.New("cpamp global request events missing")
+		}
+		page := *value.Events
+		page.Items = append([]cpamp.EventRow(nil), page.Items...)
+		sort.SliceStable(page.Items, func(i, j int) bool { return page.Items[i].TimestampMS > page.Items[j].TimestampMS })
+		if len(page.Items) > limit {
+			page.Items = page.Items[:limit]
+		}
+		return cpamp.AnalyticsResponse{Events: &page}, nil
+	})
 	if err != nil {
 		return cpamp.EventsResponse{}, err
 	}
-	if value.Events == nil {
-		return cpamp.EventsResponse{Items: []cpamp.EventRow{}}, nil
-	}
-	sort.SliceStable(value.Events.Items, func(i, j int) bool { return value.Events.Items[i].TimestampMS > value.Events.Items[j].TimestampMS })
-	if len(value.Events.Items) > limit {
-		value.Events.Items = value.Events.Items[:limit]
-	}
-	k.putCache(cacheKey, value)
 	return *value.Events, nil
 }
 
@@ -821,10 +858,7 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 		return []cpamp.APIKeyUsageStat{}, nil
 	}
 	sort.Strings(normalized)
-	cacheKey := fmt.Sprintf("key-stats:%s:%d:%d", security.SHA256(strings.Join(normalized, ",")), from.Unix()/60, to.Unix()/60)
-	if value, ok := k.cached(cacheKey); ok {
-		return value.APIKeyStats, nil
-	}
+	cacheKey := fmt.Sprintf("key-stats:%s:%s", security.SHA256(strings.Join(normalized, ",")), analyticsRangeKey(k.Now(), from, to))
 	req := cpamp.AnalyticsRequest{
 		FromMS:   from.UnixMilli(),
 		ToMS:     to.UnixMilli(),
@@ -833,11 +867,12 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 		Filters:  cpamp.AnalyticsFilters{APIKeyHashes: normalized},
 		Include:  cpamp.AnalyticsInclude{APIKeyStats: true},
 	}
-	value, err := k.CPAMP.Analytics(ctx, req)
+	value, err := k.loadAnalytics(ctx, cacheKey, false, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
+		return k.CPAMP.Analytics(fetchCtx, req)
+	})
 	if err != nil {
 		return nil, err
 	}
-	k.putCache(cacheKey, value)
 	return value.APIKeyStats, nil
 }
 
@@ -1801,21 +1836,6 @@ func quotaRemaining(window cpamp.CodexQuotaWindow) float64 {
 	return value
 }
 
-func (k *Keys) cached(key string) (cpamp.AnalyticsResponse, bool) {
-	if k.CacheTTL <= 0 {
-		return cpamp.AnalyticsResponse{}, false
-	}
-	k.cacheMu.Lock()
-	defer k.cacheMu.Unlock()
-	v, ok := k.cache[key]
-	if !ok || k.Now().After(v.expiresAt) {
-		if ok {
-			delete(k.cache, key)
-		}
-		return cpamp.AnalyticsResponse{}, false
-	}
-	return v.value, true
-}
 func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 	if k.CacheTTL <= 0 {
 		return
@@ -1828,7 +1848,13 @@ func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 	if len(k.cache) > 500 {
 		k.cache = make(map[string]analyticsCache)
 	}
-	k.cache[key] = analyticsCache{value: value, expiresAt: k.Now().Add(k.CacheTTL)}
+	expiresAt := k.Now().Add(k.CacheTTL)
+	if value.ModelStatsReconcileAtMS > 0 {
+		if due := time.UnixMilli(value.ModelStatsReconcileAtMS); due.Before(expiresAt) {
+			expiresAt = due
+		}
+	}
+	k.cache[key] = analyticsCache{value: value, expiresAt: expiresAt}
 }
 
 func (k *Keys) cachedQuota() (UpstreamQuotaPool, bool) {

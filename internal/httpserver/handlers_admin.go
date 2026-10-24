@@ -25,7 +25,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
-	a, usageErr := s.Keys.GlobalUsage(r.Context(), from, to, 0)
+	a, usageErr := s.Keys.GlobalOverviewUsage(r.Context(), from, to)
 	summary, _, _, _ := s.usageViews(a, from, to)
 	statuses := []struct{ label, status string }{{"待审批", string(domain.StatusPending)}, {"已批准", string(domain.StatusApproved)}, {"已停用", string(domain.StatusSuspended)}, {"全部用户", ""}}
 	v := webui.AdminDashboardView{LayoutView: s.layout(u, currentToken(r), "管理概览", "admin-dashboard"), Usage: summary}
@@ -120,9 +120,23 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		}
 		targetView := s.userView(targetUser)
 		target = &targetView
-		a, err = s.Keys.Usage(r.Context(), userID, from, to, 0)
+		if r.URL.Query().Get("refresh") == "1" {
+			a, err = s.Keys.RefreshUsage(r.Context(), userID, from, to, 0)
+		} else {
+			a, err = s.Keys.Usage(r.Context(), userID, from, to, 0)
+		}
 	} else {
-		a, err = s.Keys.GlobalUsage(r.Context(), from, to, 0)
+		if r.URL.Query().Get("refresh") == "1" {
+			a, err = s.Keys.RefreshGlobalUsage(r.Context(), from, to, 0)
+		} else {
+			a, err = s.Keys.GlobalUsage(r.Context(), from, to, 0)
+		}
+	}
+	if r.URL.Query().Get("refresh") == "1" && err == nil {
+		query := r.URL.Query()
+		query.Del("refresh")
+		http.Redirect(w, r, r.URL.Path+"?"+query.Encode(), http.StatusSeeOther)
+		return
 	}
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, userID)

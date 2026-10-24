@@ -389,18 +389,21 @@ type EventsPage struct {
 type AnalyticsResponse struct {
 	// ModelStatsNote is a portal-only warning when complete actual-model
 	// aggregates cannot be derived. Never fall back to requested-model totals.
-	ModelStatsNote string                     `json:"-"`
-	Coverage       *AnalyticsCoverage         `json:"coverage,omitempty"`
-	GeneratedAtMS  int64                      `json:"generated_at_ms"`
-	Granularity    string                     `json:"granularity"`
-	Summary        *UsageSummary              `json:"summary,omitempty"`
-	Timeline       []UsageTimelinePoint       `json:"timeline,omitempty"`
-	ModelStats     []ModelUsageStat           `json:"model_stats,omitempty"`
-	ModelShare     []ModelShareRow            `json:"model_share,omitempty"`
-	APIKeyStats    []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
-	APIKeyTimeline []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
-	RecentFailures []RecentFailure            `json:"recent_failures,omitempty"`
-	Events         *EventsResponse            `json:"events,omitempty"`
+	ModelStatsNote string `json:"-"`
+	// ModelStatsReconcileAtMS bounds portal caching of incremental statistics.
+	// It is never read from or sent to CPAMP.
+	ModelStatsReconcileAtMS int64                      `json:"-"`
+	Coverage                *AnalyticsCoverage         `json:"coverage,omitempty"`
+	GeneratedAtMS           int64                      `json:"generated_at_ms"`
+	Granularity             string                     `json:"granularity"`
+	Summary                 *UsageSummary              `json:"summary,omitempty"`
+	Timeline                []UsageTimelinePoint       `json:"timeline,omitempty"`
+	ModelStats              []ModelUsageStat           `json:"model_stats,omitempty"`
+	ModelShare              []ModelShareRow            `json:"model_share,omitempty"`
+	APIKeyStats             []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
+	APIKeyTimeline          []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
+	RecentFailures          []RecentFailure            `json:"recent_failures,omitempty"`
+	Events                  *EventsResponse            `json:"events,omitempty"`
 }
 
 type AnalyticsCoverage struct {

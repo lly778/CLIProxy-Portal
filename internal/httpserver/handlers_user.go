@@ -33,7 +33,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
-	analytics, err := s.Keys.Usage(r.Context(), u.ID, from, to, 10)
+	analytics, err := s.Keys.UserOverviewUsage(r.Context(), u.ID, from, to)
 	analytics = s.usageWithGatewayFailures(r.Context(), analytics, from, to, u.ID, 10)
 	summary, _, _, requests := s.usageViews(analytics, from, to)
 	v := webui.DashboardView{LayoutView: s.layout(u, currentToken(r), "账户概览", "dashboard"), Greeting: u.Name + "，你好", StatusCard: s.statusCard(u), Key: s.keyView(u), Usage: summary, RecentUsage: requests}
@@ -222,7 +222,19 @@ func (s *Server) renderKey(w http.ResponseWriter, r *http.Request, errMsg, secre
 func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	from, to, rangeName := s.usageRange(r)
-	a, err := s.Keys.Usage(r.Context(), u.ID, from, to, 0)
+	var a cpamp.AnalyticsResponse
+	var err error
+	if r.URL.Query().Get("refresh") == "1" {
+		a, err = s.Keys.RefreshUsage(r.Context(), u.ID, from, to, 0)
+		if err == nil {
+			query := r.URL.Query()
+			query.Del("refresh")
+			http.Redirect(w, r, r.URL.Path+"?"+query.Encode(), http.StatusSeeOther)
+			return
+		}
+	} else {
+		a, err = s.Keys.Usage(r.Context(), u.ID, from, to, 0)
+	}
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, u.ID)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)

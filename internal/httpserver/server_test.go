@@ -155,7 +155,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 				t.Errorf("decode analytics: %v", err)
 			}
 			response := map[string]any{"generated_at_ms": time.Now().UnixMilli()}
-			if req.Include.Summary && req.Include.Timeline && req.Include.ModelStats {
+			if req.Include.Summary && req.Include.Timeline {
 				lastUsageAnalytics = req
 			}
 			if req.Include.Timeline {

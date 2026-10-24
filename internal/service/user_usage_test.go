@@ -35,7 +35,7 @@ func TestUserUsageStatusUsesCompleteTimelineAndCachesCorrection(t *testing.T) {
 	}}
 	keys := NewKeys(st, fake)
 	for _, refresh := range []bool{false, false, true, false} {
-		got, err := keys.usage(t.Context(), u.ID, from, from.Add(7*24*time.Hour), 100, refresh)
+		got, err := keys.usage(t.Context(), u.ID, from, from.Add(7*24*time.Hour), 100, refresh, false)
 		if err != nil {
 			t.Fatal(err)
 		}
