@@ -599,6 +599,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .count-pill { padding: 5px 11px; color: var(--warning); background: var(--warning-bg); border-radius: 99px; font-size: 12px; font-weight: 650; }
 .upstream-card { padding-bottom: 10px; container-type: inline-size; }
 .upstream-credentials-head { flex-wrap: wrap; }
+.upstream-header-actions { flex: 0 0 auto; flex-wrap: nowrap; }
 .upstream-channel-form { flex: 0 0 auto; align-items: center; flex-wrap: wrap; gap: 10px; }
 .upstream-channel-form label { margin: 0; }
 .upstream-channel-form select { min-width: 155px; }
@@ -947,6 +948,7 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .main { padding: 27px 16px 48px; margin-left: 0; }
   .page-head { display: block; margin-bottom: 22px; }
   .page-head > .button, .page-head > .button-row, .page-head > form, .page-head > .muted { margin-top: 15px; }
+  .page-head > .upstream-header-actions { flex-wrap: wrap; margin-top: 15px; }
   .grid-2, .grid-3, .model-grid, .approval-grid, .health-grid { grid-template-columns: 1fr; }
   .model-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
   .dashboard-summary-grid, #storage .system-health-grid, #health .system-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
