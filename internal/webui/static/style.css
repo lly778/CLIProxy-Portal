@@ -961,6 +961,9 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .detail-grid, .sync-panel .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-inline, .filter-bar { align-items: stretch; }
   .filter-inline > *, .filter-bar > * { flex: 1 1 auto; width: 100% !important; }
+  .upstream-header-actions .upstream-channel-form label,
+  .upstream-header-actions .upstream-channel-form select,
+  .upstream-header-actions .button { width: 100%; min-width: 0; }
   .filter-inline > span, .filter-bar > span { flex: 0 0 auto; width: auto !important; align-self: center; }
   .request-log-table table { min-width: 1120px; table-layout: auto; }
   .request-log-table th { width: auto !important; }
