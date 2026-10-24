@@ -459,7 +459,7 @@ input:focus, select:focus, textarea:focus { border-color: #87a2eb; box-shadow: 0
 .filter-inline, .filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .filter-inline select { width: auto; min-width: 110px; }
 .filter-inline input[type="date"] { width: auto; }
-.usage-page-head > div { min-width: 0; }
+.usage-page-head > div, .upstream-page-head > div { min-width: 0; }
 .usage-page-head .filter-inline { flex: 0 0 auto; flex-wrap: nowrap; }
 .usage-page-head .filter-inline select { width: 125px; }
 .usage-page-head .filter-inline input[type="date"] { width: 140px; }
@@ -830,8 +830,8 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 @media (max-width: 1080px) {
   .quota-pool-columns .quota-pool-meta { gap: 8px; }
   .quota-pool-columns .quota-pool-meta dd { font-size: 11px; }
-  .usage-page-head { display: block; }
-  .usage-page-head .filter-inline { margin-top: 15px; }
+  .usage-page-head, .upstream-page-head { display: block; }
+  .usage-page-head .filter-inline, .upstream-page-head > .upstream-header-actions { margin-top: 15px; }
   .sidebar { width: 196px; }
   .main { margin-left: 196px; }
   .grid-3, .model-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
