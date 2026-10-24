@@ -22,12 +22,15 @@ import (
 
 type upstreamChannelAPI struct {
 	cpamp.API
-	antiDisabled bool
-	configCalls  int
-	configData   []byte
-	excluded     map[string][]string
-	aliases      map[string][]cpamp.OAuthModelAlias
+	antiDisabled       bool
+	configCalls        int
+	cacheInvalidations int
+	configData         []byte
+	excluded           map[string][]string
+	aliases            map[string][]cpamp.OAuthModelAlias
 }
+
+func (f *upstreamChannelAPI) InvalidateUpstreamReadCache() { f.cacheInvalidations++ }
 
 func (f *upstreamChannelAPI) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {
 	return []cpamp.AuthFile{{Name: "codex.json", Provider: "codex", AccountSnapshot: "codex@example.com"}, {Name: "anti.json", Provider: "antigravity", AccountSnapshot: "anti@example.com", Disabled: f.antiDisabled}}, nil
@@ -158,6 +161,22 @@ func TestAdminUpstreamChannelFormsAndIsolation(t *testing.T) {
 		t.Fatal("Antigravity reasoning settings were not read")
 	}
 	csrf = extract(t, page, `name="csrf_token" value="([^"]+)"`)
+	if !strings.Contains(page, `action="/admin/upstreams/refresh"`) || !strings.Contains(page, "刷新配置") {
+		t.Fatal("upstream configuration refresh control missing")
+	}
+	postForm(t, client, portal.URL+"/admin/upstreams/refresh", url.Values{"channel": {"antigravity"}}, http.StatusForbidden)
+	if fake.cacheInvalidations != 0 {
+		t.Fatal("configuration cache invalidated without CSRF authorization")
+	}
+	refreshResponse, err := client.PostForm(portal.URL+"/admin/upstreams/refresh", url.Values{"channel": {"antigravity"}, "csrf_token": {csrf}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshResponse.Body.Close()
+	refreshLocation, err := url.Parse(refreshResponse.Header.Get("Location"))
+	if err != nil || refreshResponse.StatusCode != http.StatusSeeOther || refreshLocation.Query().Get("channel") != "antigravity" || fake.cacheInvalidations != 1 {
+		t.Fatal("configuration refresh failed to invalidate or preserve the selected channel")
+	}
 	post := func(path string, values url.Values) {
 		t.Helper()
 		values.Set("channel", "antigravity")

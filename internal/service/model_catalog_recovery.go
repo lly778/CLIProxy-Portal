@@ -23,7 +23,10 @@ func (k *Keys) RestoreSchedulableModels(ctx context.Context, models []cpamp.Mode
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	files, err := client.ListAuthFiles(ctx)
+	// A page may share cached alias/catalog configuration. The decision to
+	// restore a credential's models still requires its live disabled state,
+	// availability and cooldowns; registration reads remain uncached as well.
+	files, err := client.ListAuthFiles(cpamp.WithFreshUpstreamReads(ctx))
 	if err != nil {
 		return models
 	}

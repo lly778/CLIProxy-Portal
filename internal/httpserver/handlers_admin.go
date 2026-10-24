@@ -26,6 +26,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
 	a, usageErr := s.Keys.GlobalOverviewUsage(r.Context(), from, to)
+	from, to = usageWindow(a, from, to)
 	summary, _, _, _ := s.usageViews(a, from, to)
 	statuses := []struct{ label, status string }{{"待审批", string(domain.StatusPending)}, {"已批准", string(domain.StatusApproved)}, {"已停用", string(domain.StatusSuspended)}, {"全部用户", ""}}
 	v := webui.AdminDashboardView{LayoutView: s.layout(u, currentToken(r), "管理概览", "admin-dashboard"), Usage: summary}
@@ -87,7 +88,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	v.Resources = s.resourceView(r.Context())
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(cpamp.WithUpstreamReadCache(r.Context()), 5*time.Second)
 	defer cancel()
 	upstreams, upstreamErr := s.Keys.EnabledUpstreams(ctx)
 	if upstreamErr != nil {
@@ -138,15 +139,18 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, r.URL.Path+"?"+query.Encode(), http.StatusSeeOther)
 		return
 	}
+	from, to = usageWindow(a, from, to)
 	summary, daily, models, requests := s.usageViews(a, from, to)
-	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, userID)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, name)
 	if name == "24h" {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
-	v.HealthTrend = s.requestHealthTrend(r.Context(), daily, from, to, userID)
+	v.HealthTrend = timingHealthTrend(daily, a.TimingStats)
+	if a.TimingStats != nil && a.TimingStats.Note != "" {
+		v.Error = a.TimingStats.Note
+	}
 	v.ModelStatsNote = a.ModelStatsNote
 	if err != nil {
 		v.Error = "全局用量暂时不可用"
@@ -390,6 +394,7 @@ func (s *Server) renderAdminUser(w http.ResponseWriter, r *http.Request, target 
 	to := time.Now().UTC()
 	from := to.AddDate(0, 0, -7)
 	a, _ := s.Keys.Usage(r.Context(), target.ID, from, to, 100)
+	from, to = usageWindow(a, from, to)
 	a = s.usageWithGatewayFailures(r.Context(), a, from, to, target.ID, 100)
 	summary, daily, models, requests := s.usageViews(a, from, to)
 	v := webui.AdminUserDetailView{LayoutView: s.layout(actor, currentToken(r), target.Name, "admin-users"), Target: s.userView(target), Key: s.keyView(target), StatusCard: s.adminStatusCard(target), Usage: summary, Daily: daily, Trend: usageTrend(daily), ByModel: models, Requests: requests, CanApprove: target.Status == domain.StatusPending || target.Status == domain.StatusRejected, CanReject: target.Status == domain.StatusPending, CanSuspend: target.Status == domain.StatusApproved, CanUnsuspend: target.Status == domain.StatusSuspended, CanDelete: target.ID != actor.ID, CanReset: target.Status != domain.StatusDeleted, CanChangePhone: target.Status != domain.StatusDeleted, DeleteWarning: "将先撤销 API Key，再永久匿名化账号。此操作不可恢复。"}
@@ -629,6 +634,7 @@ func (s *Server) adminRegistration(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(cpamp.WithUpstreamReadCache(r.Context()))
 	channel, ok := s.upstreamChannel(w, r)
 	if !ok {
 		return
@@ -672,6 +678,20 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) adminUpstreamRefresh(w http.ResponseWriter, r *http.Request) {
+	if !s.verifyCSRF(r) {
+		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
+		return
+	}
+	channel, err := service.NormalizeOAuthChannel(r.FormValue("channel"))
+	if err != nil {
+		s.errorPage(w, r, http.StatusBadRequest, "OAuth 渠道无效", nil)
+		return
+	}
+	s.Keys.InvalidateUpstreamReadCache()
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "已请求刷新上游配置"), http.StatusSeeOther)
 }
 
 func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {

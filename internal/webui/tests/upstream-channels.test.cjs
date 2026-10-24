@@ -27,11 +27,12 @@ function setup(initial = 'codex') {
   };
   const status = { textContent: '' };
   const preset = { name: '日常', returnFields: [{ value: initial }, { value: initial }, { value: initial }] };
+  const refreshChannel = { value: initial };
   let channel = initial;
   const page = {
     getAttribute: () => channel, setAttribute: (_, value) => { channel = value; },
     querySelector: s => s === '.upstream-channel-form' ? form : status,
-    querySelectorAll: selector => selector.includes('data-global-oauth-presets') ? preset.returnFields : panels,
+    querySelectorAll: selector => selector.includes('data-upstream-config-refresh') ? [...preset.returnFields, refreshChannel] : selector.includes('data-global-oauth-presets') ? preset.returnFields : panels,
   };
   // Switching must work offline, without fetch, DOMParser, or confirmation.
   vm.runInNewContext(script, {
@@ -47,7 +48,7 @@ function setup(initial = 'codex') {
     },
   });
   return {
-    panels, page, select, button, status, history, location, preset,
+    panels, page, select, button, status, history, location, preset, refreshChannel,
     choose(value) { select.value = value; events.change(); },
     submit(value) { select.value = value; let prevented = false; events.submit({ preventDefault() { prevented = true; } }); return prevented; },
     back(url) { location.href = url; windowEvents.popstate(); },
@@ -118,4 +119,12 @@ test('one shared preset name survives switching and only return fields change', 
   f.back('https://portal.test/admin/upstreams?channel=codex');
   assert.deepEqual(f.preset.returnFields.map(input => input.value), ['codex', 'codex', 'codex']);
   assert.equal(f.preset.name, '全渠道配置');
+});
+
+test('configuration refresh returns to the currently selected channel after switching and history navigation', () => {
+  const f = setup();
+  f.choose('antigravity');
+  assert.equal(f.refreshChannel.value, 'antigravity');
+  f.back('https://portal.test/admin/upstreams?channel=codex');
+  assert.equal(f.refreshChannel.value, 'codex');
 });

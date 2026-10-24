@@ -87,7 +87,7 @@ func (k *Keys) loadAnalytics(ctx context.Context, key string, refresh bool, fetc
 					value = cpamp.AnalyticsResponse{}
 					err = errors.New("analytics query failed")
 				}
-				if err == nil {
+				if err == nil && (value.TimingStats == nil || value.TimingStats.Note == "") {
 					k.putCache(key, value)
 				}
 				k.cacheMu.Lock()

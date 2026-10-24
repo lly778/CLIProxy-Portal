@@ -107,12 +107,20 @@ func (s *Server) adminStatusCard(u domain.User) webui.StatusCardView {
 	return v
 }
 
+func usageWindow(a cpamp.AnalyticsResponse, from, to time.Time) (time.Time, time.Time) {
+	if a.WindowFromMS > 0 && a.WindowToMS > a.WindowFromMS {
+		return time.UnixMilli(a.WindowFromMS), time.UnixMilli(a.WindowToMS)
+	}
+	return from, to
+}
+
 func (s *Server) usageViews(a cpamp.AnalyticsResponse, from, to time.Time) (webui.UsageSummaryView, []webui.UsagePointView, []webui.ModelUsageView, []webui.RequestView) {
+	from, to = usageWindow(a, from, to)
 	var summary webui.UsageSummaryView
 	if a.Summary != nil {
 		x := a.Summary
 		summary = webui.UsageSummaryView{Requests: compactNumber(x.TotalCalls), Successes: compactNumber(x.SuccessCalls), Failures: compactNumber(x.FailureCalls), InputTokens: compactNumber(x.InputTokens), OutputTokens: compactNumber(x.OutputTokens), CacheTokens: compactNumber(x.CachedTokens + x.CacheReadTokens + x.CacheCreationTokens), ReasoningTokens: compactNumber(x.ReasoningTokens), TotalTokens: compactNumber(x.TotalTokens), WindowLabel: from.In(s.Cfg.TimeZone).Format("01-02") + " 至 " + to.In(s.Cfg.TimeZone).Format("01-02")}
-		summary.AverageDuration = "—"
+		summary.AverageDuration = timingAverage(a.TimingStats)
 		summary.Latency = "—"
 		if x.AverageLatencyMS != nil {
 			summary.Latency = fmt.Sprintf("%.0f ms", *x.AverageLatencyMS)

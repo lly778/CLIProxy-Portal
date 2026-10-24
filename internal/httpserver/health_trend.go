@@ -1,30 +1,25 @@
 package httpserver
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"strings"
-	"time"
 
+	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
 )
 
-func (s *Server) requestHealthTrend(ctx context.Context, points []webui.UsagePointView, from, to time.Time, userID string) webui.HealthTrendView {
-	if len(points) == 0 {
-		return webui.HealthTrendView{}
+func timingHealthTrend(points []webui.UsagePointView, stats *domain.UsageTimings) webui.HealthTrendView {
+	if stats == nil {
+		return healthTrend(points, nil)
 	}
-	var totals []store.GatewayTimingTotal
-	var err error
-	if points[0].BucketMS > 0 {
-		totals, err = s.Store.GatewayTimingTotals(ctx, from, to, userID, time.UnixMilli(points[0].BucketMS), time.Duration(points[0].BucketHours)*time.Hour)
+	if stats.Note != "" {
+		trend := healthTrend(points, nil)
+		trend.TimingError = stats.Note
+		return trend
 	}
-	trend := healthTrend(points, totals)
-	if err != nil {
-		s.Logger.Error("query health trend timing", "error", err)
-		trend.TimingError = "总耗时统计暂时不可用"
-	}
+	trend := healthTrend(points, stats.Buckets)
 	return trend
 }
 
@@ -35,16 +30,11 @@ func durationLabel(ms float64) string {
 	return strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.1f", ms/1000), "0"), ".") + " s"
 }
 
-func (s *Server) averageTotalDuration(ctx context.Context, from, to time.Time, userID string) string {
-	total, err := s.Store.GatewayTimingSummary(ctx, from, to, userID)
-	if err != nil {
-		s.Logger.Error("query average total duration", "error", err)
+func timingAverage(stats *domain.UsageTimings) string {
+	if stats == nil || stats.Note != "" || stats.Samples == 0 {
 		return "—"
 	}
-	if total.Samples == 0 {
-		return "—"
-	}
-	return fmt.Sprintf("%.0f ms", float64(total.TotalMS)/float64(total.Samples))
+	return fmt.Sprintf("%.0f ms", float64(stats.TotalMS)/float64(stats.Samples))
 }
 
 func healthTrend(points []webui.UsagePointView, totals []store.GatewayTimingTotal) webui.HealthTrendView {

@@ -34,6 +34,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	to := time.Now().UTC()
 	from := to.Add(-7 * 24 * time.Hour)
 	analytics, err := s.Keys.UserOverviewUsage(r.Context(), u.ID, from, to)
+	from, to = usageWindow(analytics, from, to)
 	analytics = s.usageWithGatewayFailures(r.Context(), analytics, from, to, u.ID, 10)
 	summary, _, _, requests := s.usageViews(analytics, from, to)
 	v := webui.DashboardView{LayoutView: s.layout(u, currentToken(r), "账户概览", "dashboard"), Greeting: u.Name + "，你好", StatusCard: s.statusCard(u), Key: s.keyView(u), Usage: summary, RecentUsage: requests}
@@ -41,11 +42,12 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
 	v.ShowClaimHint = !v.Key.CanRevoke
-	v.Quota = s.quotaPoolsView(s.Keys.UpstreamQuotas(r.Context()), v.CSRFToken, "/dashboard")
+	upstreamCtx := cpamp.WithUpstreamReadCache(r.Context())
+	v.Quota = s.quotaPoolsView(s.Keys.UpstreamQuotas(upstreamCtx), v.CSRFToken, "/dashboard")
 	if err != nil {
 		v.Notice = "用量数据暂时不可用"
 	}
-	if models, e := s.Keys.Models(r.Context()); e == nil {
+	if models, e := s.Keys.Models(upstreamCtx); e == nil {
 		for i, m := range models {
 			if i >= 6 {
 				break
@@ -235,14 +237,18 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	} else {
 		a, err = s.Keys.Usage(r.Context(), u.ID, from, to, 0)
 	}
+	from, to = usageWindow(a, from, to)
 	summary, daily, models, requests := s.usageViews(a, from, to)
-	summary.AverageDuration = s.averageTotalDuration(r.Context(), from, to, u.ID)
 	modelsByRequests, modelsByTokens := modelUsageCharts(models)
 	formFrom, formTo := s.usageRangeFormDates(from, to, rangeName)
 	if rangeName == "24h" {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "我的使用量", "usage"), FormAction: "/usage", From: formFrom, To: formTo, Range: rangeName, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests, ModelStatsNote: a.ModelStatsNote}
+	v.HealthTrend = timingHealthTrend(daily, a.TimingStats)
+	if a.TimingStats != nil && a.TimingStats.Note != "" {
+		v.Error = a.TimingStats.Note
+	}
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
@@ -359,7 +365,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	items, err := s.Keys.TestKey(r.Context(), u.ID)
 	if err == nil {
-		items, err = s.Keys.VisibleModels(r.Context(), items)
+		items, err = s.Keys.VisibleModels(cpamp.WithUpstreamReadCache(r.Context()), items)
 	}
 	s.renderModels(w, r, items, err)
 }

@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"cliproxy-portal/internal/domain"
 )
 
 const (
@@ -54,11 +56,12 @@ type Config struct {
 
 // Client talks to a CPAMP Manager Server. A Client is safe for concurrent use.
 type Client struct {
-	baseURL     *url.URL
-	adminHeader string
-	modelHeader string
-	httpClient  *http.Client
-	timeout     time.Duration
+	baseURL       *url.URL
+	adminHeader   string
+	modelHeader   string
+	httpClient    *http.Client
+	timeout       time.Duration
+	upstreamReads upstreamReadCache
 }
 
 // New creates a client using the default HTTP timeout.
@@ -392,18 +395,23 @@ type AnalyticsResponse struct {
 	ModelStatsNote string `json:"-"`
 	// ModelStatsReconcileAtMS bounds portal caching of incremental statistics.
 	// It is never read from or sent to CPAMP.
-	ModelStatsReconcileAtMS int64                      `json:"-"`
-	Coverage                *AnalyticsCoverage         `json:"coverage,omitempty"`
-	GeneratedAtMS           int64                      `json:"generated_at_ms"`
-	Granularity             string                     `json:"granularity"`
-	Summary                 *UsageSummary              `json:"summary,omitempty"`
-	Timeline                []UsageTimelinePoint       `json:"timeline,omitempty"`
-	ModelStats              []ModelUsageStat           `json:"model_stats,omitempty"`
-	ModelShare              []ModelShareRow            `json:"model_share,omitempty"`
-	APIKeyStats             []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
-	APIKeyTimeline          []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
-	RecentFailures          []RecentFailure            `json:"recent_failures,omitempty"`
-	Events                  *EventsResponse            `json:"events,omitempty"`
+	ModelStatsReconcileAtMS int64 `json:"-"`
+	// Portal-only bounds and local timing measurements share the cached usage
+	// result. They are not accepted from or sent to upstream analytics.
+	WindowFromMS   int64                      `json:"-"`
+	WindowToMS     int64                      `json:"-"`
+	TimingStats    *domain.UsageTimings       `json:"-"`
+	Coverage       *AnalyticsCoverage         `json:"coverage,omitempty"`
+	GeneratedAtMS  int64                      `json:"generated_at_ms"`
+	Granularity    string                     `json:"granularity"`
+	Summary        *UsageSummary              `json:"summary,omitempty"`
+	Timeline       []UsageTimelinePoint       `json:"timeline,omitempty"`
+	ModelStats     []ModelUsageStat           `json:"model_stats,omitempty"`
+	ModelShare     []ModelShareRow            `json:"model_share,omitempty"`
+	APIKeyStats    []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
+	APIKeyTimeline []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
+	RecentFailures []RecentFailure            `json:"recent_failures,omitempty"`
+	Events         *EventsResponse            `json:"events,omitempty"`
 }
 
 type AnalyticsCoverage struct {
@@ -1330,6 +1338,25 @@ func (c *Client) do(ctx context.Context, method, requestPath string, body []byte
 }
 
 func (c *Client) doWithContentType(ctx context.Context, method, requestPath string, body []byte, authorization, contentType, accept string) ([]byte, error) {
+	if c != nil && ctx != nil && method == http.MethodGet && authorization == c.adminHeader {
+		if enabled, _ := ctx.Value(upstreamReadContextKey{}).(bool); enabled {
+			if ttl := upstreamReadTTL(requestPath); ttl > 0 {
+				return c.cachedUpstreamRead(ctx, requestPath, ttl, func(fetchCtx context.Context) ([]byte, error) {
+					return c.doUncachedWithContentType(fetchCtx, method, requestPath, body, authorization, contentType, accept)
+				})
+			}
+		}
+	}
+	if c != nil && upstreamMutation(method, requestPath) {
+		// A failed write can still have reached CPA. Invalidate on both sides
+		// of the request, including failures, and fence older in-flight reads.
+		c.InvalidateUpstreamReadCache()
+		defer c.InvalidateUpstreamReadCache()
+	}
+	return c.doUncachedWithContentType(ctx, method, requestPath, body, authorization, contentType, accept)
+}
+
+func (c *Client) doUncachedWithContentType(ctx context.Context, method, requestPath string, body []byte, authorization, contentType, accept string) ([]byte, error) {
 	if c == nil || c.baseURL == nil || c.httpClient == nil {
 		return nil, errors.New("cpamp client is not initialized")
 	}

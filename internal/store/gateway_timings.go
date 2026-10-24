@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"cliproxy-portal/internal/domain"
 )
 
 // GatewayRequestTiming contains only server-side timestamps and durations.
@@ -132,13 +134,7 @@ func (s *Store) GatewayUntracedFailures(ctx context.Context, from, to time.Time,
 	return result, count, rows.Err()
 }
 
-type GatewayTimingTotal struct {
-	BucketMS                     int64
-	Samples                      int64
-	TotalMS                      int64
-	StageSamples                 int64
-	UploadMS, WaitMS, ResponseMS int64
-}
+type GatewayTimingTotal = domain.GatewayTimingTotal
 
 // All three stages use the same complete sample cohort. NULL or inconsistent
 // boundaries are unavailable, not zero-length stages. Completed=false samples

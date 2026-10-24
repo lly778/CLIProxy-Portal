@@ -97,8 +97,8 @@
     scheduleMasonryLayouts();
     var changed = channel !== page.getAttribute("data-channel");
     page.setAttribute("data-channel", channel);
-    // The hidden field controls only the return location, never preset scope.
-    page.querySelectorAll("[data-global-oauth-presets] input[name='channel']").forEach(function (input) { input.value = channel; });
+    // Hidden channel fields control the return location, never preset scope.
+    page.querySelectorAll("[data-global-oauth-presets] input[name='channel'], [data-upstream-config-refresh] input[name='channel']").forEach(function (input) { input.value = channel; });
     select.value = channel;
     if (!fromHistory && changed) window.history.pushState(null, "", target.href);
     shownURL = fromHistory || changed ? target.href : shownURL;

@@ -23,31 +23,34 @@ import (
 )
 
 type Keys struct {
-	Store              *store.Store
-	CPAMP              cpamp.API
-	Now                func() time.Time
-	CacheTTL           time.Duration
-	QuotaCacheTTL      time.Duration
-	cacheMu            sync.Mutex
-	cache              map[string]analyticsCache
-	analyticsFlights   map[string]*analyticsFlight
-	actualModelMu      sync.Mutex
-	actualModels       map[string]*actualModelSnapshot
-	quota              quotaPoolCache
-	refreshMu          sync.Mutex
-	refresh            QuotaRefreshStatus
-	refreshedQuota     map[string][]cpamp.CodexQuotaWindow
-	antigravityQuota   map[string][]cpamp.AntigravityQuotaWindow
-	antigravityAttempt map[string]time.Time
-	quotaFetchMu       sync.Mutex
-	modelConfigMu      sync.Mutex
-	presetMu           sync.Mutex
-	reconcileMu        sync.Mutex
-	reconcileStatusMu  sync.RWMutex
-	reconcileStatus    ReconcileStatus
-	lastSeenSyncAt     time.Time
-	RefreshCooldown    time.Duration
-	RefreshTimeout     time.Duration
+	Store               *store.Store
+	CPAMP               cpamp.API
+	Now                 func() time.Time
+	CacheTTL            time.Duration
+	QuotaCacheTTL       time.Duration
+	cacheMu             sync.Mutex
+	cache               map[string]analyticsCache
+	analyticsFlights    map[string]*analyticsFlight
+	actualModelMu       sync.Mutex
+	actualModels        map[string]*actualModelSnapshot
+	timingMu            sync.Mutex
+	usageTimings        map[string]*usageTimingSnapshot
+	UsageTimingLocation *time.Location
+	quota               quotaPoolCache
+	refreshMu           sync.Mutex
+	refresh             QuotaRefreshStatus
+	refreshedQuota      map[string][]cpamp.CodexQuotaWindow
+	antigravityQuota    map[string][]cpamp.AntigravityQuotaWindow
+	antigravityAttempt  map[string]time.Time
+	quotaFetchMu        sync.Mutex
+	modelConfigMu       sync.Mutex
+	presetMu            sync.Mutex
+	reconcileMu         sync.Mutex
+	reconcileStatusMu   sync.RWMutex
+	reconcileStatus     ReconcileStatus
+	lastSeenSyncAt      time.Time
+	RefreshCooldown     time.Duration
+	RefreshTimeout      time.Duration
 }
 
 type analyticsCache struct {
@@ -160,8 +163,9 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 	return &Keys{
 		Store: st, CPAMP: api, Now: func() time.Time { return time.Now().UTC() },
 		CacheTTL: 2 * time.Minute, QuotaCacheTTL: 30 * time.Minute, RefreshCooldown: time.Minute, RefreshTimeout: 3 * time.Minute,
-		cache:          make(map[string]analyticsCache),
-		refreshedQuota: make(map[string][]cpamp.CodexQuotaWindow),
+		cache:               make(map[string]analyticsCache),
+		UsageTimingLocation: time.FixedZone("Asia/Shanghai", 8*60*60),
+		refreshedQuota:      make(map[string][]cpamp.CodexQuotaWindow),
 	}
 }
 
@@ -693,9 +697,6 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	if err != nil {
 		return cpamp.AnalyticsResponse{}, err
 	}
-	if len(hashes) == 0 {
-		return cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}}, nil
-	}
 	profile, pageSize := "usage", actualModelPageSize
 	if overview {
 		profile, pageSize = "overview", events
@@ -703,6 +704,13 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 	cacheKey := fmt.Sprintf("user:%s:%s:%s:%s", userID, security.SHA256(strings.Join(hashes, ",")), profile, analyticsRangeKey(k.Now(), from, to))
 	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
 		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes}, Include: cpamp.AnalyticsInclude{Summary: true, Timeline: true, Granularity: granularity, EventsPage: &cpamp.EventsPage{Limit: pageSize}}}
+		if len(hashes) == 0 {
+			value := cpamp.AnalyticsResponse{Summary: &cpamp.UsageSummary{}, WindowFromMS: req.FromMS, WindowToMS: req.ToMS}
+			if !overview {
+				value = k.withUsageTimings(fetchCtx, cacheKey, userID, req, value, refresh)
+			}
+			return value, nil
+		}
 		if !overview {
 			req.Include.EventsPage.Limit = k.actualModelInitialPageSize(req, refresh)
 		}
@@ -712,7 +720,9 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 		}
 		if !overview {
 			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
+			value = k.withUsageTimings(fetchCtx, cacheKey, userID, req, value, refresh)
 		}
+		value.WindowFromMS, value.WindowToMS = req.FromMS, req.ToMS
 		return usageStatusFromTimeline(value), nil
 	})
 	return analyticsPreview(value, events), err
@@ -781,7 +791,9 @@ func (k *Keys) globalUsage(ctx context.Context, from, to time.Time, events int, 
 		}
 		if !overview {
 			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
+			value = k.withUsageTimings(fetchCtx, cacheKey, "", req, value, refresh)
 		}
+		value.WindowFromMS, value.WindowToMS = req.FromMS, req.ToMS
 		// Preserve the request-status summary used by CPAMP's timeline and
 		// request logs. Per-key aggregates are only for usage rankings; their
 		// success/failure counts may disagree even when total calls match.
@@ -1851,6 +1863,11 @@ func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 	expiresAt := k.Now().Add(k.CacheTTL)
 	if value.ModelStatsReconcileAtMS > 0 {
 		if due := time.UnixMilli(value.ModelStatsReconcileAtMS); due.Before(expiresAt) {
+			expiresAt = due
+		}
+	}
+	if value.TimingStats != nil && value.TimingStats.ReconcileAtMS > 0 {
+		if due := time.UnixMilli(value.TimingStats.ReconcileAtMS); due.Before(expiresAt) {
 			expiresAt = due
 		}
 	}

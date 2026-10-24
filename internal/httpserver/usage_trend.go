@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cliproxy-portal/internal/cpamp"
+	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/webui"
 )
 
@@ -98,13 +99,7 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 	if len(a.Timeline) == 0 {
 		return nil
 	}
-	bucketHours := 24
-	if !strings.EqualFold(a.Granularity, "day") && to.Sub(from) <= 7*24*time.Hour {
-		bucketHours = 1
-		if to.Sub(from) > 72*time.Hour {
-			bucketHours = 3
-		}
-	}
+	bucketHours := domain.UsageBucketHours(a.Granularity, from, to)
 	hourly := bucketHours < 24
 	sourceHourly := strings.EqualFold(a.Granularity, "hour") || (a.Granularity == "" && hourly)
 	fill := to.After(from)
@@ -115,12 +110,7 @@ func (s *Server) usageTimeline(a cpamp.AnalyticsResponse, from, to time.Time) []
 		}
 	}
 	floor := func(at time.Time) time.Time {
-		local := at.In(s.Cfg.TimeZone)
-		hour := 0
-		if hourly {
-			hour = local.Hour() / bucketHours * bucketHours
-		}
-		return time.Date(local.Year(), local.Month(), local.Day(), hour, 0, 0, 0, s.Cfg.TimeZone)
+		return domain.UsageBucketStart(at, bucketHours, s.Cfg.TimeZone)
 	}
 	next := func(at time.Time) time.Time {
 		if hourly {

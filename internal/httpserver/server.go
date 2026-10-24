@@ -43,6 +43,9 @@ type Server struct {
 }
 
 func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *service.Keys, secret []byte, logger *slog.Logger) (*Server, error) {
+	if keys != nil && cfg.TimeZone != nil {
+		keys.UsageTimingLocation = cfg.TimeZone
+	}
 	ui, err := webui.NewRenderer()
 	if err != nil {
 		return nil, err
@@ -117,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/approvals", s.withAdmin(s.adminApprovals))
 	mux.HandleFunc("GET /admin/admins", s.withAdmin(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
 	mux.HandleFunc("GET /admin/upstreams", s.withAdmin(s.adminUpstreams))
+	mux.HandleFunc("POST /admin/upstreams/refresh", s.withAdmin(s.adminUpstreamRefresh))
 	mux.HandleFunc("POST /admin/upstreams/layout", s.withAdmin(s.adminUpstreamLayoutSave))
 	mux.HandleFunc("POST /admin/upstreams/{id}/status", s.withAdmin(s.adminUpstreamStatus))
 	mux.HandleFunc("POST /admin/upstreams/models/status", s.withAdmin(s.adminOAuthModelStatus))

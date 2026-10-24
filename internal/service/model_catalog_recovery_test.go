@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +20,56 @@ type recoveryCPA struct {
 	models              []cpamp.Model
 	filesErr, modelsErr error
 	reads               int
+}
+
+func TestCachedPageRecoveryAlwaysReadsLiveCredentialState(t *testing.T) {
+	var mode, registeredReads atomic.Int32
+	now := time.Now().UTC()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/management/auth-files":
+			if mode.Load() == 4 {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			file := map[string]any{"name": "account.json", "provider": "antigravity", "auth_index": "opaque", "status": "active", "unavailable": mode.Load() == 3, "disabled": mode.Load() == 2, "cooldowns": []any{}}
+			if mode.Load() == 1 {
+				file["cooldowns"] = []cpamp.AuthCooldown{{Scope: "credential", RetryAt: now.Add(time.Hour)}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"files": []any{file}})
+		case "/v0/management/auth-files/models":
+			registeredReads.Add(1)
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": []cpamp.Model{{ID: "recovered-model"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer upstream.Close()
+	client, err := cpamp.New(upstream.URL, "test-management-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := cpamp.WithUpstreamReadCache(t.Context())
+	if _, err := client.ListAuthFiles(ctx); err != nil {
+		t.Fatal(err)
+	}
+	keys := NewKeys(nil, client)
+	keys.Now = func() time.Time { return now }
+	original := []cpamp.Model{{ID: "base-model"}}
+	if models := keys.RestoreSchedulableModels(ctx, original); len(models) != 2 || registeredReads.Load() != 1 {
+		t.Fatal("active credential was not recovered from live registrations", models)
+	}
+	for _, state := range []int32{1, 2, 3, 4} {
+		mode.Store(state)
+		models := keys.RestoreSchedulableModels(ctx, original)
+		if !reflect.DeepEqual(models, original) || registeredReads.Load() != 1 {
+			t.Fatal("cached account metadata bypassed live cooldown, disable, availability or failed-read checks", state, models)
+		}
+	}
+	mode.Store(0)
+	if models := keys.RestoreSchedulableModels(ctx, original); len(models) != 2 || registeredReads.Load() != 2 {
+		t.Fatal("cleared cooldown failed to restore models immediately", models)
+	}
 }
 
 func (c *recoveryCPA) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {

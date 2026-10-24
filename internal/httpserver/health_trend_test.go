@@ -10,6 +10,7 @@ import (
 
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/cpamp"
+	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
@@ -90,9 +91,21 @@ func TestAverageTotalDurationUsesPersistentMeasurementsAndExactRange(t *testing.
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s := &Server{Store: db}
 	from := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
-	if got := s.averageTotalDuration(t.Context(), from, from.Add(time.Hour), "a"); got != "—" {
+	average := func(to time.Time, userID string) string {
+		t.Helper()
+		batch, err := db.ReadUsageTimings(t.Context(), from.UnixMilli(), to.UnixMilli(), userID, nil, 5*time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		stats := &domain.UsageTimings{}
+		for _, total := range batch.Totals {
+			stats.Samples += total.Samples
+			stats.TotalMS += total.TotalMS
+		}
+		return timingAverage(stats)
+	}
+	if got := average(from.Add(time.Hour), "a"); got != "—" {
 		t.Fatalf("missing duration = %s", got)
 	}
 	for i, duration := range []int64{1000, 1000, 10000} {
@@ -100,14 +113,42 @@ func TestAverageTotalDurationUsesPersistentMeasurementsAndExactRange(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if got := s.averageTotalDuration(t.Context(), from, from.Add(time.Hour), "a"); got != "4000 ms" {
+	if got := average(from.Add(time.Hour), "a"); got != "4000 ms" {
 		t.Fatalf("weighted average = %s", got)
 	}
-	if got := s.averageTotalDuration(t.Context(), from, from.Add(time.Minute), "a"); got != "1000 ms" {
+	if got := average(from.Add(time.Minute), "a"); got != "1000 ms" {
 		t.Fatalf("boundary average = %s", got)
 	}
-	if got := s.averageTotalDuration(t.Context(), from, from.Add(time.Hour), "b"); got != "—" {
+	if got := average(from.Add(time.Hour), "b"); got != "—" {
 		t.Fatalf("cross-user average = %s", got)
+	}
+}
+
+func TestUsageMeanAndTrendUseOneCachedWindowAndSampleCohort(t *testing.T) {
+	from := time.Date(2026, 10, 24, 12, 15, 0, 0, time.UTC)
+	to := from.Add(4 * time.Hour)
+	firstBucket := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	stats := &domain.UsageTimings{Samples: 10, TotalMS: 19000, Buckets: []domain.GatewayTimingTotal{
+		{BucketMS: firstBucket.UnixMilli(), Samples: 9, TotalMS: 9000},
+		{BucketMS: firstBucket.Add(time.Hour).UnixMilli(), Samples: 1, TotalMS: 10000},
+	}}
+	value := cpamp.AnalyticsResponse{WindowFromMS: from.UnixMilli(), WindowToMS: to.UnixMilli(), Granularity: "hour",
+		Summary: &cpamp.UsageSummary{TotalCalls: 20}, TimingStats: stats,
+		Timeline: []cpamp.UsageTimelinePoint{{BucketMS: firstBucket.UnixMilli(), Calls: 10, Success: 10}, {BucketMS: firstBucket.Add(time.Hour).UnixMilli(), Calls: 10, Success: 10}}}
+	// No Store is attached: rendering already-cached results must not query SQL.
+	s := &Server{Cfg: config.Config{TimeZone: time.UTC}}
+	summary, points, _, _ := s.usageViews(value, from.Add(time.Hour), to.Add(time.Hour))
+	if summary.AverageDuration != "1900 ms" || len(points) == 0 || points[0].BucketMS != firstBucket.UnixMilli() {
+		t.Fatal("mean used upstream call count, unweighted bucket means, or the new page clock", summary, points)
+	}
+	trend := timingHealthTrend(points, stats)
+	if trend.Points[0].AverageTotal != "1 s" || trend.Points[1].AverageTotal != "10 s" {
+		t.Fatal("trend lost the same sample cohorts used by the overall mean", trend.Points)
+	}
+	stats.Note = "总耗时统计暂时不可用"
+	failed := timingHealthTrend(points, stats)
+	if timingAverage(stats) != "—" || failed.TimingError != stats.Note || failed.Points[0].AverageTotal != "—" {
+		t.Fatal("local timing failure was rendered as valid measurements")
 	}
 }
 
