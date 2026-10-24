@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"cliproxy-portal/internal/domain"
 )
 
 //go:embed templates/*.html static/*
@@ -271,11 +273,11 @@ func statusClass(status string) string {
 }
 
 func statusLabel(status string) string {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	if label := domain.UserStatus(normalized).Label(); label != normalized {
+		return label
+	}
 	labels := map[string]string{
-		"pending":          "待审批",
-		"rejected":         "已拒绝",
-		"approved":         "已批准",
-		"suspended":        "已停用",
 		"pending-sync":     "停用待同步",
 		"deletion-pending": "删除待撤销",
 		"active":           "正常",
@@ -283,12 +285,13 @@ func statusLabel(status string) string {
 		"warning":          "需关注",
 		"error":            "异常",
 		"revoked":          "已撤销",
+		"external_revoked": "已被外部撤销",
 		"unlinked":         "未关联",
 	}
-	if label, ok := labels[strings.ToLower(status)]; ok {
+	if label, ok := labels[normalized]; ok {
 		return label
 	}
-	if status == "" {
+	if normalized == "" {
 		return "未知"
 	}
 	return status

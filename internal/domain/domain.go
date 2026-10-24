@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type Role string
 
@@ -20,6 +23,29 @@ const (
 	StatusDeletePending    UserStatus = "delete_pending"
 	StatusDeleted          UserStatus = "deleted"
 )
+
+// Label is shared by account views and status filters. Persisted status values
+// remain unchanged; only the user-facing display is localized.
+func (status UserStatus) Label() string {
+	switch UserStatus(strings.ToLower(strings.TrimSpace(string(status)))) {
+	case StatusPending:
+		return "待审批"
+	case StatusRejected:
+		return "已拒绝"
+	case StatusApproved:
+		return "已批准"
+	case StatusSuspended:
+		return "已停用"
+	case StatusSuspendedPending:
+		return "停用待同步"
+	case StatusDeletePending:
+		return "删除待撤销"
+	case StatusDeleted:
+		return "已删除"
+	default:
+		return string(status)
+	}
+}
 
 type User struct {
 	ID                 string

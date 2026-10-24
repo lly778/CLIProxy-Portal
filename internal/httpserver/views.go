@@ -683,11 +683,7 @@ func roleLabel(r domain.Role) string {
 	return "用户"
 }
 func userStatusLabel(v domain.UserStatus) string {
-	m := map[domain.UserStatus]string{domain.StatusPending: "待审批", domain.StatusRejected: "已拒绝", domain.StatusApproved: "已批准", domain.StatusSuspended: "已停用", domain.StatusSuspendedPending: "停用待同步", domain.StatusDeletePending: "删除待撤销", domain.StatusDeleted: "已删除"}
-	if x := m[v]; x != "" {
-		return x
-	}
-	return string(v)
+	return v.Label()
 }
 func keyStatusLabel(v string) string {
 	m := map[string]string{"active": "正常", "revoked": "已撤销", "external_revoked": "已被外部撤销"}
