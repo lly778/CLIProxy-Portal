@@ -2,7 +2,7 @@
 <section class="auth-card">
   <div class="auth-head"><span class="eyebrow">人工重置</span><h1>设置新密码</h1><p>输入手机号和管理员提供的 15 分钟一次性重置码。</p></div>
   {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}
-  {{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+  {{template "flash-notice" .Flash}}
   <form method="post" action="/reset" class="stack-form">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
     <label>手机号<input type="tel" name="phone" inputmode="numeric" value="{{.Phone}}" maxlength="11" required></label>

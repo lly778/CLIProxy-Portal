@@ -1,22 +1,65 @@
 package httpserver
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/webui"
 )
 
+type presetViewsCache struct {
+	mu        sync.Mutex
+	signature string
+	views     []webui.OAuthPresetView
+}
+
+func clonePresetViews(views []webui.OAuthPresetView) []webui.OAuthPresetView {
+	views = append([]webui.OAuthPresetView(nil), views...)
+	for index := range views {
+		view := &views[index]
+		view.EnabledModels = append([]string(nil), view.EnabledModels...)
+		view.DisabledModels = append([]string(nil), view.DisabledModels...)
+		view.AliasMappings = append([]string(nil), view.AliasMappings...)
+		view.OriginalModels = append([]string(nil), view.OriginalModels...)
+		view.ReasoningCaps = append([]string(nil), view.ReasoningCaps...)
+	}
+	return views
+}
+
 func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsView) {
-	current, currentErr := s.Keys.OAuthPresetSnapshot(r.Context())
 	presets, err := s.Store.ListOAuthPresets(r.Context())
 	if err != nil {
 		v.PresetError = "调用预设暂时不可用"
 		s.Logger.Error("list OAuth presets", "error", err)
+		return
+	}
+	if len(presets) == 0 {
+		return
+	}
+	current, currentErr := s.Keys.OAuthPresetSnapshot(r.Context())
+	// Compare exact current inputs, rather than keeping a time-based database cache.
+	// JSON parsing, sorting and applied-state comparisons are shared by unchanged visits.
+	digest := sha256.New()
+	_, _ = fmt.Fprintf(digest, "%t\n", currentErr == nil)
+	_ = json.NewEncoder(digest).Encode(current)
+	for _, preset := range presets {
+		for _, value := range []string{preset.ID, preset.Name, preset.Payload} {
+			_, _ = fmt.Fprintf(digest, "%d:%s", len(value), value)
+		}
+		_, _ = fmt.Fprintf(digest, ":%d\n", preset.UpdatedAt.UnixMilli())
+	}
+	signature := fmt.Sprintf("%x", digest.Sum(nil))
+	cache := &s.presetViews
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.signature == signature {
+		v.Presets = clonePresetViews(cache.views)
 		return
 	}
 	for _, preset := range presets {
@@ -68,4 +111,5 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 		}
 		v.Presets = append(v.Presets, row)
 	}
+	cache.signature, cache.views = signature, clonePresetViews(v.Presets)
 }

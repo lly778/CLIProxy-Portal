@@ -11,9 +11,11 @@ import (
 )
 
 func (k *Keys) OAuthPresetSnapshot(ctx context.Context) (OAuthPresetSnapshot, error) {
-	k.presetMu.Lock()
-	defer k.presetMu.Unlock()
-	return k.oauthPresetSnapshot(ctx)
+	return upstreamView(ctx, k, "snapshot", func(ctx context.Context) (OAuthPresetSnapshot, error) {
+		k.presetMu.Lock()
+		defer k.presetMu.Unlock()
+		return k.oauthPresetSnapshot(ctx)
+	}, cloneOAuthSnapshot)
 }
 
 func (k *Keys) oauthPresetSnapshot(ctx context.Context) (OAuthPresetSnapshot, error) {
@@ -99,6 +101,7 @@ func validatePresetChannelNames(snapshot OAuthPresetSnapshot) error {
 
 // ValidateOAuthPreset performs the same read-only preflight as apply.
 func (k *Keys) ValidateOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	_, _, _, err := k.prepareOAuthPreset(ctx, requested)
@@ -162,12 +165,19 @@ func (k *Keys) prepareOAuthPreset(ctx context.Context, requested OAuthPresetSnap
 }
 
 func (k *Keys) ApplyOAuthPreset(ctx context.Context, requested OAuthPresetSnapshot) error {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
+	k.InvalidateUpstreamReadCache()
+	defer k.InvalidateUpstreamReadCache()
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	current, target, included, err := k.prepareOAuthPreset(ctx, requested)
 	if err != nil {
 		return err
 	}
+	return k.applyPreparedOAuthPreset(ctx, current, target, included)
+}
+
+func (k *Keys) applyPreparedOAuthPreset(ctx context.Context, current, target OAuthPresetSnapshot, included map[string]bool) error {
 	indices := map[string]int{}
 	for i, entry := range current.Channels {
 		indices[entry.Channel] = i

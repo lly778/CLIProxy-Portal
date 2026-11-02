@@ -523,33 +523,19 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("admin upstream account quotas were not rendered: %s", upstreamsPage)
 	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
-	refreshResponse, err = adminClient.PostForm(portal.URL+"/quota/refresh", url.Values{"csrf_token": {adminCSRF}, "next": {"/admin/upstreams"}})
+	if !strings.Contains(upstreamsPage, "配置模型与预设") {
+		t.Fatal("combined editor missing")
+	}
+	initialConfig, err := keysService.OAuthPresetSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = refreshResponse.Body.Close()
-	if refreshResponse.StatusCode != http.StatusSeeOther || !strings.HasPrefix(refreshResponse.Header.Get("Location"), "/admin/upstreams?quota_msg=") {
-		t.Fatalf("upstream quota refresh response = %d, location %q", refreshResponse.StatusCode, refreshResponse.Header.Get("Location"))
-	}
-	if !strings.Contains(upstreamsPage, "调用预设") || !strings.Contains(upstreamsPage, "保存当前配置") {
-		t.Fatalf("admin upstream page missing preset controls: %s", upstreamsPage)
-	}
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/save", url.Values{"csrf_token": {adminCSRF}, "name": {"基准配置"}}, http.StatusSeeOther)
+	presetPayload, _ := json.Marshal(initialConfig)
+	postFormJSON(t, adminClient, portal.URL+"/admin/upstreams/presets/new/edit", url.Values{"csrf_token": {adminCSRF}, "payload": {string(presetPayload)}, "revision": {"0"}, "action": {"save"}, "name": {"基准配置"}}, http.StatusOK)
 	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, "基准配置") || !strings.Contains(upstreamsPage, "启用 1/2 个模型") {
-		t.Fatalf("saved preset was not rendered: %s", upstreamsPage)
-	}
-	if !strings.Contains(upstreamsPage, `<span class="badge success">已应用</span>`) {
-		t.Fatalf("matching preset was not marked as applied: %s", upstreamsPage)
-	}
 	presetID := extract(t, upstreamsPage, `/admin/upstreams/presets/([^/]+)/apply`)
-	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/"+presetID+"/apply", url.Values{"csrf_token": {adminCSRF}}, http.StatusSeeOther)
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/"+presetID+"/delete", url.Values{"csrf_token": {adminCSRF}}, http.StatusSeeOther)
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if strings.Contains(upstreamsPage, "基准配置") {
-		t.Fatalf("deleted preset remained visible: %s", upstreamsPage)
-	}
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	upstreamID := extract(t, upstreamsPage, `/admin/upstreams/([a-f0-9]{64})/status`)
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/"+upstreamID+"/status", url.Values{"csrf_token": {adminCSRF}, "disabled": {"true"}}, http.StatusSeeOther)
@@ -565,145 +551,24 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("upstream state disabled=%v changes=%d", upstreamDisabled, upstreamStatusChanges)
 	}
 	mu.Unlock()
-	if !strings.Contains(upstreamsPage, "OAuth 模型") || !strings.Contains(upstreamsPage, "gpt-enabled") || !strings.Contains(upstreamsPage, "gpt-disabled") {
-		t.Fatalf("admin upstream page missing OAuth model switches: %s", upstreamsPage)
+	currentConfig, err := keysService.OAuthPresetSnapshot(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-enabled"}, "enabled": {"false"}}, http.StatusSeeOther)
+	configRevision := service.OAuthConfigurationRevision(currentConfig)
+	for index := range currentConfig.Channels {
+		entry := &currentConfig.Channels[index]
+		if entry.Channel == "codex" {
+			entry.Aliases = []cpamp.OAuthModelAlias{{Name: "gpt-enabled", Alias: "public-enabled", Fork: true}}
+			entry.ReasoningCaps = map[string]string{"gpt-enabled": "high"}
+		}
+	}
+	configPayload, _ := json.Marshal(currentConfig)
+	postFormJSON(t, adminClient, portal.URL+"/admin/upstreams/config/edit", url.Values{"csrf_token": {adminCSRF}, "payload": {string(configPayload)}, "revision": {configRevision}}, http.StatusOK)
 	mu.Lock()
-	if oauthStatusChanges != 1 || !containsFold(oauthExcluded, "gpt-enabled") {
+	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Alias != "public-enabled" || !strings.Contains(string(configYAML), "cliproxy-portal:reasoning-cap:v1") {
 		mu.Unlock()
-		t.Fatalf("OAuth exclusions after disable = %#v changes=%d", oauthExcluded, oauthStatusChanges)
-	}
-	mu.Unlock()
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-enabled"}, "enabled": {"true"}}, http.StatusSeeOther)
-	mu.Lock()
-	if oauthStatusChanges != 2 || containsFold(oauthExcluded, "gpt-enabled") {
-		mu.Unlock()
-		t.Fatalf("OAuth exclusions after enable = %#v changes=%d", oauthExcluded, oauthStatusChanges)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, "模型别名映射") || !strings.Contains(upstreamsPage, `name="revision"`) || !strings.Contains(upstreamsPage, `data-alias-add`) || !strings.Contains(upstreamsPage, `data-alias-remove`) || !strings.Contains(upstreamsPage, `name="keep_original"`) {
-		t.Fatalf("admin upstream page missing alias card: %s", upstreamsPage)
-	}
-	if !strings.Contains(upstreamsPage, "思考强度上限") || !strings.Contains(upstreamsPage, `name="reasoning_revision"`) {
-		t.Fatalf("admin upstream page missing reasoning cap controls: %s", upstreamsPage)
-	}
-	reasoningRevision := extract(t, upstreamsPage, `name="reasoning_revision" value="([^"]+)"`)
-	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/reasoning", url.Values{"csrf_token": {adminCSRF}, "reasoning_revision": {reasoningRevision}, "model": {"gpt-enabled"}, "cap_0": {"high"}}, http.StatusSeeOther)
-	mu.Lock()
-	if !strings.Contains(string(configYAML), "cliproxy-portal:reasoning-cap:v1") || !strings.Contains(string(configYAML), "configuration_update") {
-		mu.Unlock()
-		t.Fatal("reasoning cap was not persisted to CPA config")
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, `<option value="high" selected>high</option>`) {
-		t.Fatal("saved reasoning cap was not selected")
-	}
-	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
-	revision := extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	aliasSection := strings.SplitN(upstreamsPage, "<h2>模型别名映射</h2>", 2)[1]
-	if strings.Count(aliasSection, `class="oauth-alias-row"`) != 1 || strings.Contains(aliasSection, `name="model" value="gpt-disabled"`) || strings.Contains(aliasSection, `name="alias_0" value=`) {
-		t.Fatalf("alias card should only show enabled models: %s", aliasSection)
-	}
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"same-name", "same-name"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 0 {
-		mu.Unlock()
-		t.Fatalf("duplicate aliases were saved: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"gpt-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 0 {
-		mu.Unlock()
-		t.Fatalf("self-name mapping should be a no-op: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"gpt-disabled"}, "keep_original": {"gpt-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Name != "gpt-enabled" || oauthModelAliases[0].Alias != "gpt-disabled" || !oauthModelAliases[0].Fork || !oauthModelAliases[0].ForceMapping {
-		mu.Unlock()
-		t.Fatalf("disabled model name was not available as an alias: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-disabled"}, "enabled": {"true"}}, http.StatusSeeOther)
-	mu.Lock()
-	if oauthStatusChanges != 2 || !containsFold(oauthExcluded, "gpt-disabled") {
-		mu.Unlock()
-		t.Fatalf("conflicting model was re-enabled: exclusions=%#v changes=%d", oauthExcluded, oauthStatusChanges)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, `value="gpt-disabled"`) {
-		t.Fatalf("saved alias was not rendered: %s", upstreamsPage)
-	}
-	multiRevision := extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {multiRevision}, "model": {"gpt-enabled"}, "alias_0": {"gpt-disabled", "public-enabled"}, "keep_original": {"gpt-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 2 || oauthModelAliases[0].Alias != "gpt-disabled" || oauthModelAliases[1].Alias != "public-enabled" || !oauthModelAliases[0].Fork || !oauthModelAliases[1].Fork {
-		mu.Unlock()
-		t.Fatalf("multiple aliases with original name were not saved: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, `name="alias_0" value="gpt-disabled"`) || !strings.Contains(upstreamsPage, `name="alias_0" value="public-enabled"`) || strings.Count(strings.SplitN(upstreamsPage, "<h2>模型别名映射</h2>", 2)[1], `class="oauth-alias-entry"`) != 3 {
-		t.Fatalf("multiple saved aliases were not rendered: %s", upstreamsPage)
-	}
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"stale-change"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 2 || oauthModelAliases[0].Alias != "gpt-disabled" {
-		mu.Unlock()
-		t.Fatalf("stale alias form was accepted: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	revision = extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"gpt-disabled", "gpt-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Alias != "gpt-disabled" || !oauthModelAliases[0].Fork {
-		mu.Unlock()
-		t.Fatalf("original name included in alias list did not retain original: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	revision = extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 0 {
-		mu.Unlock()
-		t.Fatalf("clearing aliases did not restore original: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	mu.Lock()
-	oauthModelAliases = []cpamp.OAuthModelAlias{{Name: "gpt-disabled", Alias: "hidden-disabled", DisplayName: "hidden-disabled", ForceMapping: true}}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	revision = extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-enabled"}, "alias_0": {"public-enabled"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Alias != "public-enabled" {
-		mu.Unlock()
-		t.Fatalf("disabled model alias was not removed by the complete form save: %#v", oauthModelAliases)
-	}
-	mu.Unlock()
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-disabled"}, "enabled": {"true"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 1 || containsFold(oauthExcluded, "gpt-disabled") {
-		mu.Unlock()
-		t.Fatalf("renamed disabled model could not be re-enabled: aliases=%#v exclusions=%#v", oauthModelAliases, oauthExcluded)
-	}
-	mu.Unlock()
-	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	revision = extract(t, upstreamsPage, `name="revision" value="([^"]+)"`)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/aliases", url.Values{"csrf_token": {adminCSRF}, "revision": {revision}, "model": {"gpt-disabled", "gpt-enabled"}, "alias_0": {"hidden-disabled"}, "alias_1": {"public-enabled"}}, http.StatusSeeOther)
-	postForm(t, adminClient, portal.URL+"/admin/upstreams/models/status", url.Values{"csrf_token": {adminCSRF}, "model": {"gpt-disabled"}, "enabled": {"false"}}, http.StatusSeeOther)
-	mu.Lock()
-	if len(oauthModelAliases) != 1 || oauthModelAliases[0].Name != "gpt-enabled" || oauthModelAliases[0].Alias != "public-enabled" || !containsFold(oauthExcluded, "gpt-disabled") {
-		mu.Unlock()
-		t.Fatalf("disabled model aliases were not deleted: aliases=%#v exclusions=%#v", oauthModelAliases, oauthExcluded)
+		t.Fatal("combined configuration did not persist aliases and reasoning cap")
 	}
 	mu.Unlock()
 	adminUsersPage := getBody(t, adminClient, portal.URL+"/admin/users", http.StatusOK)

@@ -246,7 +246,7 @@ func (k *Keys) incrementActualModels(ctx context.Context, req cpamp.AnalyticsReq
 		delta := req
 		delta.FromMS = cutoff
 		delta.Include = cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: actualModelDeltaPageSize, BeforeMS: &beforeMS, BeforeID: &beforeID}}
-		response, err := k.CPAMP.Analytics(ctx, delta)
+		response, err := k.queryUsageAnalytics(ctx, delta, false)
 		if err != nil || rawModelHistoryDeleted(response) {
 			return nil, false
 		}

@@ -41,13 +41,13 @@ func (k *Keys) fetchAntigravityQuota(ctx context.Context, file cpamp.AuthFile, n
 }
 
 func (k *Keys) antigravityAccountQuotas(ctx context.Context) (map[string]UpstreamAccountQuota, error) {
-	client, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持读取上游账号")
 	}
-	files, err := client.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -133,13 +133,13 @@ func (k *Keys) UpstreamQuotas(ctx context.Context) []UpstreamQuotaPool {
 	if pool, _ := k.UpstreamQuota(ctx); pool.TotalAccounts > 0 {
 		pools = append(pools, pool)
 	}
-	client, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	if !ok {
 		return pools
 	}
-	files, err := client.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return pools
 	}

@@ -14,15 +14,15 @@ import (
 // Reapplying disabled=false invokes CPA's post-persist registration hook without
 // toggling the credential off or refreshing its OAuth token.
 func (k *Keys) refreshOAuthRegistrations(ctx context.Context, channels ...string) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(cpamp.WithFreshUpstreamReads(ctx), 30*time.Second)
 	defer cancel()
-	reader, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	if !ok {
 		return errors.New("CPAMP 客户端不支持读取上游账号")
 	}
-	files, err := reader.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return fmt.Errorf("读取上游账号失败：%w", err)
 	}
@@ -71,14 +71,14 @@ func (k *Keys) refreshOAuthRegistrations(ctx context.Context, channels ...string
 	}
 	for _, file := range active {
 		channel := strings.ToLower(strings.TrimSpace(file.Provider))
-		before, err := client.ListAuthFileModels(ctx, file)
+		before, err := k.upstreamRegisteredModels(ctx, file)
 		if err != nil {
 			return fmt.Errorf("读取 %s 已注册模型失败：%w", OAuthChannelLabel(channel), err)
 		}
 		for attempt := 0; ; attempt++ {
 			// CPA reloads configuration asynchronously. Retry a stale projection,
 			// but re-resolve the identity and disabled state before each write.
-			current, err := reader.ListAuthFiles(ctx)
+			current, err := k.upstreamAuthFiles(ctx)
 			if err != nil {
 				return fmt.Errorf("确认上游账号状态失败：%w", err)
 			}
@@ -98,7 +98,7 @@ func (k *Keys) refreshOAuthRegistrations(ctx context.Context, channels ...string
 			if err := client.SetAuthFileDisabled(ctx, file, false); err != nil {
 				return fmt.Errorf("刷新 %s 账号注册失败：%w", OAuthChannelLabel(channel), err)
 			}
-			after, err := client.ListAuthFileModels(ctx, file)
+			after, err := k.upstreamRegisteredModels(ctx, file)
 			if err != nil {
 				return fmt.Errorf("确认 %s 模型注册失败：%w", OAuthChannelLabel(channel), err)
 			}

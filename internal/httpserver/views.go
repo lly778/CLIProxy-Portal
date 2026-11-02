@@ -32,8 +32,13 @@ func (s *Server) csrf(token string) string {
 }
 
 func (s *Server) userView(u domain.User) webui.UserView {
+	key, _ := s.Store.ActiveKey(contextBackground(), u.ID)
+	return s.userViewWithKey(u, key)
+}
+
+func (s *Server) userViewWithKey(u domain.User, key domain.APIKey) webui.UserView {
 	v := webui.UserView{ID: u.ID, Name: u.Name, Phone: u.Phone, Role: string(u.Role), RoleLabel: roleLabel(u.Role), Status: string(u.Status), StatusLabel: userStatusLabel(u.Status), Initials: initials(u.Name), JoinedAt: s.formatTime(u.CreatedAt), LastLoginAt: s.formatTime(u.LastLoginAt)}
-	if key, err := s.Store.ActiveKey(contextBackground(), u.ID); err == nil {
+	if key.ID != "" && key.Status == "active" {
 		v.HasKey = true
 		v.KeyStatus = key.Status
 		v.KeyStatusLabel = keyStatusLabel(key.Status)
@@ -567,15 +572,24 @@ func (s *Server) quotaPoolsView(pools []service.UpstreamQuotaPool, csrfToken, re
 func (s *Server) auditViews(ctx context.Context, items []domain.AuditEvent) []webui.AuditView {
 	out := make([]webui.AuditView, 0, len(items))
 	actors := make(map[string]domain.User)
+	if s.Store != nil {
+		ids := make([]string, 0, len(items))
+		for _, event := range items {
+			if event.ActorUserID != "" {
+				ids = append(ids, event.ActorUserID)
+			}
+		}
+		var err error
+		actors, err = s.Store.UserIdentitiesFor(ctx, ids)
+		if err != nil && s.Logger != nil {
+			s.Logger.Error("load audit actors", "error", err)
+		}
+	}
 	for _, e := range items {
 		name, _ := auditActorParts(e.ActorLabel)
 		phone := ""
 		if e.ActorUserID != "" && s.Store != nil {
-			actor, cached := actors[e.ActorUserID]
-			if !cached {
-				actor, _ = s.Store.UserByID(ctx, e.ActorUserID)
-				actors[e.ActorUserID] = actor
-			}
+			actor := actors[e.ActorUserID]
 			if name == "" {
 				name = actor.Name
 			}

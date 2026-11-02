@@ -73,13 +73,23 @@ func (k *Keys) OAuthChannels(ctx context.Context) ([]string, error) {
 // Mutating routing settings must not silently omit configured channels when
 // discovery fails. The read-only channel picker retains its fallback behavior.
 func (k *Keys) oauthChannels(ctx context.Context, strict bool) ([]string, error) {
-	typed, ok := k.CPAMP.(interface {
+	name := "channels"
+	if strict {
+		name += ":strict"
+	}
+	return upstreamView(ctx, k, name, func(ctx context.Context) ([]string, error) {
+		return k.readOAuthChannels(ctx, strict)
+	}, func(value []string) []string { return append([]string(nil), value...) })
+}
+
+func (k *Keys) readOAuthChannels(ctx context.Context, strict bool) ([]string, error) {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	var files []cpamp.AuthFile
 	if ok {
 		var err error
-		files, err = typed.ListAuthFiles(ctx)
+		files, err = k.upstreamAuthFiles(ctx)
 		if err != nil {
 			return nil, err
 		}

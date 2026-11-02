@@ -16,7 +16,6 @@ import (
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/service"
-	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
 )
 
@@ -44,21 +43,24 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		byUser := map[string]*rank{}
 		var unlinked cpamp.UsageSummary
+		directory, directoryErr := s.usageDirectory(r.Context(), a.APIKeyStats)
+		if directoryErr != nil {
+			v.Error = "用户用量归属暂时不可用"
+		}
 		for _, stat := range a.APIKeyStats {
-			key, keyErr := s.Store.KeyByHash(r.Context(), stat.APIKeyHash)
-			if keyErr != nil {
-				unlinked.TotalCalls += stat.Calls
-				unlinked.SuccessCalls += stat.SuccessCalls
-				unlinked.FailureCalls += stat.FailureCalls
-				unlinked.InputTokens += stat.InputTokens
-				unlinked.OutputTokens += stat.OutputTokens
-				unlinked.TotalTokens += stat.TotalTokens
+			userID, linked := directory.Owners[strings.ToLower(strings.TrimSpace(stat.APIKeyHash))]
+			if !linked {
+				if directoryErr == nil {
+					unlinked.TotalCalls += stat.Calls
+					unlinked.SuccessCalls += stat.SuccessCalls
+					unlinked.FailureCalls += stat.FailureCalls
+					unlinked.InputTokens += stat.InputTokens
+					unlinked.OutputTokens += stat.OutputTokens
+					unlinked.TotalTokens += stat.TotalTokens
+				}
 				continue
 			}
-			target, userErr := s.Store.UserByID(r.Context(), key.UserID)
-			if userErr != nil {
-				continue
-			}
+			target := directory.Users[userID]
 			x := byUser[target.ID]
 			if x == nil {
 				x = &rank{user: target}
@@ -84,7 +86,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 			if i >= 10 {
 				break
 			}
-			v.TopUsers = append(v.TopUsers, webui.UserUsageRankView{Rank: i + 1, User: s.userView(x.user), Requests: compactNumber(x.calls), Tokens: compactNumber(x.tokens), Percent: int(x.calls * 100 / totalCalls)})
+			v.TopUsers = append(v.TopUsers, webui.UserUsageRankView{Rank: i + 1, User: s.userViewWithKey(x.user, directory.ActiveKeys[x.user.ID]), Requests: compactNumber(x.calls), Tokens: compactNumber(x.tokens), Percent: int(x.calls * 100 / totalCalls)})
 		}
 	}
 	v.Resources = s.resourceView(r.Context())
@@ -156,31 +158,33 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		v.Error = "全局用量暂时不可用"
 	} else if userID == "" {
 		v.ShowUserStats = true
-		v.ByUserRequests, v.ByUserTokens, v.UnlinkedRequests, v.UnlinkedTokens, v.HasUnlinked = s.adminUsageByUser(r, a.APIKeyStats, name, formFrom, formTo)
+		v.ByUserRequests, v.ByUserTokens, v.UnlinkedRequests, v.UnlinkedTokens, v.HasUnlinked, err = s.adminUsageByUser(r, a.APIKeyStats, name, formFrom, formTo)
+		if err != nil {
+			v.Error = "用户用量归属暂时不可用"
+		}
 	}
 	_ = s.UI.Render(w, webui.PageUsage, v)
 }
 
-func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat, rangeName, formFrom, formTo string) ([]webui.UserUsageView, []webui.UserUsageView, string, string, bool) {
+func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat, rangeName, formFrom, formTo string) ([]webui.UserUsageView, []webui.UserUsageView, string, string, bool, error) {
 	type aggregate struct {
 		user          domain.User
 		calls, tokens int64
 	}
 	byUser := make(map[string]*aggregate)
 	var unlinkedCalls, unlinkedTokens int64
+	directory, err := s.usageDirectory(r.Context(), stats)
+	if err != nil {
+		return nil, nil, "—", "—", false, err
+	}
 	for _, stat := range stats {
-		key, err := s.Store.KeyByHash(r.Context(), stat.APIKeyHash)
-		if err != nil {
+		id, linked := directory.Owners[strings.ToLower(strings.TrimSpace(stat.APIKeyHash))]
+		if !linked {
 			unlinkedCalls += stat.Calls
 			unlinkedTokens += stat.TotalTokens
 			continue
 		}
-		user, err := s.Store.UserByID(r.Context(), key.UserID)
-		if err != nil {
-			unlinkedCalls += stat.Calls
-			unlinkedTokens += stat.TotalTokens
-			continue
-		}
+		user := directory.Users[id]
 		item := byUser[user.ID]
 		if item == nil {
 			item = &aggregate{user: user}
@@ -196,10 +200,10 @@ func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat
 			query.Set("from", formFrom)
 			query.Set("to", formTo)
 		}
-		rows = append(rows, webui.UserUsageView{User: s.userView(item.user), UsageURL: "/admin/usage?" + query.Encode(), Requests: compactNumber(item.calls), Tokens: compactNumber(item.tokens), RequestValue: item.calls, TokenValue: item.tokens})
+		rows = append(rows, webui.UserUsageView{User: s.userViewWithKey(item.user, directory.ActiveKeys[item.user.ID]), UsageURL: "/admin/usage?" + query.Encode(), Requests: compactNumber(item.calls), Tokens: compactNumber(item.tokens), RequestValue: item.calls, TokenValue: item.tokens})
 	}
 	byRequests, byTokens := userUsageCharts(rows)
-	return byRequests, byTokens, compactNumber(unlinkedCalls), compactNumber(unlinkedTokens), unlinkedCalls > 0 || unlinkedTokens > 0
+	return byRequests, byTokens, compactNumber(unlinkedCalls), compactNumber(unlinkedTokens), unlinkedCalls > 0 || unlinkedTokens > 0, nil
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
@@ -220,27 +224,30 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(r.URL.Query().Get("sort")) != "" {
 		http.SetCookie(w, &http.Cookie{Name: "portal_admin_user_sort", Value: sortOrder, Path: "/admin/users", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 365 * 24 * 60 * 60})
 	}
-	statusTotal, err := s.Store.CountUsers(r.Context(), status)
+	total, err := s.Store.CountUsersMatching(r.Context(), status, q)
 	if err != nil {
 		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
 		return
 	}
-	loadLimit := statusTotal
-	if loadLimit < 1 {
-		loadLimit = 1
-	}
-	users, err := s.Store.ListUsers(r.Context(), status, q, loadLimit, 0)
-	if err != nil {
-		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
-		return
-	}
-	total := len(users)
 	pages := (total + size - 1) / size
 	if pages < 1 {
 		pages = 1
 	}
 	if page > pages {
 		page = pages
+	}
+	// Usage/last-seen sorts need all matching rows to rank correctly. Name and
+	// creation sorts can paginate before reading keys or querying CPAMP usage.
+	paged := strings.HasPrefix(sortOrder, "created_") || strings.HasPrefix(sortOrder, "name_")
+	var users []domain.User
+	if paged {
+		users, err = s.Store.ListUserDisplayPage(r.Context(), status, q, sortOrder, size, (page-1)*size)
+	} else {
+		users, err = s.Store.ListUsers(r.Context(), status, q, max(1, total), 0)
+	}
+	if err != nil {
+		s.errorPage(w, r, 500, "用户列表暂时不可用", err)
+		return
 	}
 	v := webui.AdminUsersView{LayoutView: s.layout(u, currentToken(r), "用户管理", "admin-users"), Query: q, Status: status, Sort: sortOrder, Statuses: []string{"pending", "rejected", "approved", "suspended", "suspended_pending", "delete_pending"}, Page: page, PageCount: pages, Total: strconv.Itoa(total)}
 	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); msg != "" {
@@ -252,11 +259,16 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	keyOwners := make(map[string]string)
 	lastUsedByUser := make(map[string]time.Time)
 	var hashes []string
+	userIDs := make([]string, 0, len(users))
+	for _, user := range users {
+		userIDs = append(userIDs, user.ID)
+	}
+	directory, directoryErr := s.Store.UserDirectoryFor(r.Context(), userIDs, nil, true)
+	if directoryErr != nil {
+		v.Error = "用户 Key 资料暂时不可用"
+	}
 	for _, x := range users {
-		keys, keyErr := s.Store.ListKeysByUser(r.Context(), x.ID)
-		if keyErr != nil {
-			continue
-		}
+		keys := directory.Keys[x.ID]
 		for _, key := range keys {
 			keyOwners[strings.ToLower(strings.TrimSpace(key.Hash))] = x.ID
 			hashes = append(hashes, key.Hash)
@@ -266,7 +278,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	usageByUser := make(map[string]cpamp.UsageSummary)
-	usageLoaded := true
+	usageLoaded := directoryErr == nil
 	now := time.Now().UTC()
 	stats, usageErr := s.Keys.APIKeyUsage(r.Context(), hashes, now.AddDate(0, 0, -7), now)
 	if usageErr != nil {
@@ -301,39 +313,47 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	for _, x := range users {
 		rows = append(rows, sortableUser{user: x, lastUsed: lastUsedByUser[x.ID], usage: usageByUser[x.ID]})
 	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		left, right := rows[i], rows[j]
-		switch sortOrder {
-		case "created_desc":
-			return left.user.CreatedAt.After(right.user.CreatedAt)
-		case "created_asc":
-			return left.user.CreatedAt.Before(right.user.CreatedAt)
-		case "last_used_desc":
-			return adminUserTimeBefore(left.lastUsed, right.lastUsed, true)
-		case "last_used_asc":
-			return adminUserTimeBefore(left.lastUsed, right.lastUsed, false)
-		case "usage_desc":
-			if left.usage.TotalCalls != right.usage.TotalCalls {
-				return left.usage.TotalCalls > right.usage.TotalCalls
+	if !paged {
+		sort.SliceStable(rows, func(i, j int) bool {
+			left, right := rows[i], rows[j]
+			switch sortOrder {
+			case "created_desc":
+				return left.user.CreatedAt.After(right.user.CreatedAt)
+			case "created_asc":
+				return left.user.CreatedAt.Before(right.user.CreatedAt)
+			case "last_used_desc":
+				return adminUserTimeBefore(left.lastUsed, right.lastUsed, true)
+			case "last_used_asc":
+				return adminUserTimeBefore(left.lastUsed, right.lastUsed, false)
+			case "usage_desc":
+				if left.usage.TotalCalls != right.usage.TotalCalls {
+					return left.usage.TotalCalls > right.usage.TotalCalls
+				}
+				return left.usage.TotalTokens > right.usage.TotalTokens
+			case "usage_asc":
+				if left.usage.TotalCalls != right.usage.TotalCalls {
+					return left.usage.TotalCalls < right.usage.TotalCalls
+				}
+				return left.usage.TotalTokens < right.usage.TotalTokens
+			case "name_asc":
+				return strings.ToLower(left.user.Name) < strings.ToLower(right.user.Name)
+			case "name_desc":
+				return strings.ToLower(left.user.Name) > strings.ToLower(right.user.Name)
+			default:
+				return left.user.CreatedAt.After(right.user.CreatedAt)
 			}
-			return left.usage.TotalTokens > right.usage.TotalTokens
-		case "usage_asc":
-			if left.usage.TotalCalls != right.usage.TotalCalls {
-				return left.usage.TotalCalls < right.usage.TotalCalls
-			}
-			return left.usage.TotalTokens < right.usage.TotalTokens
-		case "name_asc":
-			return strings.ToLower(left.user.Name) < strings.ToLower(right.user.Name)
-		case "name_desc":
-			return strings.ToLower(left.user.Name) > strings.ToLower(right.user.Name)
-		default:
-			return left.user.CreatedAt.After(right.user.CreatedAt)
-		}
-	})
+		})
+	}
 	start := (page - 1) * size
 	end := start + size
+	if paged {
+		start, end = 0, len(rows)
+	}
 	if end > len(rows) {
 		end = len(rows)
+	}
+	if start > end {
+		start = end
 	}
 	for _, item := range rows[start:end] {
 		x := item.user
@@ -343,7 +363,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 			usage.Requests = compactNumber(summary.TotalCalls)
 			usage.TotalTokens = compactNumber(summary.TotalTokens)
 		}
-		row := webui.UserRowView{User: s.userView(x), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(item.lastUsed), CanManage: true, Usage: usage}
+		row := webui.UserRowView{User: s.userViewWithKey(x, directory.ActiveKeys[x.ID]), Pending: x.Status == domain.StatusPending, LastUsed: s.formatTime(item.lastUsed), CanManage: true, Usage: usage}
 		v.Users = append(v.Users, row)
 	}
 	_ = s.UI.Render(w, webui.PageAdminUsers, v)
@@ -639,19 +659,17 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// All channel panels travel in the initial HTML. Switching never reads CPA.
+	// All channel credentials and configuration summaries appear in the initial HTML.
 	// Bound the combined reads so an unavailable provider cannot stall the page.
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
+	r = r.WithContext(s.Store.WithUpstreamPageSettings(r.Context()))
 	layout := s.layout(currentUser(r), currentToken(r), "上游管理", "admin-upstreams")
 	v := s.adminUpstreamChannelView(r, channel, layout, true)
+	s.loadClientModelView(r, &v)
 	s.loadOAuthPresetViews(r, &v)
 	v.PresetCardOrder, v.PresetLayoutError = s.upstreamCardOrder(r.Context(), "presets")
-	if r.Header.Get("X-Upstream-Channel-Only") == "true" {
-		_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
-		return
-	}
 	channels, channelErr := s.Keys.OAuthChannels(r.Context())
 	if channelErr != nil {
 		v.Error = "渠道列表暂时不可用"
@@ -667,10 +685,8 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 		channels = append(channels, channel)
 	}
 	for _, value := range channels {
-		v.Channels = append(v.Channels, webui.OAuthChannelView{Value: value, Label: service.OAuthChannelLabel(value), Selected: value == channel})
 		if value == channel {
 			panel := v
-			panel.Channels = nil
 			panel.ChannelPanels = nil
 			v.ChannelPanels = append(v.ChannelPanels, panel)
 		} else {
@@ -691,6 +707,10 @@ func (s *Server) adminUpstreamRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Keys.InvalidateUpstreamReadCache()
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		clientConfigJSON(w, http.StatusOK, map[string]string{"message": "已请求刷新上游配置"})
+		return
+	}
 	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "已请求刷新上游配置"), http.StatusSeeOther)
 }
 
@@ -707,7 +727,6 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 			v.IdentityCompatibilityReady = s.Cfg.GatewayListenAddr != ""
 		}
 	}
-	v.AliasCardOrder, v.AliasLayoutError = s.upstreamCardOrder(r.Context(), "aliases:"+channel)
 	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil && v.SupportsQuota {
@@ -763,12 +782,11 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 		}
 	}
 	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context(), channel)
-	aliases, revision, aliasErr := s.Keys.OAuthModelAliases(r.Context(), channel)
+	aliases, _, aliasErr := s.Keys.OAuthModelAliases(r.Context(), channel)
 	var reasoningCaps map[string]string
-	var reasoningRevision string
 	var reasoningErr error
 	if v.SupportsReasoning {
-		reasoningCaps, reasoningRevision, reasoningErr = s.Keys.OAuthReasoningCaps(r.Context(), channel)
+		reasoningCaps, _, reasoningErr = s.Keys.OAuthReasoningCaps(r.Context(), channel)
 	}
 	aliasByModel := make(map[string][]string, len(aliases))
 	keepOriginalByModel := make(map[string]bool, len(aliases))
@@ -776,8 +794,6 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 		v.AliasError = "模型别名暂时不可用"
 		s.Logger.Error("list OAuth model aliases", "error", aliasErr)
 	} else {
-		v.AliasReady = true
-		v.AliasRevision = revision
 		for _, alias := range aliases {
 			modelID := strings.ToLower(alias.Name)
 			aliasByModel[modelID] = append(aliasByModel[modelID], alias.Alias)
@@ -787,9 +803,6 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 	if reasoningErr != nil {
 		v.ReasoningError = "思考强度配置暂时不可用"
 		s.Logger.Error("list OAuth reasoning caps", "error", reasoningErr)
-	} else {
-		v.ReasoningReady = v.SupportsReasoning
-		v.ReasoningRevision = reasoningRevision
 	}
 	if modelErr != nil {
 		v.ModelError = "OAuth 模型状态暂时不可用"
@@ -798,37 +811,25 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 		v.WildcardRules = wildcards
 		for _, model := range models {
 			modelAliases := aliasByModel[strings.ToLower(model.ID)]
-			row := webui.OAuthModelView{ID: model.ID, DisplayName: model.DisplayName, AliasList: modelAliases, KeepOriginal: len(modelAliases) == 0 || keepOriginalByModel[strings.ToLower(model.ID)], Enabled: model.Enabled, WildcardRule: model.WildcardRule}
-			v.Models = append(v.Models, row)
-			if model.Enabled {
-				v.AliasModels = append(v.AliasModels, row)
-				levels := service.OAuthReasoningLevels(channel, model)
-				if v.SupportsReasoning && len(levels) > 0 {
-					cap := reasoningCaps[strings.ToLower(model.ID)]
-					capRow := webui.ReasoningCapModelView{ID: model.ID}
-					capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: "", Label: "不限制", Selected: cap == ""})
-					found := cap == ""
-					for _, level := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"} {
-						for _, supported := range levels {
-							if strings.EqualFold(supported, level) {
-								label := level
-								if len(model.ThinkingLevels) == 0 {
-									if budget, ok := service.OAuthReasoningBudget(channel, model, level); ok {
-										label = fmt.Sprintf("%s（%d tokens）", level, budget)
-									}
-								}
-								capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: level, Label: label, Selected: cap == level})
-								found = found || cap == level
-								break
-							}
+			row := webui.OAuthModelView{ID: model.ID, AliasList: modelAliases, KeepOriginal: len(modelAliases) == 0 || keepOriginalByModel[strings.ToLower(model.ID)], Enabled: model.Enabled}
+			if model.Enabled && v.SupportsReasoning {
+				cap := reasoningCaps[strings.ToLower(model.ID)]
+				if cap != "" {
+					row.ReasoningCap = cap
+					declared := false
+					for _, level := range service.OAuthReasoningLevels(channel, model) {
+						declared = declared || strings.EqualFold(cap, level)
+					}
+					if !declared {
+						row.ReasoningCap += "（当前模型未声明）"
+					} else if len(model.ThinkingLevels) == 0 {
+						if budget, ok := service.OAuthReasoningBudget(channel, model, cap); ok {
+							row.ReasoningCap = fmt.Sprintf("%s（%d tokens）", cap, budget)
 						}
 					}
-					if !found {
-						capRow.Options = append(capRow.Options, webui.ReasoningCapOptionView{Value: cap, Label: cap + "（当前模型未声明）", Selected: true})
-					}
-					v.ReasoningModels = append(v.ReasoningModels, capRow)
 				}
 			}
+			v.Models = append(v.Models, row)
 		}
 	}
 	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); showMessages && msg != "" {
@@ -837,71 +838,10 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 	if msg := strings.TrimSpace(r.URL.Query().Get("error")); showMessages && msg != "" {
 		v.ModelError = msg
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("alias_error")); showMessages && msg != "" {
-		v.AliasError = msg
-	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("reasoning_error")); showMessages && msg != "" {
-		v.ReasoningError = msg
-	}
 	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); showMessages && msg != "" {
 		v.PresetError = msg
 	}
-	refresh := s.Keys.QuotaRefreshStatus()
-	v.RefreshLabel = "刷新额度"
-	v.RefreshRunning = refresh.Running
-	if refresh.Running {
-		v.RefreshLabel = "正在刷新…"
-		v.RefreshDisabled = true
-	} else if !refresh.NextAllowedAt.IsZero() && time.Now().UTC().Before(refresh.NextAllowedAt) {
-		v.RefreshLabel = "稍后可刷新"
-		v.RefreshCompleted = !refresh.LastFinishedAt.IsZero() && refresh.Succeeded > 0 && refresh.Failed == 0
-		v.RefreshDisabled = true
-	}
 	return v
-}
-
-func (s *Server) adminOAuthPresetSave(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
-		return
-	}
-	channel, ok := s.upstreamChannel(w, r)
-	if !ok {
-		return
-	}
-	name := strings.TrimSpace(r.FormValue("name"))
-	if length := len([]rune(name)); length == 0 || length > 40 {
-		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "预设名称须为 1 至 40 个字符"), http.StatusSeeOther)
-		return
-	}
-	snapshot, err := s.Keys.OAuthPresetSnapshot(r.Context())
-	if err != nil {
-		s.Logger.Error("capture OAuth preset", "error", err)
-		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", "读取当前调用配置失败："+err.Error()), http.StatusSeeOther)
-		return
-	}
-	payload, err := json.Marshal(snapshot)
-	if err != nil {
-		s.errorPage(w, r, http.StatusInternalServerError, "保存调用预设失败", err)
-		return
-	}
-	id, err := security.NewID("preset_")
-	if err != nil {
-		s.errorPage(w, r, http.StatusInternalServerError, "保存调用预设失败", err)
-		return
-	}
-	u := currentUser(r)
-	saved, err := s.Store.SaveOAuthPreset(r.Context(), store.OAuthPreset{ID: id, Name: name, Payload: string(payload), UpdatedBy: u.Name})
-	if err != nil {
-		message := "保存调用预设失败"
-		if strings.Contains(err.Error(), "limit") {
-			message = fmt.Sprintf("最多保存 %d 个调用预设", store.MaxOAuthPresets)
-		}
-		http.Redirect(w, r, upstreamRedirectURL(channel, "preset_error", message), http.StatusSeeOther)
-		return
-	}
-	s.audit(r, u, "oauth_preset.save", saved.Name, "跨渠道；OAuth 模型、模型别名映射及思考强度上限")
-	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已保存"), http.StatusSeeOther)
 }
 
 func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {
@@ -956,110 +896,6 @@ func (s *Server) adminOAuthPresetDelete(w http.ResponseWriter, r *http.Request) 
 	}
 	s.audit(r, currentUser(r), "oauth_preset.delete", preset.Name, "跨渠道；已删除预设，不影响当前调用配置")
 	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "调用预设已删除"), http.StatusSeeOther)
-}
-
-func (s *Server) adminOAuthModelAliases(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
-		return
-	}
-	channel, ok := s.upstreamChannel(w, r)
-	if !ok {
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		s.errorPage(w, r, http.StatusBadRequest, "模型别名表单无效", nil)
-		return
-	}
-	models := r.PostForm["model"]
-	inputs := make([]service.OAuthModelAliasInput, 0, len(models))
-	keepOriginal := make(map[string]bool, len(r.PostForm["keep_original"]))
-	for _, model := range r.PostForm["keep_original"] {
-		keepOriginal[strings.ToLower(strings.TrimSpace(model))] = true
-	}
-	for i, model := range models {
-		inputs = append(inputs, service.OAuthModelAliasInput{Model: model, Aliases: strings.Join(r.PostForm["alias_"+strconv.Itoa(i)], ","), KeepOriginal: keepOriginal[strings.ToLower(strings.TrimSpace(model))]})
-	}
-	before, _, beforeErr := s.Keys.OAuthModelAliases(r.Context(), channel)
-	if err := s.Keys.SetOAuthModelAliases(r.Context(), inputs, r.PostForm.Get("revision"), channel); err != nil {
-		s.Logger.Error("update OAuth model aliases", "error", err)
-		http.Redirect(w, r, upstreamRedirectURL(channel, "alias_error", err.Error()), http.StatusSeeOther)
-		return
-	}
-	detail := "已保存；变更明细暂不可用"
-	if after, _, err := s.Keys.OAuthModelAliases(r.Context(), channel); beforeErr == nil && err == nil {
-		detail = aliasChangeDetails(before, after)
-	}
-	s.audit(r, currentUser(r), "oauth_model.aliases.update", channel, detail)
-	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "模型别名已保存"), http.StatusSeeOther)
-}
-
-func (s *Server) adminReasoningCaps(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
-		return
-	}
-	channel, ok := s.upstreamChannel(w, r)
-	if !ok {
-		return
-	}
-	if channel != "codex" && channel != "antigravity" {
-		s.errorPage(w, r, http.StatusBadRequest, "该渠道暂不支持思考强度上限", nil)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		s.errorPage(w, r, http.StatusBadRequest, "思考强度表单无效", nil)
-		return
-	}
-	models := r.PostForm["model"]
-	inputs := make([]service.ReasoningCapInput, 0, len(models))
-	for i, model := range models {
-		values := r.PostForm["cap_"+strconv.Itoa(i)]
-		if len(values) != 1 {
-			http.Redirect(w, r, upstreamRedirectURL(channel, "reasoning_error", "思考强度表单已变化，请刷新页面后重试"), http.StatusSeeOther)
-			return
-		}
-		inputs = append(inputs, service.ReasoningCapInput{Model: model, Cap: values[0]})
-	}
-	before, _, beforeErr := s.Keys.OAuthReasoningCaps(r.Context(), channel)
-	if err := s.Keys.SetOAuthReasoningCaps(r.Context(), inputs, r.PostForm.Get("reasoning_revision"), channel); err != nil {
-		s.Logger.Error("update OAuth reasoning caps", "error", err)
-		http.Redirect(w, r, upstreamRedirectURL(channel, "reasoning_error", err.Error()), http.StatusSeeOther)
-		return
-	}
-	detail := "已保存；变更明细暂不可用"
-	if after, _, err := s.Keys.OAuthReasoningCaps(r.Context(), channel); beforeErr == nil && err == nil {
-		detail = reasoningCapChangeDetails(before, after)
-	}
-	s.audit(r, currentUser(r), "oauth_model.reasoning_caps.update", channel, detail)
-	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "思考强度上限已保存"), http.StatusSeeOther)
-}
-
-func (s *Server) adminOAuthModelStatus(w http.ResponseWriter, r *http.Request) {
-	if !s.verifyCSRF(r) {
-		s.errorPage(w, r, http.StatusForbidden, "请求已失效", nil)
-		return
-	}
-	channel, ok := s.upstreamChannel(w, r)
-	if !ok {
-		return
-	}
-	modelID := strings.TrimSpace(r.FormValue("model"))
-	enabled := r.FormValue("enabled") == "true"
-	if err := s.Keys.SetOAuthModelEnabled(r.Context(), modelID, enabled, channel); err != nil {
-		s.Logger.Error("update OAuth model status", "model", modelID, "error", err)
-		http.Redirect(w, r, upstreamRedirectURL(channel, "error", err.Error()), http.StatusSeeOther)
-		return
-	}
-	action, message, detail := "oauth_model.disable", "OAuth 模型已停用，相关别名和思考强度上限已删除", "Codex；已删除该模型的全部别名和门户思考强度上限"
-	if channel != "codex" {
-		message, detail = "OAuth 模型已停用，相关别名已删除", service.OAuthChannelLabel(channel)+"；已删除该模型的全部别名"
-	}
-	if enabled {
-		action, message, detail = "oauth_model.enable", "OAuth 模型已启用", service.OAuthChannelLabel(channel)
-	}
-	s.audit(r, currentUser(r), action, modelID, detail)
-	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", message), http.StatusSeeOther)
 }
 
 func (s *Server) adminUpstreamStatus(w http.ResponseWriter, r *http.Request) {

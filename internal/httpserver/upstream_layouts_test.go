@@ -69,16 +69,12 @@ func TestSharedUpstreamLayoutsAcrossAdminSessionsAndScopes(t *testing.T) {
 	if body := save(one, csrfOne, "presets", `["preset-b","preset-a"]`, http.StatusOK); !strings.Contains(body, `"ok":true`) {
 		t.Fatalf("save reply=%s", body)
 	}
-	save(one, csrfOne, "aliases:codex", `["codex-model"]`, http.StatusOK)
-	save(one, csrfOne, "aliases:antigravity", `["antigravity-model"]`, http.StatusOK)
 	if fake.configCalls != callsBeforeSave || len(fake.configData) != 0 || len(fake.aliases) != 0 || len(fake.excluded) != 0 {
 		t.Fatal("layout saving must not read or write upstream model configuration")
 	}
 	page := html.UnescapeString(getBody(t, two, portal.URL+"/admin/upstreams?channel=antigravity", http.StatusOK))
 	for _, want := range []string{
 		`data-masonry-key="presets" data-masonry-order="["preset-b","preset-a"]"`,
-		`data-masonry-key="aliases:codex" data-masonry-order="["codex-model"]"`,
-		`data-masonry-key="aliases:antigravity" data-masonry-order="["antigravity-model"]"`,
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("second browser missing shared layout %s", want)
@@ -94,7 +90,7 @@ func TestSharedUpstreamLayoutsAcrossAdminSessionsAndScopes(t *testing.T) {
 		t.Fatal("first browser did not load the latest shared order")
 	}
 	for _, invalid := range []struct{ scope, order string }{
-		{"registration_open", `["x"]`}, {"aliases:", `[]`}, {"presets", `["x","x"]`},
+		{"registration_open", `["x"]`}, {"aliases:codex", `[]`}, {"presets", `["x","x"]`},
 		{"presets", `null`}, {"presets", `{}`}, {"presets", `bad`}, {"presets", `[""]`},
 	} {
 		save(one, csrfOne, invalid.scope, invalid.order, http.StatusBadRequest)

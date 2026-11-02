@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>管理概览</h1><p class="muted">账号审批、使用量和系统健康状态。</p></div></div>
-{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{template "flash-notice" .Flash}}
 <div class="metric-grid admin-metrics">{{range .Counts}}<div class="metric-card"><span>{{.Label}}</span><strong>{{.Value}}</strong>{{if .Hint}}<small>{{.Hint}}</small>{{end}}</div>{{end}}</div>
 <div class="grid grid-2 section-gap overview-card-grid"><section class="card overview-resource-card" data-overview-resources>
     <div class="section-head compact"><h2>资源占用</h2><a class="text-link" href="/admin/system#resources">详情 →</a></div>

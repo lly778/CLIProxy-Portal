@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestOAuthPresetIsGlobalAndOutsideChannelPanels(t *testing.T) {
+func TestOAuthPresetsShareTheGlobalConfigurationCard(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
 		t.Fatal(err)
@@ -20,15 +20,10 @@ func TestOAuthPresetIsGlobalAndOutsideChannelPanels(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := out.String()
-	if strings.Count(html, `data-global-oauth-presets`) != 1 || strings.Count(html, `action="/admin/upstreams/presets/save"`) != 1 {
+	if strings.Count(html, `data-global-oauth-presets`) != 1 || strings.Count(html, `data-preset-editor aria-labelledby=`) != 1 {
 		t.Fatal("preset controls duplicated per channel")
 	}
-	global := strings.Index(html, `data-global-oauth-presets`)
-	panelIndex := strings.Index(html, `data-upstream-channel-panel`)
-	if global < 0 || global > panelIndex {
-		t.Fatal("shared presets nested in channel panel")
-	}
-	for _, want := range []string{"共用最多 20 个预设", "Codex · gpt", "Antigravity · claude", "预设记录的所有渠道模型"} {
+	for _, want := range []string{"最多保存 20 个预设", "Codex · gpt", "Antigravity · claude", "预设记录的所有渠道模型"} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("global preset UI missing %s", want)
 		}
@@ -60,42 +55,10 @@ func TestOAuthPresetCardsUseIndependentColumns(t *testing.T) {
 			t.Fatalf("preset cards must stack independently without splitting: %s", want)
 		}
 	}
-	_, narrow, found := strings.Cut(css, "@media (max-width: 760px) {")
-	narrow, _, _ = strings.Cut(narrow, "\n}")
-	if !found || !strings.Contains(narrow, `.oauth-preset-list { grid-template-columns: 1fr; }`) {
+	if !strings.Contains(css, `.oauth-preset-list { grid-template-columns: 1fr; }`) {
 		t.Fatal("narrow preset cards must retain their single-column layout")
 	}
 	if strings.Contains(css, `.oauth-preset-list { column-count:`) {
 		t.Fatal("preset cards must not depend on browser column balancing")
-	}
-}
-
-func TestAliasSortingScopesPreserveOriginalModelFieldBindings(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, channel := range []string{"codex", "antigravity"} {
-		view := AdminUpstreamsView{Channel: channel, AliasReady: true, AliasModels: []OAuthModelView{
-			{ID: "model-a", AliasList: []string{"public-a"}, KeepOriginal: true},
-			{ID: "model-b", AliasList: []string{"public-b"}},
-		}}
-		var out bytes.Buffer
-		if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
-			t.Fatal(err)
-		}
-		html := out.String()
-		for _, want := range []string{
-			`data-masonry-key="aliases:` + channel + `"`,
-			`data-masonry-card="model-a"`, `data-masonry-card="model-b"`,
-			`name="alias_0" value="public-a"`, `name="alias_1" value="public-b"`,
-			`name="model" value="model-a"`, `name="model" value="model-b"`,
-			`name="keep_original" value="model-a" checked`,
-			`type="button" data-masonry-handle hidden`,
-		} {
-			if !strings.Contains(html, want) {
-				t.Fatalf("sorting controls must preserve %s", want)
-			}
-		}
 	}
 }

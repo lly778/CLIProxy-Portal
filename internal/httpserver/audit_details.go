@@ -1,10 +1,7 @@
 package httpserver
 
 import (
-	"sort"
 	"strings"
-
-	"cliproxy-portal/internal/cpamp"
 )
 
 func auditActionDisplay(action string) string {
@@ -35,8 +32,12 @@ func auditActionDisplay(action string) string {
 		return "模型连接测试失败"
 	case "oauth_model.aliases.update":
 		return "修改模型别名"
+	case "oauth_config.update":
+		return "修改上游模型配置"
 	case "oauth_model.reasoning_caps.update":
 		return "修改思考上限"
+	case "client_models.save":
+		return "保存客户端模型配置"
 	case "oauth_model.enable":
 		return "启用模型"
 	case "oauth_model.disable":
@@ -112,6 +113,8 @@ func auditTargetDisplay(action, id, label string) string {
 		target = strings.TrimSpace(id)
 	}
 	switch action {
+	case "client_models.save":
+		return "客户端模型同步"
 	case "registration.toggle":
 		return "注册设置"
 	case "policy.publish":
@@ -165,6 +168,15 @@ func auditDetailDisplay(action, detail string) string {
 		return "—"
 	}
 	switch action {
+	case "client_models.save":
+		parts := strings.Split(detail, "；")
+		visible := parts[:0]
+		for _, part := range parts {
+			if !strings.HasPrefix(strings.TrimSpace(part), "配置版本") {
+				visible = append(visible, part)
+			}
+		}
+		return strings.Join(visible, "；")
 	case "resource.policy.update":
 		parts := strings.Split(detail, "；")
 		visible := parts[:0]
@@ -247,99 +259,6 @@ func auditReasoningDetailDisplay(detail string) string {
 			continue
 		}
 		changes[index] = model + ": " + reasoningCapLabel(before) + " → " + reasoningCapLabel(after)
-	}
-	return strings.Join(changes, "；")
-}
-
-func aliasChangeDetails(before, after []cpamp.OAuthModelAlias) string {
-	oldSettings := aliasSettings(before)
-	newSettings := aliasSettings(after)
-	ids := make(map[string]bool, len(oldSettings)+len(newSettings))
-	for id := range oldSettings {
-		ids[id] = true
-	}
-	for id := range newSettings {
-		ids[id] = true
-	}
-	models := make([]string, 0, len(ids))
-	for id := range ids {
-		models = append(models, id)
-	}
-	sort.Strings(models)
-	changes := make([]string, 0, len(models))
-	for _, id := range models {
-		oldValue := oldSettings[id]
-		newValue := newSettings[id]
-		if oldValue != newValue {
-			changes = append(changes, id+": "+aliasSettingLabel(oldValue)+" → "+aliasSettingLabel(newValue))
-		}
-	}
-	if len(changes) == 0 {
-		return "配置未变化"
-	}
-	return strings.Join(changes, "；")
-}
-
-func aliasSettingLabel(value string) string {
-	if value == "" {
-		return "原名"
-	}
-	return value
-}
-
-func aliasSettings(aliases []cpamp.OAuthModelAlias) map[string]string {
-	type selection struct {
-		aliases      []string
-		keepOriginal bool
-	}
-	grouped := make(map[string]*selection)
-	for _, alias := range aliases {
-		id := strings.TrimSpace(alias.Name)
-		name := strings.TrimSpace(alias.Alias)
-		if id == "" || name == "" {
-			continue
-		}
-		entry := grouped[id]
-		if entry == nil {
-			entry = &selection{}
-			grouped[id] = entry
-		}
-		entry.aliases = append(entry.aliases, name)
-		entry.keepOriginal = entry.keepOriginal || alias.Fork
-	}
-	settings := make(map[string]string, len(grouped))
-	for id, entry := range grouped {
-		sort.Strings(entry.aliases)
-		value := strings.Join(entry.aliases, ", ")
-		if entry.keepOriginal {
-			value += "（保留原名）"
-		}
-		settings[id] = value
-	}
-	return settings
-}
-
-func reasoningCapChangeDetails(before, after map[string]string) string {
-	ids := make(map[string]bool, len(before)+len(after))
-	for id := range before {
-		ids[id] = true
-	}
-	for id := range after {
-		ids[id] = true
-	}
-	models := make([]string, 0, len(ids))
-	for id := range ids {
-		models = append(models, id)
-	}
-	sort.Strings(models)
-	changes := make([]string, 0, len(models))
-	for _, id := range models {
-		if before[id] != after[id] {
-			changes = append(changes, id+": "+reasoningCapLabel(before[id])+" → "+reasoningCapLabel(after[id]))
-		}
-	}
-	if len(changes) == 0 {
-		return "配置未变化"
 	}
 	return strings.Join(changes, "；")
 }

@@ -1,6 +1,6 @@
 {{define "content"}}
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>系统管理</h1><p class="muted">集中查看资源保护、存储占用、系统健康和系统日志。</p></div></div>
-{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+{{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{template "flash-notice" .Flash}}
 <section class="section" id="resources" data-resource-panel>
   <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">监测{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 和门户、CPA、CPAMP 的合计内存，决定是否接收新模型请求。</p></div><div class="button-row"><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
   <div class="alert {{.Resources.StateClass}} resource-limit-alert" data-resource-limit-alert role="alert"{{if eq .Resources.State "正常"}} hidden{{end}}><strong data-resource-field="State">{{.Resources.State}}</strong><p data-resource-field="StateHelp">{{.Resources.StateHelp}}</p></div>

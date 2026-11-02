@@ -550,17 +550,11 @@ type UpstreamAccountQuotaView struct {
 	ResetAt          string
 }
 
-type OAuthChannelView struct {
-	Value    string
-	Label    string
-	Selected bool
-}
-
 type AdminUpstreamsView struct {
 	LayoutView
+	ClientModels                  ClientModelsView
 	Channel                       string
 	ChannelLabel                  string
-	Channels                      []OAuthChannelView
 	ChannelPanels                 []AdminUpstreamsView
 	SupportsQuota                 bool
 	SupportsReasoning             bool
@@ -573,26 +567,30 @@ type AdminUpstreamsView struct {
 	PresetError                   string
 	PresetCardOrder               string
 	PresetLayoutError             string
-	AliasCardOrder                string
-	AliasLayoutError              string
 	Models                        []OAuthModelView
-	AliasModels                   []OAuthModelView
-	ReasoningModels               []ReasoningCapModelView
 	WildcardRules                 []string
 	ModelError                    string
 	AliasError                    string
-	AliasRevision                 string
-	AliasReady                    bool
 	ReasoningError                string
-	ReasoningRevision             string
-	ReasoningReady                bool
 	QuotaError                    string
-	RefreshLabel                  string
-	RefreshCompleted              bool
-	RefreshDisabled               bool
-	RefreshRunning                bool
 	Enabled                       int
 	Disabled                      int
+}
+
+type ClientModelsView struct {
+	Ready            bool
+	Revision         string
+	DefaultModel     string
+	DefaultReasoning string
+	Models           []ClientModelRowView
+	Error            string
+}
+
+type ClientModelRowView struct {
+	ID               string
+	DefaultReasoning string
+	Selected         bool
+	DefaultOptions   []ReasoningCapOptionView
 }
 
 type OAuthPresetView struct {
@@ -609,17 +607,11 @@ type OAuthPresetView struct {
 }
 
 type OAuthModelView struct {
+	ReasoningCap string
 	ID           string
-	DisplayName  string
 	AliasList    []string
 	KeepOriginal bool
 	Enabled      bool
-	WildcardRule string
-}
-
-type ReasoningCapModelView struct {
-	ID      string
-	Options []ReasoningCapOptionView
 }
 
 type ReasoningCapOptionView struct {

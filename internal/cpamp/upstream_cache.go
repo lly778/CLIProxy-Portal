@@ -14,6 +14,9 @@ import (
 
 type upstreamReadContextKey struct{}
 
+// Shared with the administrator's complete model-directory aggregate.
+const OAuthModelDefinitionsCacheTTL = time.Hour
+
 // WithUpstreamReadCache opts a read-only page into shared management reads.
 // Writes, verification, conflict checks, quota refresh and other callers retain
 // fresh upstream reads unless they explicitly opt in.
@@ -28,6 +31,25 @@ func WithFreshUpstreamReads(ctx context.Context) context.Context {
 	return context.WithValue(ctx, upstreamReadContextKey{}, false)
 }
 
+// UpstreamReadCacheEnabled is only for read-only derived views, never write validation.
+func UpstreamReadCacheEnabled(ctx context.Context) bool {
+	enabled, _ := ctx.Value(upstreamReadContextKey{}).(bool)
+	return enabled
+}
+
+// UpstreamReadDeadline prevents a derived cache from extending raw response freshness.
+func (c *Client) UpstreamReadDeadline() time.Time {
+	c.upstreamReads.mu.Lock()
+	defer c.upstreamReads.mu.Unlock()
+	var deadline time.Time
+	for _, entry := range c.upstreamReads.entries {
+		if deadline.IsZero() || entry.expiresAt.Before(deadline) {
+			deadline = entry.expiresAt
+		}
+	}
+	return deadline
+}
+
 func upstreamReadTTL(path string) time.Duration {
 	switch path {
 	case pathAuthFiles:
@@ -36,7 +58,7 @@ func upstreamReadTTL(path string) time.Duration {
 		return 30 * time.Minute
 	default:
 		if strings.HasPrefix(path, pathModelDefinitions+"/") && !strings.Contains(path, "?") {
-			return time.Hour
+			return OAuthModelDefinitionsCacheTTL
 		}
 		return 0
 	}
@@ -89,6 +111,14 @@ func (c *Client) InvalidateUpstreamReadCache() {
 	cache.generation++
 	cache.entries = nil
 	cache.bytes = 0
+}
+
+// UpstreamReadGeneration lets aggregate read caches share the same mutation
+// boundary without observing credentials or extending stale configuration.
+func (c *Client) UpstreamReadGeneration() uint64 {
+	c.upstreamReads.mu.Lock()
+	defer c.upstreamReads.mu.Unlock()
+	return c.upstreamReads.generation
 }
 
 func cacheableUpstreamBody(path string, body []byte) bool {

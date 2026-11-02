@@ -127,143 +127,59 @@ func TestAdminUpstreamChannelFormsAndIsolation(t *testing.T) {
 	login := getBody(t, client, portal.URL+"/login", http.StatusOK)
 	csrf := extract(t, login, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, client, portal.URL+"/login", url.Values{"csrf_token": {csrf}, "phone": {admin.Phone}, "password": {"very-long-admin-password"}}, http.StatusSeeOther)
-	page := getBody(t, client, portal.URL+"/admin/upstreams?channel=antigravity", http.StatusOK)
-	if !strings.Contains(page, "codex@example.com") || !strings.Contains(page, "codex-model") {
-		t.Fatal("initial page must preload other channels")
-	}
-	panelBody := func(html, channel string) string {
-		t.Helper()
-		start := strings.Index(html, `data-upstream-channel-panel data-channel="`+channel+`"`)
-		if start < 0 {
-			t.Fatalf("missing channel panel: %s", channel)
-		}
-		body := html[start:]
-		if next := strings.Index(body[1:], `data-upstream-channel-panel`); next >= 0 {
-			body = body[:next+1]
-		}
-		return body
-	}
-	active := panelBody(page, "antigravity")
-	if strings.Count(active, `class="upstream-quota-group"`) != 2 || strings.Count(active, `class="badge neutral">5H</span>`) != 2 || strings.Count(active, `class="badge neutral">7D</span>`) != 2 {
-		t.Fatal("Antigravity page must group all four windows into two abbreviated pairs")
-	}
-	for _, text := range []string{"Antigravity 凭证", "anti@example.com", "antigravity-model", `name="channel" value="antigravity"`, "Gemini", "75%", `action="/quota/refresh"`, `id="reasoning-cap-form-antigravity"`} {
-		if !strings.Contains(active, text) {
-			t.Fatalf("page missing %q", text)
+	page := getBody(t, client, portal.URL+"/admin/upstreams", http.StatusOK)
+	for _, value := range []string{"Codex 凭证", "Antigravity 凭证", "codex@example.com", "anti@example.com", "配置模型与预设", "Gemini", "75%"} {
+		if !strings.Contains(page, value) {
+			t.Fatalf("stacked upstream page missing %s", value)
 		}
 	}
-	for _, text := range []string{"codex@example.com", "codex-model", "暂未接入额度查询"} {
-		if strings.Contains(active, text) {
-			t.Fatalf("foreign UI present: %q", text)
-		}
-	}
-	if fake.configCalls == 0 {
-		t.Fatal("Antigravity reasoning settings were not read")
+	if strings.Contains(page, "切换渠道") || strings.Contains(page, "刷新额度") {
+		t.Fatal("obsolete channel/refresh controls remain")
 	}
 	csrf = extract(t, page, `name="csrf_token" value="([^"]+)"`)
-	if !strings.Contains(page, `action="/admin/upstreams/refresh"`) || !strings.Contains(page, "刷新配置") {
-		t.Fatal("upstream configuration refresh control missing")
-	}
 	postForm(t, client, portal.URL+"/admin/upstreams/refresh", url.Values{"channel": {"antigravity"}}, http.StatusForbidden)
 	if fake.cacheInvalidations != 0 {
-		t.Fatal("configuration cache invalidated without CSRF authorization")
+		t.Fatal("cache invalidated without CSRF")
 	}
-	refreshResponse, err := client.PostForm(portal.URL+"/admin/upstreams/refresh", url.Values{"channel": {"antigravity"}, "csrf_token": {csrf}})
+	postForm(t, client, portal.URL+"/admin/upstreams/refresh", url.Values{"csrf_token": {csrf}}, http.StatusSeeOther)
+	if fake.cacheInvalidations != 1 {
+		t.Fatal("refresh did not invalidate shared cache")
+	}
+	snapshot, err := keys.OAuthPresetSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshResponse.Body.Close()
-	refreshLocation, err := url.Parse(refreshResponse.Header.Get("Location"))
-	if err != nil || refreshResponse.StatusCode != http.StatusSeeOther || refreshLocation.Query().Get("channel") != "antigravity" || fake.cacheInvalidations != 1 {
-		t.Fatal("configuration refresh failed to invalidate or preserve the selected channel")
-	}
-	post := func(path string, values url.Values) {
-		t.Helper()
-		values.Set("channel", "antigravity")
-		values.Set("csrf_token", csrf)
-		response, err := client.PostForm(portal.URL+path, values)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer response.Body.Close()
-		target, err := url.Parse(response.Header.Get("Location"))
-		if err != nil || response.StatusCode != http.StatusSeeOther || target.Query().Get("channel") != "antigravity" {
-			t.Fatalf("status=%d redirect=%s err=%v", response.StatusCode, response.Header.Get("Location"), err)
+	revision := service.OAuthConfigurationRevision(snapshot)
+	for index := range snapshot.Channels {
+		entry := &snapshot.Channels[index]
+		if entry.Channel == "antigravity" {
+			entry.Aliases = []cpamp.OAuthModelAlias{{Name: "antigravity-model", Alias: "anti-public", Fork: true}}
+			entry.ReasoningCaps = map[string]string{"antigravity-model": "low"}
 		}
 	}
-	id := extract(t, active, `/admin/upstreams/([a-f0-9]{64})/status`)
-	post("/admin/upstreams/"+id+"/status", url.Values{"disabled": {"true"}})
-	if !fake.antiDisabled {
-		t.Fatal("account was not disabled")
+	payload, _ := json.Marshal(snapshot)
+	postFormJSON(t, client, portal.URL+"/admin/upstreams/config/edit", url.Values{"payload": {string(payload)}, "revision": {revision}}, http.StatusForbidden)
+	postFormJSON(t, client, portal.URL+"/admin/upstreams/config/edit", url.Values{"csrf_token": {csrf}, "payload": {string(payload)}, "revision": {revision}}, http.StatusOK)
+	if len(fake.aliases["antigravity"]) != 1 || len(fake.aliases["codex"]) != 0 {
+		t.Fatal("combined save mixed channel aliases")
 	}
-	revision := extract(t, active, `name="revision" value="([^"]+)"`)
-	post("/admin/upstreams/models/aliases", url.Values{"model": {"antigravity-model"}, "alias_0": {"anti-public"}, "revision": {revision}, "keep_original": {"antigravity-model"}})
-	if len(fake.aliases["antigravity"]) != 1 {
-		t.Fatal("alias was not saved")
-	}
-	// All channel screens use one shared preset name and snapshot.
-	codexSnapshot, err := keys.OAuthPresetSnapshot(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	codexPayload, _ := json.Marshal(codexSnapshot)
-	if _, err := st.SaveOAuthPreset(t.Context(), store.OAuthPreset{ID: "codex-preset", Name: "日常", Payload: string(codexPayload)}); err != nil {
-		t.Fatal(err)
-	}
-	post("/admin/upstreams/presets/save", url.Values{"name": {"日常"}})
-	antiPresets, err := st.ListOAuthPresets(t.Context())
-	if err != nil || len(antiPresets) != 1 || antiPresets[0].ID != "codex-preset" {
-		t.Fatalf("presets=%v err=%v", antiPresets, err)
-	}
-	var saved service.OAuthPresetSnapshot
-	if json.Unmarshal([]byte(antiPresets[0].Payload), &saved) != nil || len(saved.Channels) != 2 {
-		t.Fatal("save omitted a channel")
-	}
-	page = getBody(t, client, portal.URL+"/admin/upstreams?channel=codex", http.StatusOK)
-	if strings.Count(page, `action="/admin/upstreams/presets/save"`) != 1 || !strings.Contains(page, "日常") || !strings.Contains(page, "Codex · codex-model") || !strings.Contains(page, "Antigravity · antigravity-model") {
-		t.Fatal("global preset must appear once with channel-qualified details")
-	}
-	fake.excluded["codex"] = []string{"codex-model"}
-	post("/admin/upstreams/models/status", url.Values{"model": {"antigravity-model"}, "enabled": {"false"}})
-	post("/admin/upstreams/presets/"+antiPresets[0].ID+"/apply", url.Values{})
-	if len(fake.excluded["antigravity"]) != 0 || len(fake.aliases["antigravity"]) != 1 || len(fake.excluded["codex"]) != 0 {
-		t.Fatal("global preset did not restore both channels")
-	}
-	post("/admin/upstreams/presets/"+antiPresets[0].ID+"/delete", url.Values{})
-	if list, err := st.ListOAuthPresets(t.Context()); err != nil || len(list) != 0 {
-		t.Fatal("global preset was not deleted")
-	}
-	page = getBody(t, client, portal.URL+"/admin/upstreams?channel=antigravity", http.StatusOK)
-	reasoningRevision := extract(t, panelBody(page, "antigravity"), `name="reasoning_revision" value="([^"]+)"`)
-	post("/admin/upstreams/models/reasoning", url.Values{"model": {"antigravity-model"}, "cap_0": {"low"}, "reasoning_revision": {reasoningRevision}})
 	antiCaps, _, err := keys.OAuthReasoningCaps(t.Context(), "antigravity")
 	if err != nil || antiCaps["antigravity-model"] != "low" {
 		t.Fatalf("caps=%v err=%v", antiCaps, err)
 	}
-	codexCaps, _, err := keys.OAuthReasoningCaps(t.Context())
-	if err != nil || len(codexCaps) != 0 {
-		t.Fatalf("foreign caps=%v err=%v", codexCaps, err)
+	postFormJSON(t, client, portal.URL+"/admin/upstreams/config/edit", url.Values{"csrf_token": {csrf}, "payload": {string(payload)}, "revision": {revision}}, http.StatusConflict)
+	postFormJSON(t, client, portal.URL+"/admin/upstreams/presets/new/edit", url.Values{"csrf_token": {csrf}, "payload": {string(payload)}, "revision": {"0"}, "name": {"日常"}, "action": {"save"}}, http.StatusOK)
+	presets, err := st.ListOAuthPresets(t.Context())
+	if err != nil || len(presets) != 1 {
+		t.Fatalf("presets=%v err=%v", presets, err)
 	}
-	postForm(t, client, portal.URL+"/admin/upstreams/models/reasoning", url.Values{"channel": {"antigravity"}, "csrf_token": {csrf}}, http.StatusSeeOther)
-	getBody(t, client, portal.URL+"/admin/upstreams?channel=unknown", http.StatusBadRequest)
-	getBody(t, client, portal.URL+"/admin/upstreams?channel=..%2Fcodex", http.StatusBadRequest)
+	postForm(t, client, portal.URL+"/admin/upstreams/presets/"+presets[0].ID+"/apply", url.Values{"csrf_token": {csrf}}, http.StatusSeeOther)
+	postForm(t, client, portal.URL+"/admin/upstreams/presets/"+presets[0].ID+"/delete", url.Values{"csrf_token": {csrf}}, http.StatusSeeOther)
 	codexAccounts, err := keys.UpstreamAccounts(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	postForm(t, client, portal.URL+"/admin/upstreams/"+codexAccounts[0].ID+"/status", url.Values{"channel": {"antigravity"}, "disabled": {"true"}, "csrf_token": {csrf}}, http.StatusBadGateway)
-	if len(fake.excluded["codex"]) != 0 || len(fake.aliases["codex"]) != 0 {
-		t.Fatal("Codex state changed")
-	}
-	request, _ := http.NewRequest(http.MethodGet, portal.URL+"/admin/upstreams?channel=antigravity", nil)
-	request.Header.Set("X-Upstream-Channel-Only", "true")
-	response, err := client.Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	data, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusOK || strings.Contains(string(data), `data-upstream-channel-panel data-channel="codex"`) || !strings.Contains(string(data), `data-upstream-channel-panel data-channel="antigravity"`) {
-		t.Fatal("quota polling must only load its original channel")
-	}
+	getBody(t, client, portal.URL+"/admin/upstreams?channel=unknown", http.StatusBadRequest)
+	getBody(t, client, portal.URL+"/admin/upstreams?channel=..%2Fcodex", http.StatusBadRequest)
 }

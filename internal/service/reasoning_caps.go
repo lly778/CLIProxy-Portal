@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/security"
 	"gopkg.in/yaml.v3"
 )
@@ -44,6 +45,10 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[
 	if err := validateReasoningChannel(channel); err != nil {
 		return nil, "", err
 	}
+	if cpamp.UpstreamReadCacheEnabled(ctx) {
+		value, err := upstreamView(ctx, k, "reasoning", k.readUpstreamReasoningView, cloneUpstreamReasoning)
+		return value.Caps[channel], value.Revision, err
+	}
 	k.modelConfigMu.Lock()
 	defer k.modelConfigMu.Unlock()
 	client, ok := k.CPAMP.(interface {
@@ -67,10 +72,58 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[
 	return caps, security.SHA256(string(data)), nil
 }
 
+type upstreamReasoningView struct {
+	Caps     map[string]map[string]string
+	Revision string
+}
+
+func cloneUpstreamReasoning(value upstreamReasoningView) upstreamReasoningView {
+	caps := make(map[string]map[string]string, len(value.Caps))
+	for channel, entries := range value.Caps {
+		caps[channel] = make(map[string]string, len(entries))
+		for model, cap := range entries {
+			caps[channel][model] = cap
+		}
+	}
+	value.Caps = caps
+	return value
+}
+
+func (k *Keys) readUpstreamReasoningView(ctx context.Context) (upstreamReasoningView, error) {
+	k.modelConfigMu.Lock()
+	defer k.modelConfigMu.Unlock()
+	client, ok := k.CPAMP.(interface {
+		GetConfigYAML(context.Context) ([]byte, error)
+	})
+	if !ok {
+		return upstreamReasoningView{}, errors.New("CPAMP 客户端不支持 CPA 配置管理")
+	}
+	data, err := client.GetConfigYAML(ctx)
+	if err != nil {
+		return upstreamReasoningView{}, err
+	}
+	_, rules, err := parseReasoningConfig(data)
+	if err != nil {
+		return upstreamReasoningView{}, err
+	}
+	value := upstreamReasoningView{Caps: make(map[string]map[string]string), Revision: security.SHA256(string(data))}
+	for _, channel := range []string{"codex", "antigravity"} {
+		caps, err := managedReasoningCapsForChannel(channel, rules)
+		if err != nil {
+			return upstreamReasoningView{}, err
+		}
+		value.Caps[channel] = caps
+	}
+	return value, nil
+}
+
 // SetOAuthReasoningCaps preserves every non-portal CPA rule and all other YAML
 // fields. Portal-managed rules are appended last within override-raw, so they
 // win over ordinary overrides without replacing lower requested efforts.
 func (k *Keys) SetOAuthReasoningCaps(ctx context.Context, inputs []ReasoningCapInput, revision string, channels ...string) error {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
+	k.InvalidateUpstreamReadCache()
+	defer k.InvalidateUpstreamReadCache()
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	if err := k.setOAuthReasoningCaps(ctx, inputs, revision, channels...); err != nil {

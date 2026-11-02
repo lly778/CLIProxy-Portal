@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/domain"
 )
 
@@ -82,24 +81,5 @@ func TestAuditViewsExplainLegacyModelChanges(t *testing.T) {
 	views := s.auditViews(context.Background(), items)
 	if len(views) != 1 || views[0].Action != "修改模型别名" || views[0].Target != "Codex 模型" || views[0].Details != "旧记录未保存变更明细" {
 		t.Fatalf("legacy audit view = %+v", views)
-	}
-}
-
-func TestAliasChangeDetails(t *testing.T) {
-	before := []cpamp.OAuthModelAlias{{Name: "gpt-6-luna", Alias: "old", Fork: true}}
-	after := []cpamp.OAuthModelAlias{{Name: "gpt-6-luna", Alias: "new", Fork: false}}
-	got := aliasChangeDetails(before, after)
-	if !strings.Contains(got, "gpt-6-luna: old（保留原名） → new") {
-		t.Fatalf("alias change = %q", got)
-	}
-	if got := aliasChangeDetails(nil, nil); got != "配置未变化" {
-		t.Fatalf("unchanged alias detail = %q", got)
-	}
-}
-
-func TestReasoningCapChangeDetails(t *testing.T) {
-	got := reasoningCapChangeDetails(map[string]string{"gpt-6-luna": "high"}, map[string]string{"gpt-6-luna": ""})
-	if got != "gpt-6-luna: 高 → 不限制" {
-		t.Fatalf("reasoning cap change = %q", got)
 	}
 }

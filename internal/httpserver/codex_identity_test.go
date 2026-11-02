@@ -47,8 +47,8 @@ func TestAdminIdentityOptionChannelIsolationCSRFAndPersistence(t *testing.T) {
 	if strings.Count(page, `data-codex-identity-toggle`) != 1 || !strings.Contains(page, `action="/admin/upstreams/codex-identity"`) || !strings.Contains(page, "based on GPT-5") {
 		t.Fatal("non-Codex option missing or leaked into Codex panel")
 	}
-	if strings.Index(page, "data-codex-identity-toggle") > strings.LastIndex(page, `class="oauth-model-list"`) || !strings.Contains(page, `type="checkbox" role="switch"`) || strings.Contains(page, "codex-identity-setting") {
-		t.Fatal("compatibility must be a switch in the OAuth model header, with no separate card")
+	if !strings.Contains(page, `type="checkbox" role="switch"`) || strings.Contains(page, "codex-identity-setting") {
+		t.Fatal("compatibility must remain a switch in the combined configuration card")
 	}
 	csrf = extract(t, page, `name="csrf_token" value="([^"]+)"`)
 	endpoint := portal.URL + "/admin/upstreams/codex-identity"

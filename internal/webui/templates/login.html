@@ -2,7 +2,7 @@
 <section class="auth-card">
   <div class="auth-head"><span class="eyebrow">欢迎回来</span><h1>登录账号门户</h1><p>使用手机号和密码登录，管理 API Key 与使用量。</p></div>
   {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}
-  {{if .Flash}}<div class="alert {{.Flash.Kind}}" role="status">{{.Flash.Message}}</div>{{end}}
+  {{template "flash-notice" .Flash}}
   <form method="post" action="/login" class="stack-form">
     {{if .CSRFToken}}<input type="hidden" name="csrf_token" value="{{.CSRFToken}}">{{end}}
     {{if .Next}}<input type="hidden" name="next" value="{{.Next}}">{{end}}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/security"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
@@ -39,10 +40,27 @@ func presetEditorJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(cpamp.WithUpstreamReadCache(r.Context()))
+	live := r.URL.Path == "/admin/upstreams/config/edit"
 	creating := r.PathValue("id") == "new"
 	var preset store.OAuthPreset
 	var snapshot service.OAuthPresetSnapshot
-	if creating {
+	if live {
+		channel, err := service.NormalizeOAuthChannel(r.URL.Query().Get("channel"))
+		if err != nil {
+			presetEditorJSON(w, 400, map[string]string{"error": "OAuth 渠道无效"})
+			return
+		}
+		if r.URL.Query().Get("channel") == "" {
+			snapshot, err = s.Keys.OAuthPresetSnapshot(r.Context())
+		} else {
+			snapshot, err = s.Keys.OAuthChannelConfiguration(r.Context(), channel)
+		}
+		if err != nil {
+			presetEditorJSON(w, 502, map[string]string{"error": "读取上游配置失败，请刷新配置后重试"})
+			return
+		}
+	} else if creating {
 		presets, err := s.Store.ListOAuthPresets(r.Context())
 		if err != nil {
 			presetEditorJSON(w, 500, map[string]string{"error": "读取调用预设失败"})
@@ -124,10 +142,54 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		notice = "模型目录已更新：新增模型默认关闭，已移除模型不再保存。请核对后保存。"
 	}
 	revision := "0"
-	if !creating {
+	if live {
+		revision = service.OAuthConfigurationRevision(snapshot)
+	} else if !creating {
 		revision = strconv.FormatInt(preset.UpdatedAt.UnixMilli(), 10)
 	}
-	presetEditorJSON(w, 200, map[string]any{"id": preset.ID, "name": preset.Name, "revision": revision, "creating": creating, "channels": channels, "notice": notice})
+	presetEditorJSON(w, 200, map[string]any{"id": preset.ID, "name": preset.Name, "revision": revision, "creating": creating, "live": live, "channels": channels, "notice": notice})
+}
+
+func (s *Server) adminOAuthConfigurationEdit(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if r.ParseForm() != nil {
+		presetEditorJSON(w, 400, map[string]string{"error": "配置内容过大或格式无效"})
+		return
+	}
+	if !s.verifyCSRF(r) {
+		presetEditorJSON(w, 403, map[string]string{"error": "请求已失效，请刷新页面后重试"})
+		return
+	}
+	channel, err := service.NormalizeOAuthChannel(r.URL.Query().Get("channel"))
+	if err != nil {
+		presetEditorJSON(w, 400, map[string]string{"error": "OAuth 渠道无效"})
+		return
+	}
+	var snapshot service.OAuthPresetSnapshot
+	decoder := json.NewDecoder(strings.NewReader(r.PostForm.Get("payload")))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&snapshot) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(snapshot.Channels) == 0 {
+		presetEditorJSON(w, 400, map[string]string{"error": "配置内容无效，请重新打开弹窗"})
+		return
+	}
+	if r.URL.Query().Get("channel") != "" && (len(snapshot.Channels) != 1 || snapshot.Channels[0].Channel != channel) {
+		presetEditorJSON(w, 400, map[string]string{"error": "配置渠道不匹配，请重新打开弹窗"})
+		return
+	}
+	if err := s.Keys.ApplyOAuthConfiguration(r.Context(), snapshot, r.PostForm.Get("revision")); err != nil {
+		status := http.StatusBadGateway
+		if errors.Is(err, service.ErrOAuthConfigurationChanged) {
+			status = http.StatusConflict
+		}
+		presetEditorJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	labels := make([]string, 0, len(snapshot.Channels))
+	for _, entry := range snapshot.Channels {
+		labels = append(labels, service.OAuthChannelLabel(entry.Channel))
+	}
+	s.audit(r, currentUser(r), "oauth_config.update", strings.Join(labels, "、"), "OAuth 模型、模型别名映射及思考强度上限")
+	presetEditorJSON(w, 200, map[string]string{"redirect": upstreamRedirectURL(channel, "msg", "上游模型配置已保存并应用")})
 }
 
 func (s *Server) adminOAuthPresetEdit(w http.ResponseWriter, r *http.Request) {

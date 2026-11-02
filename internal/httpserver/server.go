@@ -40,6 +40,7 @@ type Server struct {
 	systemMu     sync.RWMutex
 	systemChecks systemCheckSnapshot
 	backupMu     sync.Mutex
+	presetViews  presetViewsCache
 }
 
 func New(cfg config.Config, st *store.Store, accounts *service.Accounts, keys *service.Keys, secret []byte, logger *slog.Logger) (*Server, error) {
@@ -104,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /usage", s.withApproved(s.usage))
 	mux.HandleFunc("POST /quota/refresh", s.withApproved(s.quotaRefresh))
 	mux.HandleFunc("GET /models", s.withApproved(s.models))
+	mux.HandleFunc("GET /api/client-model-config", s.clientModelsGet)
+	mux.HandleFunc("GET /downloads/codex-sync.ps1", s.downloadClientSync)
 	mux.HandleFunc("POST /models/test", s.withApproved(s.modelsTest))
 	mux.HandleFunc("GET /activity", s.withApproved(s.activity))
 	mux.HandleFunc("GET /logs/dialogue/{id}", s.withApproved(s.downloadDialogue))
@@ -123,11 +126,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/upstreams/refresh", s.withAdmin(s.adminUpstreamRefresh))
 	mux.HandleFunc("POST /admin/upstreams/layout", s.withAdmin(s.adminUpstreamLayoutSave))
 	mux.HandleFunc("POST /admin/upstreams/{id}/status", s.withAdmin(s.adminUpstreamStatus))
-	mux.HandleFunc("POST /admin/upstreams/models/status", s.withAdmin(s.adminOAuthModelStatus))
-	mux.HandleFunc("POST /admin/upstreams/models/aliases", s.withAdmin(s.adminOAuthModelAliases))
-	mux.HandleFunc("POST /admin/upstreams/models/reasoning", s.withAdmin(s.adminReasoningCaps))
+	mux.HandleFunc("GET /admin/upstreams/config/edit", s.withAdmin(s.adminOAuthPresetEditor))
+	mux.HandleFunc("POST /admin/upstreams/config/edit", s.withAdmin(s.adminOAuthConfigurationEdit))
+	mux.HandleFunc("POST /admin/upstreams/client-models", s.withAdmin(s.adminClientModelsSave))
+	mux.HandleFunc("GET /admin/upstreams/client-models/catalog", s.withAdmin(s.adminClientModelCatalog))
 	mux.HandleFunc("POST /admin/upstreams/codex-identity", s.withAdmin(s.adminCodexIdentityCompatibility))
-	mux.HandleFunc("POST /admin/upstreams/presets/save", s.withAdmin(s.adminOAuthPresetSave))
 	mux.HandleFunc("GET /admin/upstreams/presets/{id}/edit", s.withAdmin(s.adminOAuthPresetEditor))
 	mux.HandleFunc("POST /admin/upstreams/presets/{id}/edit", s.withAdmin(s.adminOAuthPresetEdit))
 	mux.HandleFunc("POST /admin/upstreams/presets/{id}/apply", s.withAdmin(s.adminOAuthPresetApply))

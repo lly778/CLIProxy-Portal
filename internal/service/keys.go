@@ -31,6 +31,7 @@ type Keys struct {
 	cacheMu             sync.Mutex
 	cache               map[string]analyticsCache
 	analyticsFlights    map[string]*analyticsFlight
+	usageSource         usageSourceCache
 	actualModelMu       sync.Mutex
 	actualModels        map[string]*actualModelSnapshot
 	timingMu            sync.Mutex
@@ -44,6 +45,8 @@ type Keys struct {
 	antigravityAttempt  map[string]time.Time
 	quotaFetchMu        sync.Mutex
 	modelConfigMu       sync.Mutex
+	clientCatalog       clientCatalogCache
+	upstreamViews       upstreamViewCache
 	presetMu            sync.Mutex
 	reconcileMu         sync.Mutex
 	reconcileStatusMu   sync.RWMutex
@@ -232,7 +235,7 @@ func (k *Keys) runQuotaRefresh(client interface {
 	defer cancel()
 	k.quotaFetchMu.Lock()
 	defer k.quotaFetchMu.Unlock()
-	files, err := client.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		k.finishQuotaRefresh(0, 0, "无法读取上游账号，请稍后再试")
 		return
@@ -526,13 +529,13 @@ func (k *Keys) TestKey(ctx context.Context, userID string) ([]cpamp.Model, error
 		}
 		return nil, err
 	}
-	typed, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListModelsWithAPIKey(context.Context, string) (cpamp.ModelListResponse, error)
 	})
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持 Key 测试")
 	}
-	result, err := typed.ListModelsWithAPIKey(ctx, raw)
+	result, err := k.modelsWithAPIKey(ctx, raw)
 	if err != nil {
 		return nil, errors.New("Key 已存在，但 CPA 模型接口测试失败")
 	}
@@ -714,10 +717,11 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 		if !overview {
 			req.Include.EventsPage.Limit = k.actualModelInitialPageSize(req, refresh)
 		}
-		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
+		req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
 		if !overview {
 			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
 			value = k.withUsageTimings(fetchCtx, cacheKey, userID, req, value, refresh)
@@ -774,25 +778,22 @@ func (k *Keys) GlobalOverviewUsage(ctx context.Context, from, to time.Time) (cpa
 
 func (k *Keys) globalUsage(ctx context.Context, from, to time.Time, events int, overview, refresh bool) (cpamp.AnalyticsResponse, error) {
 	granularity := usageGranularity(from, to)
-	profile := "usage"
 	if overview {
-		profile = "overview"
+		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, APIKeyStats: true, Granularity: granularity}}
+		return k.queryUsageAnalytics(ctx, req, refresh)
 	}
-	cacheKey := fmt.Sprintf("global:%s:%s", profile, analyticsRangeKey(k.Now(), from, to))
+	cacheKey := "global:usage:" + analyticsRangeKey(k.Now(), from, to)
 	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
 		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, APIKeyStats: true, Granularity: granularity}}
-		if !overview {
-			req.Include.Timeline = true
-			req.Include.EventsPage = &cpamp.EventsPage{Limit: k.actualModelInitialPageSize(req, refresh)}
-		}
-		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		req.Include.Timeline = true
+		req.Include.EventsPage = &cpamp.EventsPage{Limit: k.actualModelInitialPageSize(req, refresh)}
+		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
-		if !overview {
-			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
-			value = k.withUsageTimings(fetchCtx, cacheKey, "", req, value, refresh)
-		}
+		req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
+		value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
+		value = k.withUsageTimings(fetchCtx, cacheKey, "", req, value, refresh)
 		value.WindowFromMS, value.WindowToMS = req.FromMS, req.ToMS
 		// Preserve the request-status summary used by CPAMP's timeline and
 		// request logs. Per-key aggregates are only for usage rankings; their
@@ -829,7 +830,7 @@ func (k *Keys) globalRequests(ctx context.Context, limit int, refresh bool) (cpa
 			FromMS: from.UnixMilli(), ToMS: now.UnixMilli(), NowMS: now.UnixMilli(), TimeZone: "Asia/Shanghai",
 			Include: cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: limit}},
 		}
-		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
@@ -842,7 +843,8 @@ func (k *Keys) globalRequests(ctx context.Context, limit int, refresh bool) (cpa
 		if len(page.Items) > limit {
 			page.Items = page.Items[:limit]
 		}
-		return cpamp.AnalyticsResponse{Events: &page}, nil
+		value.Events = &page
+		return value, nil
 	})
 	if err != nil {
 		return cpamp.EventsResponse{}, err
@@ -870,22 +872,18 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 		return []cpamp.APIKeyUsageStat{}, nil
 	}
 	sort.Strings(normalized)
-	cacheKey := fmt.Sprintf("key-stats:%s:%s", security.SHA256(strings.Join(normalized, ",")), analyticsRangeKey(k.Now(), from, to))
-	req := cpamp.AnalyticsRequest{
-		FromMS:   from.UnixMilli(),
-		ToMS:     to.UnixMilli(),
-		NowMS:    k.Now().UnixMilli(),
-		TimeZone: "Asia/Shanghai",
-		Filters:  cpamp.AnalyticsFilters{APIKeyHashes: normalized},
-		Include:  cpamp.AnalyticsInclude{APIKeyStats: true},
-	}
-	value, err := k.loadAnalytics(ctx, cacheKey, false, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
-		return k.CPAMP.Analytics(fetchCtx, req)
-	})
+	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: normalized}, Include: cpamp.AnalyticsInclude{APIKeyStats: true, Granularity: usageGranularity(from, to)}}
+	value, err := k.queryUsageAnalytics(ctx, req, false)
 	if err != nil {
 		return nil, err
 	}
-	return value.APIKeyStats, nil
+	stats := make([]cpamp.APIKeyUsageStat, 0, len(normalized))
+	for _, stat := range value.APIKeyStats {
+		if _, ok := unique[strings.ToLower(strings.TrimSpace(stat.APIKeyHash))]; ok {
+			stats = append(stats, stat)
+		}
+	}
+	return stats, nil
 }
 
 func usageGranularity(from, to time.Time) string {
@@ -903,13 +901,19 @@ func (k *Keys) UpstreamAccounts(ctx context.Context, channels ...string) ([]Upst
 	if err != nil {
 		return nil, err
 	}
-	typed, ok := k.CPAMP.(interface {
+	return upstreamView(ctx, k, "accounts:"+channel, func(ctx context.Context) ([]UpstreamAccount, error) {
+		return k.readUpstreamAccounts(ctx, channel)
+	}, func(value []UpstreamAccount) []UpstreamAccount { return append([]UpstreamAccount(nil), value...) })
+}
+
+func (k *Keys) readUpstreamAccounts(ctx context.Context, channel string) ([]UpstreamAccount, error) {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持上游账号管理")
 	}
-	files, err := typed.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -962,7 +966,7 @@ func (k *Keys) UpstreamAccountQuotas(ctx context.Context, channels ...string) (m
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持实时额度查询")
 	}
-	files, err := typed.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1019,6 +1023,9 @@ func (k *Keys) UpstreamAccountQuotas(ctx context.Context, channels ...string) (m
 // SetUpstreamAccountDisabled re-resolves the submitted opaque ID immediately
 // before mutating CPAMP, then verifies that the requested state was applied.
 func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabled bool, channels ...string) (UpstreamAccount, error) {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
+	k.InvalidateUpstreamReadCache()
+	defer k.InvalidateUpstreamReadCache()
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	channel, err := selectedOAuthChannel(channels)
@@ -1032,7 +1039,7 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 	if !ok {
 		return UpstreamAccount{}, errors.New("CPAMP 客户端不支持上游账号管理")
 	}
-	files, err := typed.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return UpstreamAccount{}, err
 	}
@@ -1051,7 +1058,7 @@ func (k *Keys) SetUpstreamAccountDisabled(ctx context.Context, id string, disabl
 		if err := typed.SetAuthFileDisabled(ctx, selected, disabled); err != nil {
 			return UpstreamAccount{}, err
 		}
-		confirmed, err := typed.ListAuthFiles(ctx)
+		confirmed, err := k.upstreamAuthFiles(ctx)
 		if err != nil {
 			return UpstreamAccount{}, err
 		}
@@ -1096,6 +1103,14 @@ func (k *Keys) OAuthModelSettings(ctx context.Context, channels ...string) ([]OA
 	if err != nil {
 		return nil, nil, err
 	}
+	value, err := upstreamView(ctx, k, "models:"+channel, func(ctx context.Context) (upstreamModelView, error) {
+		models, wildcards, err := k.readOAuthModelSettings(ctx, channel)
+		return upstreamModelView{Models: models, Wildcards: wildcards}, err
+	}, cloneUpstreamModels)
+	return value.Models, value.Wildcards, err
+}
+
+func (k *Keys) readOAuthModelSettings(ctx context.Context, channel string) ([]OAuthModelSetting, []string, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
@@ -1103,7 +1118,7 @@ func (k *Keys) OAuthModelSettings(ctx context.Context, channels ...string) ([]OA
 	if !ok {
 		return nil, nil, errors.New("CPAMP 客户端不支持 OAuth 模型管理")
 	}
-	definitions, err := typed.ListOAuthModelDefinitions(ctx, channel)
+	definitions, err := k.upstreamModelDefinitions(ctx, channel)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1133,6 +1148,14 @@ func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpa
 	if err != nil {
 		return nil, "", err
 	}
+	value, err := upstreamView(ctx, k, "aliases:"+channel, func(ctx context.Context) (upstreamAliasView, error) {
+		aliases, revision, err := k.readOAuthModelAliases(ctx, channel)
+		return upstreamAliasView{Aliases: aliases, Revision: revision}, err
+	}, cloneUpstreamAliases)
+	return value.Aliases, value.Revision, err
+}
+
+func (k *Keys) readOAuthModelAliases(ctx context.Context, channel string) ([]cpamp.OAuthModelAlias, string, error) {
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 	})
@@ -1150,6 +1173,16 @@ func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpa
 // in model catalogs, across every discovered/configured OAuth channel. An
 // alias that is also an enabled real model in any channel stays visible.
 func (k *Keys) HiddenModelAliases(ctx context.Context) (map[string]bool, error) {
+	return upstreamView(ctx, k, "hidden-aliases", k.readHiddenModelAliases, func(value map[string]bool) map[string]bool {
+		result := make(map[string]bool, len(value))
+		for id, hidden := range value {
+			result[id] = hidden
+		}
+		return result
+	})
+}
+
+func (k *Keys) readHiddenModelAliases(ctx context.Context) (map[string]bool, error) {
 	channels, err := k.oauthChannels(ctx, true)
 	if err != nil {
 		return nil, fmt.Errorf("读取模型目录渠道失败：%w", err)
@@ -1222,6 +1255,9 @@ func oauthAliasRevision(aliases []cpamp.OAuthModelAlias) string {
 // original ID alongside aliases; force-mapping keeps alias responses labelled
 // with the client-facing name.
 func (k *Keys) SetOAuthModelAliases(ctx context.Context, inputs []OAuthModelAliasInput, revision string, channels ...string) error {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
+	k.InvalidateUpstreamReadCache()
+	defer k.InvalidateUpstreamReadCache()
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	if err := k.setOAuthModelAliases(ctx, inputs, revision, true, channels...); err != nil {
@@ -1435,6 +1471,9 @@ func validateOAuthAliasNames(models []OAuthModelSetting, aliases []cpamp.OAuthMo
 // SetOAuthModelEnabled updates only an exact model rule. Wildcard exclusions
 // remain untouched because changing one would alter multiple model switches.
 func (k *Keys) SetOAuthModelEnabled(ctx context.Context, modelID string, enabled bool, channels ...string) error {
+	ctx = cpamp.WithFreshUpstreamReads(ctx)
+	k.InvalidateUpstreamReadCache()
+	defer k.InvalidateUpstreamReadCache()
 	k.presetMu.Lock()
 	defer k.presetMu.Unlock()
 	if err := k.setOAuthModelEnabled(ctx, modelID, enabled, true, channels...); err != nil {
@@ -1465,7 +1504,7 @@ func (k *Keys) setOAuthModelEnabled(ctx context.Context, modelID string, enabled
 		return errors.New("CPAMP 客户端不支持 OAuth 模型管理")
 	}
 	modelID = strings.TrimSpace(modelID)
-	definitions, err := typed.ListOAuthModelDefinitions(ctx, channel)
+	definitions, err := k.upstreamModelDefinitions(ctx, channel)
 	if err != nil {
 		return err
 	}
@@ -1635,7 +1674,7 @@ func (k *Keys) UpstreamQuota(ctx context.Context) (UpstreamQuotaPool, error) {
 	if !ok {
 		return UpstreamQuotaPool{}, errors.New("CPAMP 客户端不支持实时额度查询")
 	}
-	files, err := typed.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return UpstreamQuotaPool{}, err
 	}
@@ -1861,6 +1900,11 @@ func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 		k.cache = make(map[string]analyticsCache)
 	}
 	expiresAt := k.Now().Add(k.CacheTTL)
+	if value.SourceExpiresAtMS > 0 {
+		if due := time.UnixMilli(value.SourceExpiresAtMS); due.Before(expiresAt) {
+			expiresAt = due
+		}
+	}
 	if value.ModelStatsReconcileAtMS > 0 {
 		if due := time.UnixMilli(value.ModelStatsReconcileAtMS); due.Before(expiresAt) {
 			expiresAt = due
@@ -1917,13 +1961,13 @@ func (k *Keys) Models(ctx context.Context) ([]cpamp.Model, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("CPA 中没有可用于查询模型的 API Key")
 	}
-	typed, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListModelsWithAPIKey(context.Context, string) (cpamp.ModelListResponse, error)
 	})
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持模型查询")
 	}
-	result, err := typed.ListModelsWithAPIKey(ctx, raw[0])
+	result, err := k.modelsWithAPIKey(ctx, raw[0])
 	if err != nil {
 		return nil, err
 	}
@@ -1994,14 +2038,14 @@ func (k *Keys) Reconcile(ctx context.Context) (resultErr error) {
 	if !from.Before(now) || from.UnixMilli() >= now.UnixMilli() {
 		from = now.Add(-24 * time.Hour)
 	}
-	usage, err := k.CPAMP.Analytics(ctx, cpamp.AnalyticsRequest{
+	usage, err := k.queryUsageAnalytics(ctx, cpamp.AnalyticsRequest{
 		FromMS:   from.UnixMilli(),
 		ToMS:     now.UnixMilli(),
 		NowMS:    now.UnixMilli(),
 		TimeZone: "Asia/Shanghai",
 		Filters:  cpamp.AnalyticsFilters{APIKeyHashes: activeHashes},
 		Include:  cpamp.AnalyticsInclude{APIKeyStats: true},
-	})
+	}, true)
 	if err != nil {
 		return fmt.Errorf("sync API key last used time: %w", err)
 	}

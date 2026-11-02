@@ -7,16 +7,14 @@ import (
 	"testing"
 )
 
-func TestSharedUpstreamCardLayoutsPersistAndRemainSeparate(t *testing.T) {
+func TestSharedPresetCardLayoutPersists(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "layouts.db")
 	s, err := Open(path, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for scope, order := range map[string][]string{
-		"presets":             {"preset-b", "preset-a"},
-		"aliases:codex":       {"model-c", "model-a"},
-		"aliases:antigravity": {"gemini", "claude"},
+		"presets": {"preset-b", "preset-a"},
 	} {
 		if err := s.SetUpstreamCardOrder(t.Context(), scope, order); err != nil {
 			t.Fatal(err)
@@ -31,10 +29,7 @@ func TestSharedUpstreamCardLayoutsPersistAndRemainSeparate(t *testing.T) {
 	}
 	defer s.Close()
 	for scope, want := range map[string][]string{
-		"presets":             {"preset-b", "preset-a"},
-		"aliases:codex":       {"model-c", "model-a"},
-		"aliases:antigravity": {"gemini", "claude"},
-		"aliases:gemini":      {},
+		"presets": {"preset-b", "preset-a"},
 	} {
 		got, err := s.UpstreamCardOrder(t.Context(), scope)
 		if err != nil || !reflect.DeepEqual(got, want) {
@@ -59,7 +54,7 @@ func TestSharedUpstreamCardLayoutsPersistAndRemainSeparate(t *testing.T) {
 
 func TestSharedLayoutRejectsInvalidScopesIDsAndDamagedStoredData(t *testing.T) {
 	s := testStore(t)
-	for _, scope := range []string{"", "registration_open", "aliases:", "aliases:CODEX", "aliases:../codex", "aliases:" + strings.Repeat("a", 65)} {
+	for _, scope := range []string{"", "registration_open", "aliases:codex", "aliases:", "aliases:CODEX", "aliases:../codex", "aliases:" + strings.Repeat("a", 65)} {
 		if err := s.SetUpstreamCardOrder(t.Context(), scope, []string{"a"}); err == nil {
 			t.Fatalf("accepted invalid scope %q", scope)
 		}

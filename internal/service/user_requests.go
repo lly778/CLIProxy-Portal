@@ -45,7 +45,7 @@ func (k *Keys) userRequests(ctx context.Context, userID string, from time.Time, 
 			Filters: cpamp.AnalyticsFilters{APIKeyHashes: hashes},
 			Include: cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: limit}},
 		}
-		value, err := k.CPAMP.Analytics(fetchCtx, req)
+		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
@@ -67,7 +67,8 @@ func (k *Keys) userRequests(ctx context.Context, userID string, from time.Time, 
 		if len(page.Items) > limit {
 			page.Items = page.Items[:limit]
 		}
-		return cpamp.AnalyticsResponse{Events: &page}, nil
+		value.Events = &page
+		return value, nil
 	})
 	if err != nil {
 		return cpamp.EventsResponse{}, err

@@ -398,20 +398,21 @@ type AnalyticsResponse struct {
 	ModelStatsReconcileAtMS int64 `json:"-"`
 	// Portal-only bounds and local timing measurements share the cached usage
 	// result. They are not accepted from or sent to upstream analytics.
-	WindowFromMS   int64                      `json:"-"`
-	WindowToMS     int64                      `json:"-"`
-	TimingStats    *domain.UsageTimings       `json:"-"`
-	Coverage       *AnalyticsCoverage         `json:"coverage,omitempty"`
-	GeneratedAtMS  int64                      `json:"generated_at_ms"`
-	Granularity    string                     `json:"granularity"`
-	Summary        *UsageSummary              `json:"summary,omitempty"`
-	Timeline       []UsageTimelinePoint       `json:"timeline,omitempty"`
-	ModelStats     []ModelUsageStat           `json:"model_stats,omitempty"`
-	ModelShare     []ModelShareRow            `json:"model_share,omitempty"`
-	APIKeyStats    []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
-	APIKeyTimeline []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
-	RecentFailures []RecentFailure            `json:"recent_failures,omitempty"`
-	Events         *EventsResponse            `json:"events,omitempty"`
+	WindowFromMS      int64                      `json:"-"`
+	WindowToMS        int64                      `json:"-"`
+	SourceExpiresAtMS int64                      `json:"-"`
+	TimingStats       *domain.UsageTimings       `json:"-"`
+	Coverage          *AnalyticsCoverage         `json:"coverage,omitempty"`
+	GeneratedAtMS     int64                      `json:"generated_at_ms"`
+	Granularity       string                     `json:"granularity"`
+	Summary           *UsageSummary              `json:"summary,omitempty"`
+	Timeline          []UsageTimelinePoint       `json:"timeline,omitempty"`
+	ModelStats        []ModelUsageStat           `json:"model_stats,omitempty"`
+	ModelShare        []ModelShareRow            `json:"model_share,omitempty"`
+	APIKeyStats       []APIKeyUsageStat          `json:"api_key_stats,omitempty"`
+	APIKeyTimeline    []APIKeyUsageTimelinePoint `json:"api_key_timeline,omitempty"`
+	RecentFailures    []RecentFailure            `json:"recent_failures,omitempty"`
+	Events            *EventsResponse            `json:"events,omitempty"`
 }
 
 type AnalyticsCoverage struct {

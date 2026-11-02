@@ -17,75 +17,6 @@ func TestRendererParsesAllPages(t *testing.T) {
 	}
 }
 
-func TestUpstreamChannelsHavePreloadedContentsAndNoScriptFallback(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, channel := range []string{"codex", "antigravity", "gemini"} {
-		var out bytes.Buffer
-		view := AdminUpstreamsView{
-			LayoutView: LayoutView{ActiveNav: "admin-upstreams", CSRFToken: "test-token"},
-			Channel:    channel, ChannelLabel: channel,
-			Channels: []OAuthChannelView{{Value: channel, Label: channel, Selected: true}},
-			Accounts: []UpstreamAccountView{{ID: "account"}},
-		}
-		if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
-			t.Fatal(err)
-		}
-		for _, want := range []string{
-			`data-upstream-channel-page data-channel="` + channel + `"`,
-			`/static/masonry-sort.js?v=`,
-			`/static/upstream-channels.js?v=`,
-			`data-upstream-channel-panel data-channel="` + channel + `"`,
-			`method="get" action="/admin/upstreams"`,
-			`name="channel" value="` + channel + `"`,
-			`name="csrf_token" value="test-token"`,
-			`type="submit">切换渠道</button>`,
-		} {
-			if !strings.Contains(out.String(), want) {
-				t.Fatalf("%s page missing %q", channel, want)
-			}
-		}
-	}
-}
-
-func TestUpstreamChannelPanelsHaveUniqueFormsAndSelectedVisibility(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := AdminUpstreamsView{Channel: "antigravity"}
-	for _, channel := range []string{"codex", "antigravity", "gemini"} {
-		v.ChannelPanels = append(v.ChannelPanels, AdminUpstreamsView{
-			Channel: channel, AliasReady: true, ReasoningReady: true, SupportsReasoning: true,
-			AliasModels:     []OAuthModelView{{ID: channel + "-model"}},
-			ReasoningModels: []ReasoningCapModelView{{ID: channel + "-model"}},
-		})
-	}
-	var out bytes.Buffer
-	if err := r.Execute(&out, PageAdminUpstreams, v); err != nil {
-		t.Fatal(err)
-	}
-	for _, channel := range []string{"codex", "antigravity", "gemini"} {
-		panel := `data-upstream-channel-panel data-channel="` + channel + `" `
-		if channel != v.Channel {
-			panel += "hidden"
-		}
-		if !strings.Contains(out.String(), panel+">") {
-			t.Fatalf("wrong panel visibility: %s", channel)
-		}
-		for _, id := range []string{"oauth-alias-form-", "reasoning-cap-form-"} {
-			if channel == "gemini" && id == "reasoning-cap-form-" {
-				continue
-			}
-			if strings.Count(out.String(), `id="`+id+channel+`"`) != 1 || !strings.Contains(out.String(), `form="`+id+channel+`"`) {
-				t.Fatalf("missing unique form/button association: %s%s", id, channel)
-			}
-		}
-	}
-}
-
 func TestUpstreamQuotasUseCompactRowsAndSeparatePlan(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
@@ -1123,19 +1054,11 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 	}
 	for _, rule := range []string{
 		`.dashboard-summary-grid, #storage .system-health-grid, #health .system-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }`,
-		`.oauth-model-list, .oauth-alias-list, .reasoning-cap-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }`,
-		`.oauth-alias-row { display: flex; flex-direction: column; min-width: 0; padding: 17px 18px 15px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 3px 12px rgba(24,34,48,.035); }`,
-		`.oauth-alias-entries { display: grid; min-width: 0; gap: 8px; }`,
 		`.key-actions { display: grid; width: 100%; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }`,
 		`.dashboard-summary-grid > .summary-card:last-child,`,
 		`#health .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }`,
 		`.dashboard-summary-grid > .summary-card, .system-health-grid > .system-health-card { min-width: 0; padding: 16px; overflow-wrap: anywhere; }`,
 		`.dashboard-summary-grid .key-mask { padding: 5px 6px; font-size: 13px; letter-spacing: .04em; }`,
-		`.oauth-model-row .upstream-main { grid-column: 1 / -1; }`,
-		`.oauth-model-row form { grid-column: 2; grid-row: 2; justify-self: end; }`,
-		`.reasoning-cap-row { padding: 12px; }`,
-		`.reasoning-cap-row { container: reasoning-cap / inline-size; display: block; min-width: 0; padding: 12px 14px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 10px; }`,
-		`.reasoning-cap-fields { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 12px; min-width: 0; }`,
 	} {
 		if !bytes.Contains(css, []byte(rule)) {
 			t.Fatalf("missing available-width card layout policy: %s", rule)
@@ -1146,66 +1069,6 @@ func TestResponsiveCardGroupsKeepRequestedColumnPolicies(t *testing.T) {
 		if strings.Contains(medium, ".dashboard-summary-grid > .summary-card:last-child") || strings.Contains(medium, "#health .system-health-grid > .system-health-card:last-child") {
 			t.Fatal("third summary and health cards must also span both columns on phones")
 		}
-	}
-	if bytes.Contains(css, []byte("grid-template-columns: minmax(0, 1fr) minmax(145px, 180px)")) {
-		t.Fatal("reasoning selects must not squeeze model IDs into a vertical column")
-	}
-}
-
-func TestAliasAndReasoningRestylePreservesFormsAndCardColumns(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	model := "claude-opus-4-6-thinking"
-	view := AdminUpstreamsView{
-		LayoutView: LayoutView{CSRFToken: "style-csrf"}, Channel: "antigravity",
-		AliasReady: true, AliasRevision: "alias-revision",
-		AliasModels:    []OAuthModelView{{ID: model, AliasList: []string{"claude-main", "claude-tools"}, KeepOriginal: true}},
-		ReasoningReady: true, ReasoningRevision: "reasoning-revision",
-		ReasoningModels: []ReasoningCapModelView{{ID: model, Options: []ReasoningCapOptionView{{Value: "medium", Label: "Medium", Selected: true}}}},
-	}
-	var out bytes.Buffer
-	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		`action="/admin/upstreams/models/aliases"`, `action="/admin/upstreams/models/reasoning"`,
-		`name="csrf_token" value="style-csrf"`, `name="channel" value="antigravity"`,
-		`name="revision" value="alias-revision"`, `name="reasoning_revision" value="reasoning-revision"`,
-		`name="alias_0" value="claude-main"`, `name="alias_0" value="claude-tools"`,
-		`name="keep_original" value="` + model + `" checked`,
-		`data-alias-add`, `data-alias-remove`, `data-alias-template`,
-		`<label class="reasoning-cap-row"><span class="reasoning-cap-fields"><span class="mono">` + model + `</span>`,
-		`<select name="cap_0"><option value="medium" selected>Medium</option></select>`,
-		`name="model" value="` + model + `"`,
-	} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("restyling must preserve form data and interactions: %s", want)
-		}
-	}
-	asset, err := fs.ReadFile(Assets(), "style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	css := string(asset)
-	for _, rule := range []string{
-		`.oauth-alias-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 14px; }`,
-		`.oauth-alias-list.is-masonry { position: relative; display: block; }`,
-		`.oauth-alias-list.is-masonry > .oauth-alias-row { position: absolute; }`,
-		`.reasoning-cap-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }`,
-		`.oauth-alias-entries { display: grid; min-width: 0; gap: 8px; }`,
-		`@container reasoning-cap (min-width: 400px) {`,
-		`.reasoning-cap-fields { grid-template-columns: minmax(220px, 1fr) 160px; }`,
-	} {
-		if !strings.Contains(css, rule) {
-			t.Fatalf("alias entries stay vertical, card columns stay unchanged and reasoning adapts to actual width: %s", rule)
-		}
-	}
-	_, roomy, found := strings.Cut(css, "@container reasoning-cap (min-width: 400px) {")
-	roomy, _, _ = strings.Cut(roomy, "\n}")
-	if !found || !strings.Contains(roomy, `.reasoning-cap-fields { grid-template-columns: minmax(220px, 1fr) 160px; }`) {
-		t.Fatal("side-by-side reasoning fields must require sufficient card width")
 	}
 }
 
@@ -1375,113 +1238,6 @@ func TestAdminUserMetricsKeepTwoColumnsAndCompleteLongValues(t *testing.T) {
 	}
 }
 
-func TestOAuthPresetNarrowHeaderIsCompactAndPreservesSaveForm(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	view := AdminUpstreamsView{LayoutView: LayoutView{CSRFToken: "preset-csrf"}, Channel: "antigravity"}
-	if err := r.Execute(&out, PageAdminUpstreams, view); err != nil {
-		t.Fatal(err)
-	}
-	_, form, found := strings.Cut(out.String(), `action="/admin/upstreams/presets/save"`)
-	form, _, _ = strings.Cut(form, `</form>`)
-	if !found {
-		t.Fatal("preset save route must be preserved")
-	}
-	for _, want := range []string{`name="csrf_token" value="preset-csrf"`, `name="channel" value="antigravity"`, `name="name" maxlength="40" placeholder="输入预设名称" autocomplete="off" required`, `type="submit">保存当前配置</button>`} {
-		if !strings.Contains(form, want) {
-			t.Fatalf("preset save form lost existing behavior: %s", want)
-		}
-	}
-	asset, err := fs.ReadFile(Assets(), "style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	css := string(asset)
-	_, narrow, found := strings.Cut(css, "@media (max-width: 760px) {")
-	narrow, _, _ = strings.Cut(narrow, "\n}")
-	if !found {
-		t.Fatal("missing narrow-page breakpoint")
-	}
-	for _, rule := range []string{
-		`.upstream-card > .oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }`,
-		`.oauth-preset-tools { width: 100%; flex-wrap: wrap; justify-content: flex-start; }`,
-		`.oauth-preset-save { width: 100%; max-width: none; grid-template-columns: minmax(0, 1fr); }`,
-	} {
-		if !strings.Contains(narrow, rule) || strings.Count(css, rule) != 1 {
-			t.Fatalf("compact preset layout must be narrow-only: %s", rule)
-		}
-	}
-	if !strings.Contains(narrow, `.oauth-preset-save .button { width: 100%; justify-self: stretch; }`) {
-		t.Fatal("narrow preset save button must fill its own row, like user suspension controls")
-	}
-}
-
-func TestOAuthPresetSaveMatchesSuspensionControlBreakpoints(t *testing.T) {
-	asset, err := fs.ReadFile(Assets(), "style.css")
-	if err != nil {
-		t.Fatal(err)
-	}
-	css := string(asset)
-	for _, rule := range []string{
-		`.oauth-preset-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }`,
-		`.oauth-preset-head > div:first-child { min-width: 0; }`,
-		`.oauth-preset-save { display: grid; width: auto; max-width: 100%; grid-template-columns: clamp(190px, 22vw, 300px) auto; gap: 9px; align-items: center; }`,
-		`.detail-hero .suspend-action input[type="text"] { width: clamp(190px, 22vw, 300px); }`,
-	} {
-		if !strings.Contains(css, rule) {
-			t.Fatalf("wide preset controls must match suspension controls: %s", rule)
-		}
-	}
-	_, medium, found := strings.Cut(css, "@media (min-width: 761px) and (max-width: 1080px) {")
-	medium, _, _ = strings.Cut(medium, "\n}")
-	if !found {
-		t.Fatal("missing medium-page breakpoint")
-	}
-	for _, rule := range []string{
-		`.oauth-preset-head { grid-template-columns: minmax(0, 1fr) minmax(0, 200px); }`,
-		`.oauth-preset-save { width: 100%; grid-template-columns: minmax(0, 1fr); }`,
-		`.oauth-preset-save .button { width: 100%; justify-self: stretch; }`,
-	} {
-		if !strings.Contains(medium, rule) {
-			t.Fatalf("medium preset controls must stack inside the right-hand column: %s", rule)
-		}
-	}
-	if strings.Contains(css, `.oauth-preset-tools { flex: 1 1 100%; justify-content: flex-start; }`) {
-		t.Fatal("preset controls must not move below the heading prematurely")
-	}
-}
-
-func TestQuotaRefreshCompletedTextPrecedesButton(t *testing.T) {
-	r, err := NewRenderer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, completed := range []bool{false, true} {
-		for _, page := range []string{PageDashboard, PageAdminUpstreams} {
-			var view any = DashboardView{Quota: QuotaPoolView{Show: true, RefreshCompleted: completed, RefreshDisabled: true, RefreshLabel: "稍后可刷新"}}
-			if page == PageAdminUpstreams {
-				view = AdminUpstreamsView{RefreshCompleted: completed, RefreshDisabled: true, RefreshLabel: "稍后可刷新"}
-			}
-			var out bytes.Buffer
-			if err := r.Execute(&out, page, view); err != nil {
-				t.Fatal(err)
-			}
-			got := out.String()
-			result := strings.Index(got, `class="muted small quota-refresh-result" role="status">`)
-			button := strings.Index(got, `class="button secondary quota-refresh-button"`)
-			if completed && (result < 0 || button < result) || !completed && result >= 0 {
-				t.Fatalf("page %s completed=%v should show success only before the refresh button", page, completed)
-			}
-			if completed && !strings.Contains(got[result:button], "已刷新") {
-				t.Fatal("refresh status must keep its success message")
-			}
-		}
-	}
-}
-
 func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
 	r, err := NewRenderer()
 	if err != nil {
@@ -1503,5 +1259,50 @@ func TestAdminUsageNavigationIsRenderedAndActive(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing narrow navigation control: %s", want)
 		}
+	}
+}
+
+func TestUpstreamPageShowsAllChannelsAndOneSharedEditor(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := AdminUpstreamsView{LayoutView: LayoutView{ActiveNav: "admin-upstreams", CSRFToken: "csrf"}, Channel: "codex"}
+	for _, channel := range []string{"Codex", "Antigravity"} {
+		v.ChannelPanels = append(v.ChannelPanels, AdminUpstreamsView{ChannelLabel: channel, Accounts: []UpstreamAccountView{{Account: channel + "@example.com"}}, Models: []OAuthModelView{{ID: channel + "-enabled", Enabled: true, AliasList: []string{"public-name"}, KeepOriginal: true, ReasoningCap: "medium"}, {ID: channel + "-disabled"}}})
+	}
+	var out bytes.Buffer
+	if err := r.Execute(&out, PageAdminUpstreams, v); err != nil {
+		t.Fatal(err)
+	}
+	html := out.String()
+	for _, value := range []string{"Codex 凭证", "Antigravity 凭证", "Codex-enabled", "Antigravity-enabled", "public-name", "保留原名", "上限 medium", "/static/upstream-presets-layout.js?v="} {
+		if !strings.Contains(html, value) {
+			t.Fatalf("missing current upstream UI: %s", value)
+		}
+	}
+	for _, value := range []string{"Codex-disabled", "Antigravity-disabled", "切换渠道", "刷新额度"} {
+		if strings.Contains(html, value) {
+			t.Fatalf("obsolete or disabled content remains: %s", value)
+		}
+	}
+	if strings.Count(html, `data-preset-editor aria-labelledby=`) != 1 || strings.Count(html, `data-global-oauth-presets`) != 1 {
+		t.Fatal("configuration and presets must share one editor/card")
+	}
+}
+
+func TestQuotaRefreshCompletionRemainsOnAccountDashboard(t *testing.T) {
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	v := DashboardView{Quota: QuotaPoolView{Show: true, RefreshCompleted: true, RefreshDisabled: true, RefreshLabel: "稍后可刷新"}}
+	if err := r.Execute(&out, PageDashboard, v); err != nil {
+		t.Fatal(err)
+	}
+	result, button := strings.Index(out.String(), "已刷新"), strings.Index(out.String(), "稍后可刷新")
+	if result < 0 || button <= result {
+		t.Fatal("dashboard must preserve its quota refresh result and control")
 	}
 }

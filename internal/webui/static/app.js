@@ -1,259 +1,22 @@
 (function () {
   "use strict";
 
-  var presetDialog = document.querySelector("[data-preset-editor]");
-  if (presetDialog && presetDialog.showModal) {
-    var presetForm = presetDialog.querySelector("[data-preset-editor-form]");
-    var presetChannels = presetDialog.querySelector("[data-preset-editor-channels]");
-    var presetStatus = presetDialog.querySelector("[data-preset-editor-status]");
-    var presetTabs = presetDialog.querySelector("[data-preset-editor-tabs]");
-    var presetSearch = presetDialog.querySelector("[data-preset-editor-search]");
-    var presetState = null;
-    var presetLoading = null;
-    var presetSaving = false;
-
-    function presetElement(tag, className, text) {
-      var el = document.createElement(tag);
-      if (className) el.className = className;
-      if (text !== undefined) el.textContent = text;
-      return el;
-    }
-    function presetMessage(text, error) {
-      presetStatus.textContent = text || "";
-      presetStatus.classList.toggle("is-error", !!error);
-      if (error) presetStatus.focus();
-    }
-    function presetBusy(busy) {
-      presetSaving = busy;
-      presetDialog.querySelectorAll("[data-preset-editor-close]").forEach(function (button) { button.disabled = busy; });
-      presetForm.querySelectorAll("button[type=submit]").forEach(function (button) { button.disabled = busy || !presetState; });
-      presetForm.inert = busy;
-    }
-    function presetModelCard(model, channel) {
-      var card = presetElement("article", "preset-editor-model");
-      var toggle = presetElement("label", "preset-editor-toggle");
-      var enabled = presetElement("input");
-      enabled.type = "checkbox";
-      enabled.checked = model.enabled;
-      enabled.disabled = !!model.wildcard_rule;
-      enabled.setAttribute("aria-label", "启用 " + channel.label + " " + model.id);
-      toggle.append(enabled, presetElement("span", "mono", model.id));
-      var modelName = presetElement("div", "preset-editor-model-name");
-      modelName.append(toggle);
-      if (model.wildcard_rule) modelName.append(presetElement("p", "muted small", "受规则限制：" + model.wildcard_rule));
-      card.append(modelName);
-      var fields = presetElement("div", "preset-editor-fields");
-      var aliasField = presetElement("div", "preset-editor-alias-field");
-      aliasField.append(presetElement("span", "preset-editor-field-caption", "别名"));
-      var aliasControls = presetElement("div", "preset-editor-alias-controls");
-      var aliases = presetElement("div", "preset-editor-aliases");
-      var add = presetElement("button", "preset-editor-icon preset-editor-add", "+");
-      add.type = "button";
-      add.setAttribute("aria-label", "添加别名");
-      add.title = "添加别名";
-      function aliasRow(value) {
-        var row = presetElement("div", "preset-editor-alias");
-        var input = presetElement("input");
-        input.type = "text";
-        input.maxLength = 128;
-        input.placeholder = "输入别名";
-        input.value = value || "";
-        row.classList.toggle("is-empty", !input.value);
-        input.addEventListener("input", function () { row.classList.toggle("is-empty", !input.value); });
-        input.setAttribute("aria-label", channel.label + " " + model.id + " 别名");
-        var remove = presetElement("button", "preset-editor-icon", "×");
-        remove.type = "button";
-        remove.title = "移除别名";
-        remove.setAttribute("aria-label", "移除 " + model.id + " 的这个别名");
-        remove.addEventListener("click", function () {
-          if (aliases.children.length === 1) { input.value = ""; row.classList.add("is-empty"); }
-          else row.remove();
-          add.disabled = aliases.children.length >= 32;
-        });
-        row.append(input, remove);
-        aliases.append(row);
-      }
-      (model.aliases.length ? model.aliases : [""]).forEach(aliasRow);
-      add.addEventListener("click", function () {
-        if (aliases.children.length >= 32) return;
-        aliasRow("");
-        aliases.lastElementChild.querySelector("input").focus();
-        add.disabled = aliases.children.length >= 32;
+  var successFlashes = document.querySelectorAll("[data-success-flash]");
+  if (successFlashes.length) {
+    window.setTimeout(function () {
+      successFlashes.forEach(function (flash) { flash.remove(); });
+    }, 4000);
+    if (window.history && window.history.replaceState) {
+      var cleanURL = new URL(window.location.href);
+      var changed = false;
+      ["msg", "quota_msg", "resource_msg"].forEach(function (key) {
+        if (cleanURL.searchParams.has(key)) {
+          cleanURL.searchParams.delete(key);
+          changed = true;
+        }
       });
-      aliasControls.append(aliases, add);
-      aliasField.append(aliasControls);
-      fields.append(aliasField);
-      var originalLabel = presetElement("label", "preset-editor-original");
-      var original = presetElement("input");
-      original.type = "checkbox";
-      original.setAttribute("aria-label", "保留原名");
-      original.checked = model.keep_original;
-      originalLabel.append(original, presetElement("span", "", "保留原名"));
-      fields.append(originalLabel);
-      var cap = null;
-      var levels = model.reasoning_levels || [];
-      if (levels.length || model.reasoning_cap) {
-        var capLabel = presetElement("label", "preset-editor-cap");
-        capLabel.append(presetElement("span", "preset-editor-field-caption", "思考上限"));
-        cap = presetElement("select");
-        cap.setAttribute("aria-label", channel.label + " " + model.id + " 思考上限");
-        var none = presetElement("option", "", "不限制");
-        none.value = "";
-        cap.append(none);
-        levels.forEach(function (level) {
-          var option = presetElement("option", "", (model.reasoning_labels || {})[level] || level);
-          option.value = level;
-          cap.append(option);
-        });
-        if (model.reasoning_cap && levels.indexOf(model.reasoning_cap) < 0) {
-          var old = presetElement("option", "", model.reasoning_cap + "（当前不支持）");
-          old.value = model.reasoning_cap;
-          cap.append(old);
-        }
-        cap.value = model.reasoning_cap || "";
-        capLabel.append(cap);
-        fields.append(capLabel);
-      } else {
-        fields.append(presetElement("span", "preset-editor-no-cap muted", "—"));
-      }
-      card.append(fields);
-      function syncEnabled() {
-        card.classList.toggle("is-disabled", !enabled.checked);
-        fields.querySelectorAll("input, select, button").forEach(function (input) { input.disabled = !enabled.checked; });
-        add.disabled = !enabled.checked || aliases.children.length >= 32;
-      }
-      enabled.addEventListener("change", syncEnabled);
-      syncEnabled();
-      card.presetModel = { model: model, enabled: enabled, aliases: aliases, original: original, cap: cap };
-      return card;
+      if (changed) window.history.replaceState(window.history.state, "", cleanURL.href);
     }
-    function presetFilterModels() {
-      var term = presetSearch.value.trim().toLowerCase();
-      presetChannels.querySelectorAll(".preset-editor-model").forEach(function (card) { card.hidden = card.presetModel.model.id.toLowerCase().indexOf(term) < 0; });
-      presetChannels.querySelectorAll(".preset-editor-channel").forEach(function (section) {
-        var matches = Array.from(section.querySelectorAll(".preset-editor-model")).some(function (card) { return !card.hidden; });
-        section.querySelector(".preset-editor-empty").hidden = matches;
-      });
-    }
-    presetSearch.addEventListener("input", presetFilterModels);
-    presetTabs.addEventListener("keydown", function (event) {
-      var tabs = Array.from(presetTabs.querySelectorAll("button"));
-      var index = tabs.indexOf(event.target);
-      if (index < 0 || ["ArrowLeft", "ArrowRight", "Home", "End"].indexOf(event.key) < 0) return;
-      event.preventDefault();
-      var target = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + tabs.length) % tabs.length;
-      tabs[target].click();
-      tabs[target].focus();
-    });
-    function presetPayload() {
-      return { version: 3, channels: Array.from(presetChannels.children).map(function (section) {
-        var target = { channel: section.presetChannel.channel, models: [], aliases: [], reasoning_caps: Object.create(null) };
-        section.querySelectorAll(".preset-editor-model").forEach(function (card) {
-          var row = card.presetModel;
-          target.models.push({ id: row.model.id, enabled: row.enabled.checked, wildcard_rule: row.model.wildcard_rule || "" });
-          if (!row.enabled.checked) return;
-          var names = Array.from(row.aliases.querySelectorAll("input")).map(function (input) { return input.value.trim(); }).filter(Boolean);
-          if (!row.original.checked && !names.length) throw new Error(row.model.id + " 不保留原名时，请至少设置一个别名");
-          names.forEach(function (name) { target.aliases.push({ name: row.model.id, alias: name, fork: row.original.checked }); });
-          if (row.cap && row.cap.value) target.reasoning_caps[row.model.id.toLowerCase()] = row.cap.value;
-        });
-        return target;
-      }) };
-    }
-    document.addEventListener("click", async function (event) {
-      var button = event.target.closest("[data-preset-edit]");
-      if (!button) return;
-      presetDialog.querySelector("#preset-editor-title").textContent = button.hasAttribute("data-preset-create") ? "新增调用预设" : "编辑调用预设";
-      if (presetLoading) presetLoading.abort();
-      var controller = new AbortController();
-      presetLoading = controller;
-      presetState = null;
-      presetChannels.replaceChildren();
-      presetTabs.replaceChildren();
-      presetForm.reset();
-      presetBusy(false);
-      presetMessage("正在读取预设…", false);
-      if (!presetDialog.open) presetDialog.showModal();
-      try {
-        var url = button.getAttribute("data-preset-edit");
-        var response = await fetch(url, { credentials: "same-origin", cache: "no-store", signal: controller.signal, headers: { "Accept": "application/json" } });
-        var data = await response.json();
-        if (!response.ok) throw new Error(data.error || "读取预设失败");
-        if (presetLoading !== controller || !presetDialog.open) return;
-        presetState = { url: url, revision: data.revision };
-        presetForm.elements.name.value = data.name;
-        if (data.creating) {
-          var quickName = button.closest(".oauth-preset-tools").querySelector("input[name=name]");
-          if (quickName) presetForm.elements.name.value = quickName.value;
-        }
-        data.channels.forEach(function (channel, index) {
-          var section = presetElement("section", "preset-editor-channel");
-          section.presetChannel = channel;
-          section.id = "preset-editor-channel-" + index;
-          section.hidden = index !== 0;
-          section.setAttribute("role", "tabpanel");
-          section.setAttribute("aria-label", channel.label);
-          var tab = presetElement("button", "preset-editor-tab" + (index === 0 ? " is-active" : ""), channel.label);
-          tab.type = "button";
-          tab.setAttribute("role", "tab");
-          tab.setAttribute("aria-selected", index === 0 ? "true" : "false");
-          tab.setAttribute("aria-controls", section.id);
-          tab.tabIndex = index === 0 ? 0 : -1;
-          tab.append(presetElement("span", "preset-editor-tab-count", String(channel.models.length)));
-          tab.addEventListener("click", function () {
-            Array.from(presetChannels.children).forEach(function (panel) { panel.hidden = panel !== section; });
-            presetTabs.querySelectorAll("button").forEach(function (button) { button.classList.toggle("is-active", button === tab); button.setAttribute("aria-selected", button === tab ? "true" : "false"); button.tabIndex = button === tab ? 0 : -1; });
-            presetChannels.scrollTop = 0;
-          });
-          presetTabs.append(tab);
-          var tableHead = presetElement("div", "preset-editor-table-head");
-          ["模型", "别名", "保留原名", "思考上限"].forEach(function (text) { tableHead.append(presetElement("span", "", text)); });
-          section.append(tableHead);
-          var models = presetElement("div", "preset-editor-models");
-          channel.models.forEach(function (model) { models.append(presetModelCard(model, channel)); });
-          section.append(models);
-          var empty = presetElement("p", "preset-editor-empty muted", "没有匹配的模型");
-          empty.hidden = channel.models.length > 0;
-          section.append(empty);
-          presetChannels.append(section);
-        });
-        presetMessage(data.notice || "", false);
-        presetBusy(false);
-        presetForm.elements.name.focus();
-      } catch (error) {
-        if (error.name !== "AbortError" && presetLoading === controller) presetMessage(error.message || "读取预设失败，请刷新页面后重试", true);
-      }
-    });
-    presetDialog.querySelectorAll("[data-preset-editor-close]").forEach(function (button) {
-      button.addEventListener("click", function () { if (!presetSaving) presetDialog.close(); });
-    });
-    presetDialog.addEventListener("cancel", function (event) { if (presetSaving) event.preventDefault(); });
-    presetDialog.addEventListener("close", function () { if (presetLoading) presetLoading.abort(); presetState = null; });
-    presetForm.addEventListener("submit", async function (event) {
-      event.preventDefault();
-      if (!presetState || presetSaving) return;
-      var body = new URLSearchParams(new FormData(presetForm));
-      try { body.set("payload", JSON.stringify(presetPayload())); }
-      catch (error) { presetMessage(error.message, true); return; }
-      body.set("revision", presetState.revision);
-      body.set("action", event.submitter && event.submitter.value === "apply" ? "apply" : "save");
-      presetBusy(true);
-      presetMessage(body.get("action") === "apply" ? "正在保存并应用…" : "正在保存…", false);
-      try {
-        var response = await fetch(presetState.url, { method: "POST", credentials: "same-origin", body: body, headers: { "Accept": "application/json" } });
-        var result = await response.json();
-        if (result.revision) presetState.revision = result.revision;
-        if (result.edit_url) {
-          presetState.url = result.edit_url;
-          presetDialog.querySelector("#preset-editor-title").textContent = "编辑调用预设";
-        }
-        if (!response.ok) throw new Error(result.error || "保存预设失败");
-        window.location.assign(result.redirect);
-      } catch (error) {
-        presetBusy(false);
-        presetMessage(error.message || "保存预设失败，请稍后重试", true);
-      }
-    });
   }
 
   var mobileNav = document.querySelector("[data-mobile-nav]");
@@ -343,35 +106,6 @@
       mobileNavMedia.addListener(restoreMobileNavScroll);
     }
   }
-
-  document.addEventListener("click", function (event) {
-    var addButton = event.target.closest("[data-alias-add]");
-    if (addButton) {
-      var controls = addButton.closest(".oauth-alias-controls");
-      var entries = controls && controls.querySelector("[data-alias-entries]");
-      var template = controls && controls.querySelector("[data-alias-template]");
-      if (!entries || !template || entries.children.length >= 32) return;
-      var entry = template.content.firstElementChild.cloneNode(true);
-      entries.appendChild(entry);
-      entry.querySelector("input").focus();
-      addButton.disabled = entries.children.length >= 32;
-      return;
-    }
-    var removeButton = event.target.closest("[data-alias-remove]");
-    if (!removeButton) return;
-    var removedEntry = removeButton.closest(".oauth-alias-entry");
-    var removedControls = removeButton.closest(".oauth-alias-controls");
-    if (!removedEntry || !removedControls) return;
-    removedEntry.remove();
-    var nextAddButton = removedControls.querySelector("[data-alias-add]");
-    if (nextAddButton) nextAddButton.disabled = false;
-  });
-
-  document.querySelectorAll(".oauth-alias-controls").forEach(function (controls) {
-    var addButton = controls.querySelector("[data-alias-add]");
-    var entries = controls.querySelector("[data-alias-entries]");
-    if (addButton && entries) addButton.disabled = entries.children.length >= 32;
-  });
 
   var requestModelTexts = Array.prototype.slice.call(document.querySelectorAll(".request-model-text"));
   var requestModelResizeFrame = 0;
@@ -899,18 +633,11 @@
       event.preventDefault();
       var button = form.querySelector("button[type='submit']");
       if (!button || button.disabled) return;
-      var quotaPanelSelector = form.closest("[data-upstream-quotas]") ? "[data-upstream-quotas]" : "[data-quota-pool]";
-      var quotaPage = form.closest("[data-upstream-channel-page]");
-      var quotaChannelPanel = form.closest("[data-upstream-channel-panel]");
-      var quotaChannel = quotaChannelPanel && quotaChannelPanel.getAttribute("data-channel");
+      var quotaPool = form.closest("[data-quota-pool]");
+      if (!quotaPool) return;
       var quotaPageURL = window.location.href;
-      if (quotaChannelPanel) {
-        var quotaURL = new URL(quotaPageURL);
-        quotaURL.searchParams.set("channel", quotaChannel);
-        quotaPageURL = quotaURL.href;
-      }
       function quotaPageIsCurrent() {
-        return !quotaPage || quotaPage === document.querySelector("[data-upstream-channel-page]");
+        return document.contains(quotaPool) && window.location.href === quotaPageURL;
       }
       var previousResult = form.querySelector(".quota-refresh-result");
       if (previousResult) previousResult.remove();
@@ -926,28 +653,23 @@
         return fetch(quotaPageURL, {
           credentials: "same-origin",
           cache: "no-store",
-          headers: quotaChannelPanel ? { "Accept": "text/html", "X-Upstream-Channel-Only": "true" } : { "Accept": "text/html" }
+          headers: { "Accept": "text/html" }
         }).then(function (response) {
           if (!response.ok) throw new Error("HTTP " + response.status);
           return response.text();
         }).then(function (html) {
           if (!quotaPageIsCurrent()) return false;
           var page = new DOMParser().parseFromString(html, "text/html");
-          var current = (quotaChannelPanel || document).querySelector(quotaPanelSelector);
-          var nextScope = page;
-          if (quotaChannelPanel) {
-            nextScope = Array.prototype.find.call(page.querySelectorAll("[data-upstream-channel-panel]"), function (panel) {
-              return panel.getAttribute("data-channel") === quotaChannel;
-            });
-          }
-          var next = nextScope && nextScope.querySelector(quotaPanelSelector);
+          var current = quotaPool;
+          var next = page.querySelector("[data-quota-pool]");
           if (!current || !next) throw new Error("quota pool missing");
           var running = next.getAttribute("data-refresh-running") === "true";
           var replacement = document.importNode(next, true);
-          var carousel = quotaPanelSelector === "[data-quota-pool]" && window.QuotaCarousel;
+          var carousel = window.QuotaCarousel;
           var selectedProvider = carousel && carousel.selected(current);
           if (carousel) carousel.destroy(current);
           current.replaceWith(replacement);
+          quotaPool = replacement;
           if (carousel) carousel.init(replacement, selectedProvider);
           return running;
         });
@@ -967,15 +689,13 @@
         method: "POST",
         body: new URLSearchParams(new FormData(form)),
         credentials: "same-origin",
-        headers: quotaChannelPanel ? {
-          "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "X-Upstream-Channel-Only": "true"
-        } : { "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
+        headers: { "Accept": "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }
       }).then(function (response) {
         if (!response.ok) throw new Error("HTTP " + response.status);
         return pollQuotaPool(0, 0);
       }).catch(function () {
         if (!quotaPageIsCurrent()) return;
-        var currentButton = (quotaChannelPanel || document).querySelector(quotaPanelSelector + " [data-quota-refresh-form] button[type='submit']");
+        var currentButton = quotaPool.querySelector("[data-quota-refresh-form] button[type='submit']");
         if (!currentButton) return;
         currentButton.disabled = false;
         currentButton.textContent = "刷新失败，请重试";

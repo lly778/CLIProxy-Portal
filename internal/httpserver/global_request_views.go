@@ -5,49 +5,39 @@ import (
 	"strings"
 
 	"cliproxy-portal/internal/cpamp"
-	"cliproxy-portal/internal/domain"
+	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
 )
 
 func (s *Server) globalRequestViews(ctx context.Context, events []cpamp.EventRow) []webui.GlobalRequestView {
 	rows := make([]webui.GlobalRequestView, 0, len(events))
-	type owner struct {
-		user   domain.User
-		linked bool
-	}
-	owners := make(map[string]owner)
+	ids, hashes := make([]string, 0), make([]string, 0, len(events))
 	for _, event := range events {
-		hash := strings.ToLower(strings.TrimSpace(event.APIKeyHash))
-		account, cached := owners[hash]
-		if !cached && hash != "" {
-			if key, keyErr := s.Store.KeyByHash(ctx, hash); keyErr == nil {
-				if target, userErr := s.Store.UserByID(ctx, key.UserID); userErr == nil {
-					account = owner{user: target, linked: true}
-				}
+		if event.PortalResourceID != 0 {
+			if event.PortalUserID != "" {
+				ids = append(ids, event.PortalUserID)
 			}
-			owners[hash] = account
+		} else if hash := strings.ToLower(strings.TrimSpace(event.APIKeyHash)); hash != "" {
+			hashes = append(hashes, hash)
 		}
+	}
+	directory := store.EmptyUserDirectory()
+	if s.Store != nil {
+		var err error
+		directory, err = s.Store.UserDirectoryFor(ctx, ids, hashes, false)
+		if err != nil && s.Logger != nil {
+			s.Logger.Error("load request owners", "error", err)
+		}
+	}
+	for _, event := range events {
 		row := webui.GlobalRequestView{RequestView: s.requestView(event), UserLabel: "外部 Key"}
+		id := directory.Owners[strings.ToLower(strings.TrimSpace(event.APIKeyHash))]
 		if event.PortalResourceID != 0 {
 			row.UserLabel = emptyDash(event.PortalUserLabel)
-			if event.PortalUserID != "" {
-				identity := "resource-user:" + event.PortalUserID
-				account, cached := owners[identity]
-				if !cached {
-					if target, userErr := s.Store.UserByID(ctx, event.PortalUserID); userErr == nil {
-						account = owner{user: target, linked: true}
-					}
-					owners[identity] = account
-				}
-				if account.linked {
-					row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
-				}
-			}
-			rows = append(rows, row)
-			continue
+			id = event.PortalUserID
 		}
-		if account.linked {
-			row.User, row.UserLabel, row.Linked = s.userView(account.user), account.user.Name, true
+		if user, linked := directory.Users[id]; linked {
+			row.User, row.UserLabel, row.Linked = s.userViewWithKey(user, directory.ActiveKeys[id]), user.Name, true
 		}
 		rows = append(rows, row)
 	}

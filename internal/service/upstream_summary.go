@@ -19,13 +19,13 @@ type EnabledUpstream struct {
 // EnabledUpstreams reads configuration only; it never probes provider quotas
 // or sends model requests from the overview page.
 func (k *Keys) EnabledUpstreams(ctx context.Context) ([]EnabledUpstream, error) {
-	client, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
 	if !ok {
 		return nil, errors.New("CPAMP 客户端不支持上游账号管理")
 	}
-	files, err := client.ListAuthFiles(ctx)
+	files, err := k.upstreamAuthFiles(ctx)
 	if err != nil {
 		return nil, err
 	}

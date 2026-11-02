@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
-const script = fs.readFileSync(path.join(__dirname, '../static/upstream-channels.js'), 'utf8');
+const script = fs.readFileSync(path.join(__dirname, '../static/upstream-presets-layout.js'), 'utf8');
 
 function setup(heights, initialWidth = 810, initialNarrow = false, restoredOrder = null) {
   let width = initialWidth, observer;

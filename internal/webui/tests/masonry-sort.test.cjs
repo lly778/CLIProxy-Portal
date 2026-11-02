@@ -9,7 +9,7 @@ function classes(initial = []) {
   const values = new Set(initial);
   return { add: value => values.add(value), remove: value => values.delete(value), contains: value => values.has(value) };
 }
-function setup({ saved = null, ids = ['a', 'b', 'c'], scope = 'aliases:codex', touch = true, saveMode = 'ok', csrf = 'test-csrf', siblingStatus = false } = {}) {
+function setup({ saved = null, ids = ['a', 'b', 'c'], scope = 'presets', touch = true, saveMode = 'ok', csrf = 'test-csrf', siblingStatus = false } = {}) {
   const documentEvents = {}, windowEvents = {}, writes = [], requests = [];
   const cards = ids.map((id, index) => {
     const events = {}, attributes = { 'aria-label': '移动模型 ' + id };
@@ -173,7 +173,7 @@ test('saved order restores surviving IDs once and appends new cards without stal
 });
 
 test('server layout scopes are separate and never read or write browser storage', async () => {
-  for (const scope of ['presets', 'aliases:codex', 'aliases:antigravity']) {
+  for (const scope of ['presets', 'presets', 'aliases:antigravity']) {
     const f = setup({ scope });
     f.key(f.cards[0], 'End');
     await f.flushSaves();

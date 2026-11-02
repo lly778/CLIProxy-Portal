@@ -5,14 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 )
 
-var upstreamLayoutScope = regexp.MustCompile(`^(presets|aliases:[a-z][a-z0-9_-]{0,63})$`)
-
 func ValidateUpstreamCardLayout(scope string, order []string) error {
-	if !upstreamLayoutScope.MatchString(scope) || len(order) > 256 {
+	if scope != "presets" || len(order) > 256 {
 		return fmt.Errorf("卡片布局范围或数量无效")
 	}
 	seen := make(map[string]bool, len(order))
@@ -30,8 +27,7 @@ func (s *Store) UpstreamCardOrder(ctx context.Context, scope string) ([]string, 
 	if err := ValidateUpstreamCardLayout(scope, nil); err != nil {
 		return nil, err
 	}
-	var payload string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, "upstream_card_layout:"+scope).Scan(&payload)
+	payload, err := s.upstreamSetting(ctx, "upstream_card_layout:"+scope)
 	if errors.Is(err, ErrNotFound) {
 		return []string{}, nil
 	}

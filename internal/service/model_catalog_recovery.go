@@ -14,19 +14,19 @@ import (
 // the current credential snapshot and its registered models instead; do not
 // reset routing state on a GET, bypass active cooldowns, or invent static IDs.
 func (k *Keys) RestoreSchedulableModels(ctx context.Context, models []cpamp.Model) []cpamp.Model {
-	client, ok := k.CPAMP.(interface {
+	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 		ListAuthFileModels(context.Context, cpamp.AuthFile) ([]cpamp.Model, error)
 	})
 	if !ok {
 		return models
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(cpamp.WithFreshUpstreamReads(ctx), 3*time.Second)
 	defer cancel()
 	// A page may share cached alias/catalog configuration. The decision to
 	// restore a credential's models still requires its live disabled state,
 	// availability and cooldowns; registration reads remain uncached as well.
-	files, err := client.ListAuthFiles(cpamp.WithFreshUpstreamReads(ctx))
+	files, err := k.upstreamAuthFiles(cpamp.WithFreshUpstreamReads(ctx))
 	if err != nil {
 		return models
 	}
@@ -50,7 +50,7 @@ func (k *Keys) RestoreSchedulableModels(ctx context.Context, models []cpamp.Mode
 			break
 		}
 		identities[file.AuthIndex] = true
-		registered, err := client.ListAuthFileModels(ctx, file)
+		registered, err := k.upstreamRegisteredModels(ctx, file)
 		if err != nil {
 			continue // A failed management read never fabricates availability.
 		}

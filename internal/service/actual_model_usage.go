@@ -55,7 +55,7 @@ func (k *Keys) actualModelUsage(ctx context.Context, req cpamp.AnalyticsRequest,
 		}
 		beforeMS, beforeID = page.NextBeforeMS, page.NextBeforeID
 		req.Include = cpamp.AnalyticsInclude{EventsPage: &cpamp.EventsPage{Limit: actualModelPageSize, BeforeMS: &beforeMS, BeforeID: &beforeID}}
-		response, err := k.CPAMP.Analytics(ctx, req)
+		response, err := k.queryUsageAnalytics(ctx, req, false)
 		if err != nil || response.Events == nil || rawModelHistoryDeleted(response) {
 			return unavailable()
 		}
