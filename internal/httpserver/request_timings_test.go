@@ -12,6 +12,26 @@ import (
 	"cliproxy-portal/internal/store"
 )
 
+func TestGatewayIdleTimeoutShowsFailureDespiteUpstreamSuccess(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now().UTC()
+	read, firstWrite := int64(100), int64(1000)
+	row := store.GatewayRequestTiming{ID: "idle", UserID: "owner", APIKeyHash: "key", CPARequestID: "request", StartedAt: now, EndedAt: now.Add(61 * time.Second), TotalMS: 61000, RequestReadMS: &read, ResponseStartedMS: &firstWrite, StatusCode: 504, FailureReason: "idle_timeout"}
+	if err := st.SaveGatewayRequestTiming(t.Context(), row); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Store: st, Cfg: config.Config{TimeZone: time.UTC}}
+	event := cpamp.EventRow{RequestID: "request", APIKeyHash: "key", TimestampMS: now.Add(time.Second).UnixMilli(), InputTokens: 10, OutputTokens: 20, TotalTokens: 30}
+	view := s.requestView(event)
+	if view.Status != "failed" || !strings.Contains(view.ErrorFull, "idle timeout") || !strings.Contains(view.LatencyDetail, "连续 60 秒") || view.TotalTokens != "30" {
+		t.Fatalf("upstream success concealed gateway timeout or lost usage: %+v", view)
+	}
+}
+
 func TestTotalTimingRequiresExactRequestAndKeyAndDoesNotInventOldTotals(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
 	if err != nil {

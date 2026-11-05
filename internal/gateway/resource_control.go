@@ -26,7 +26,7 @@ type resourceRequest struct {
 func resourceInference(r *http.Request) bool {
 	return isDialoguePath(r.Method, r.URL.Path) || (r.Method == http.MethodPost && (strings.HasPrefix(r.URL.Path, "/v1/") || strings.HasPrefix(r.URL.Path, "/v1beta/") || strings.HasPrefix(r.URL.Path, "/backend-api/"))) || (r.Method == http.MethodGet && strings.EqualFold(r.Header.Get("Upgrade"), "websocket"))
 }
-func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
+func (g *Gateway) serveResourceHTTP(w http.ResponseWriter, r *http.Request) {
 	if g.Resources == nil || !resourceInference(r) {
 		g.serveProtectedHTTP(w, r)
 		return
@@ -66,6 +66,10 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			defer cleanup()
 		}
 		if err != nil {
+			if idleWatch(r).expired() {
+				writeIdleTimeout(w, r)
+				return
+			}
 			lease.RecordStatus("request_too_large_or_invalid", code)
 			message := "请求内容无效或压缩格式不支持"
 			if code == 413 {

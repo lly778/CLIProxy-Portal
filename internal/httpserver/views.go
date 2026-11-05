@@ -195,6 +195,11 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 			// interval. Long uploads must not be discarded by a fixed window.
 			if !eventAt.Before(timing.StartedAt.Add(-time.Second)) && !eventAt.After(timing.EndedAt.Add(5*time.Second)) {
 				view.TotalLatency, view.LatencyDetail = requestTimingDisplay(timing, e)
+				if timing.FailureReason == "idle_timeout" {
+					view.Status, view.StatusLabel = "failed", "失败"
+					view.Error = "Gateway idle timeout: no I/O progress for 60 seconds"
+					view.ErrorFull = view.Error
+				}
 			}
 		}
 	}

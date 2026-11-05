@@ -27,6 +27,8 @@ func (s *Server) supplementGatewayFailures(ctx context.Context, page cpamp.Event
 			reason = "Request upload incomplete"
 		case "preparation_failed":
 			reason = "Request preparation failed"
+		case "idle_timeout":
+			reason = "Gateway idle timeout: no I/O progress for 60 seconds"
 		}
 		e := cpamp.EventRow{PortalTimingID: row.ID, TimestampMS: row.StartedAt.UnixMilli(), APIKeyHash: row.APIKeyHash, Model: "—", Failed: true, FailSummary: reason}
 		if row.StatusCode >= 400 {

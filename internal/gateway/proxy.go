@@ -36,6 +36,7 @@ type Gateway struct {
 	captureSlots chan struct{}
 	captureTasks sync.WaitGroup
 	transport    *http.Transport
+	idleTimeout  time.Duration
 }
 
 func New(upstreamURL string, keys *service.Keys, st *store.Store, vault *Vault, logger *slog.Logger) (*Gateway, error) {
@@ -69,6 +70,9 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 	var measurement *requestMeasurement
 	if isDialoguePath(r.Method, r.URL.Path) {
 		measurement = g.startMeasurement(r, start, source)
+		if watch := idleWatch(r); watch != nil {
+			watch.attachMeasurement(measurement)
+		}
 		if measurement != nil {
 			// Register before handler completion: shutdown may observe an idle
 			// connection before its final-flush callback has scheduled the save.
@@ -97,7 +101,12 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 				capture.resourceDone = state.lease.Finish
 				state.transferred = true
 			}
-			defer g.saveCaptureInBackground(capture)
+			defer func() {
+				if idleWatch(r).expired() {
+					capture.status = http.StatusGatewayTimeout
+				}
+				g.saveCaptureInBackground(capture)
+			}()
 			if r.Body != nil {
 				r.Body = &teeReadCloser{Reader: io.TeeReader(r.Body, capture.request), Closer: r.Body}
 			}
@@ -115,6 +124,10 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 		defer identityCleanup()
 	}
 	if identityErr != nil {
+		if idleWatch(r).expired() {
+			writeIdleTimeout(w, r)
+			return
+		}
 		if measurement != nil {
 			measurement.failure("preparation_failed", http.StatusBadGateway)
 		}
@@ -148,6 +161,9 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 		Transport:     g.transport,
 		FlushInterval: -1,
 		ModifyResponse: func(resp *http.Response) error {
+			if idleWatch(r).expired() {
+				return errGatewayIdleTimeout
+			}
 			if state, ok := r.Context().Value(resourceRequestKey{}).(*resourceRequest); ok && state.enforce && state.limit > 0 && resp.StatusCode == http.StatusSwitchingProtocols {
 				if rw, ok := resp.Body.(io.ReadWriteCloser); ok {
 					resp.Body = &resourceWebsocket{ReadWriteCloser: rw, limit: uint64(state.limit), onReject: func() { state.lease.Record("websocket_message_too_large") }}
@@ -169,6 +185,10 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if idleWatch(r).expired() {
+				writeIdleTimeout(w, r)
+				return
+			}
 			if measurement != nil {
 				measurement.failure("upstream_request_failed", http.StatusBadGateway)
 			}
@@ -181,6 +201,9 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
+	}
+	if watch := idleWatch(r); watch != nil {
+		proxy.Transport = idleProgressTransport{base: g.transport, watch: watch}
 	}
 	proxy.ServeHTTP(w, r)
 }

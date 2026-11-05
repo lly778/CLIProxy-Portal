@@ -54,13 +54,18 @@ func (m *requestMeasurement) upstreamResponse(resp *http.Response) {
 	defer m.mu.Unlock()
 	m.row.UpstreamHeadersMS = elapsedMS(m.row.StartedAt, time.Now())
 	m.row.CPARequestID = cpaRequestID(resp.Header.Get("X-CPA-TRACE-ID"))
-	m.row.StatusCode = resp.StatusCode
+	if m.row.FailureReason != "idle_timeout" {
+		m.row.StatusCode = resp.StatusCode
+	}
 }
 
 func (m *requestMeasurement) failure(reason string, status int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.row.RequestReadMS == nil {
+	if m.row.FailureReason == "idle_timeout" {
+		return
+	}
+	if reason != "idle_timeout" && m.row.RequestReadMS == nil {
 		reason = "upload_interrupted"
 	}
 	m.row.FailureReason, m.row.StatusCode = reason, status

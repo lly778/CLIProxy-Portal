@@ -11,7 +11,7 @@
 
 {{define "client-model-settings"}}
 <section class="card upstream-card section-gap" id="client-models" data-client-model-settings>
-  <div class="section-head compact upstream-config-head"><div><h2>客户端模型同步</h2><p class="muted small">配置 Codex 可选模型与默认思考强度，保存后运行脚本即可同步。</p></div><div class="upstream-config-tools"><a class="button secondary" href="/downloads/codex-sync.ps1">下载同步脚本</a>{{if .ClientModels.Ready}}<button class="button secondary" type="button" data-client-model-open>配置模型与思考强度</button><button type="submit" form="client-model-form" class="button primary">保存客户端配置</button>{{end}}</div></div>
+  <div class="section-head compact upstream-config-head"><div><h2>客户端模型同步</h2><p class="muted small">配置 Codex 可选模型与默认思考强度，保存后运行脚本即可同步。</p></div><div class="upstream-config-tools"><a class="button secondary" href="/downloads/codex-sync.ps1">下载同步脚本</a>{{if .ClientModels.Ready}}<button class="button secondary" type="button" data-client-model-open>配置模型与思考强度</button>{{end}}</div></div>
   {{if .ClientModels.Error}}<div class="alert danger" role="alert">{{.ClientModels.Error}}</div>{{end}}
   {{if .ClientModels.Ready}}
   <form id="client-model-form" method="post" action="/admin/upstreams/client-models" class="client-model-form">
@@ -34,7 +34,7 @@
       <section class="client-model-catalog"><div class="client-model-panel-head"><h3>全部模型</h3></div><label class="client-model-search"><span class="sr-only">搜索全部模型</span><input type="search" placeholder="搜索模型名称" data-client-model-search></label><p class="muted small" data-client-model-catalog-status role="status" aria-live="polite"></p><div class="client-model-picker-list" data-client-model-picker-list></div></section>
       <section class="client-model-selected"><div class="client-model-panel-head"><h3>已选模型 <span class="badge neutral" data-client-model-draft-count>0</span></h3><span class="muted small">最多 128 个</span></div><p class="muted small">点选“默认模型”，在下拉框中设置该模型的思考强度。</p><div class="client-model-draft-list" data-client-model-draft-list></div></section>
     </div>
-    <div class="client-model-dialog-footer"><p class="muted small" data-client-model-picker-status role="status" aria-live="polite"></p><div class="button-row"><button class="button secondary" type="button" data-client-model-close>取消</button><button class="button primary" type="button" data-client-model-apply>确认配置</button></div></div>
+    <div class="client-model-dialog-footer"><p class="muted small" data-client-model-picker-status role="status" aria-live="polite"></p><div class="button-row"><button class="button secondary" type="button" data-client-model-close>取消</button><button class="button primary" type="button" data-client-model-apply>保存配置</button></div></div>
   </dialog>
   <noscript><p class="muted small">编辑模型与思考强度需要启用 JavaScript。</p></noscript>
   {{end}}

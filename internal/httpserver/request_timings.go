@@ -13,6 +13,12 @@ func requestTimingDisplay(row store.GatewayRequestTiming, event cpamp.EventRow) 
 	row = store.GatewayTimingStages(row)
 	total := fmt.Sprintf("%d ms", row.TotalMS)
 	lines := []string{"服务器耗时：" + total}
+	if row.FailureReason == "idle_timeout" {
+		lines = append(lines, "连续 60 秒没有收发进展，门户已终止请求")
+		if row.ResponseStartedMS != nil {
+			lines = append(lines, "响应已开始，超时后中断连接；此前的 HTTP 状态码不能改写")
+		}
+	}
 	if row.FailureReason != "" {
 		lines = append(lines, "请求未完整完成；耗时包含失败处理及连接收尾")
 	} else if !row.Completed {

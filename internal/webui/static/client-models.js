@@ -13,6 +13,8 @@
   var defaultModel = section.querySelector("[data-client-default-model]");
   var options = section.querySelector("[data-client-model-effort-options]");
   var opener = section.querySelector("[data-client-model-open]");
+  var form = section.querySelector("#client-model-form");
+  var saveButton = dialog.querySelector("[data-client-model-apply]");
   var draft = new Map();
   var remembered = new Map();
   var draftDefault = "";
@@ -73,7 +75,7 @@
     selectedList.replaceChildren(fragment);
     dialog.querySelector("[data-client-model-draft-count]").textContent = String(draft.size);
     updateDefaultMarkers();
-    status.textContent = draft.size ? "确认后返回主页面保存，取消不会改变原配置。" : "请选择要下发的模型。";
+    status.textContent = draft.size ? "保存后立即生效，取消不会改变原配置。" : "请选择要下发的模型。";
   }
   async function load() {
     if (controller) controller.abort();
@@ -128,7 +130,7 @@
     var id = row.getAttribute("data-draft-model");
     if (event.target.matches("select")) { draft.set(id, event.target.value); remembered.set(id, event.target.value); }
     else if (event.target.type === "radio") { draftDefault = id; updateDefaultMarkers(); }
-    status.textContent = "确认后返回主页面保存，取消不会改变原配置。";
+    status.textContent = "保存后立即生效，取消不会改变原配置。";
   });
   selectedList.addEventListener("click", function (event) {
     var button = event.target.closest("[data-client-model-remove]"); if (!button) return;
@@ -140,8 +142,10 @@
     button.addEventListener("click", function () { dialog.close(); });
   });
   dialog.addEventListener("close", function () { if (controller) controller.abort(); opener.focus(); });
-  dialog.querySelector("[data-client-model-apply]").addEventListener("click", function () {
-    if (draft.size && !draft.has(draftDefault)) { status.textContent = "请在已选模型中指定一个默认模型。"; return; }
+  saveButton.addEventListener("click", function () {
+    if (saveButton.disabled) return;
+    if (!draft.size) { status.textContent = "请至少选择一个要下发的模型。"; return; }
+    if (!draft.has(draftDefault)) { status.textContent = "请在已选模型中指定一个默认模型。"; return; }
     var fragment = document.createDocumentFragment(); var index = 0;
     draft.forEach(function (effort, id) {
       var row = document.createElement("div"); row.setAttribute("data-client-model-row", "");
@@ -152,16 +156,9 @@
       fragment.appendChild(row); index++;
     });
     rows.replaceChildren(fragment); defaultModel.value = draftDefault;
-    var summary = document.createDocumentFragment();
-    draft.forEach(function (effort, id) {
-      var item = document.createElement("span"); item.className = "client-model-summary-item";
-      var name = document.createElement("strong"); name.className = "mono"; name.textContent = id; item.appendChild(name);
-      var level = document.createElement("span"); level.textContent = effort || "沿用模型默认"; item.appendChild(level);
-      if (id === draftDefault) { var badge = document.createElement("span"); badge.className = "badge success"; badge.textContent = "默认"; item.appendChild(badge); }
-      summary.appendChild(item);
-    });
-    if (!draft.size) { var empty = document.createElement("span"); empty.className = "muted small"; empty.textContent = "尚未选择模型，点击“配置模型与思考强度”添加。"; summary.appendChild(empty); }
-    section.querySelector("[data-client-model-summary-list]").replaceChildren(summary);
-    dialog.close();
+    saveButton.disabled = true;
+    saveButton.textContent = "正在保存…";
+    status.textContent = "正在保存客户端配置…";
+    form.requestSubmit();
   });
 })();

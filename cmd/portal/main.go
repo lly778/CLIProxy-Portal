@@ -275,8 +275,8 @@ func serve(cfg config.Config, st *store.Store) error {
 	}
 }
 
-// Model API connections follow the client and CPA lifetimes. Portal page
-// deadlines must not impose an additional upload or generation deadline.
+// Dialogue HTTP requests use a progress-based idle watchdog in the gateway. Portal
+// page deadlines must not impose an overall upload or generation deadline.
 func newGatewayServer(addr string, handler http.Handler) *http.Server {
 	server := &http.Server{Addr: addr, Handler: handler}
 	gateway.ConfigureServerTiming(server)

@@ -38,6 +38,7 @@ type timingConn struct {
 	firstWriteAt time.Time
 	writeFailed  bool
 	finish       func(time.Time, time.Time, bool)
+	idleWatch    *requestIdleWatch
 }
 
 func (c *timingConn) Read(p []byte) (int, error) {
@@ -50,6 +51,9 @@ func (c *timingConn) Read(p []byte) (int, error) {
 			c.readAt = time.Now()
 		}
 		c.mu.Unlock()
+	}
+	if n > 0 {
+		c.progress()
 	}
 	return n, err
 }
@@ -67,7 +71,19 @@ func (c *timingConn) Write(p []byte) (int, error) {
 		c.writeFailed = true
 	}
 	c.mu.Unlock()
+	if n > 0 {
+		c.progress()
+	}
 	return n, err
+}
+
+func (c *timingConn) progress() {
+	c.mu.Lock()
+	watch := c.idleWatch
+	c.mu.Unlock()
+	if watch != nil {
+		watch.progress()
+	}
 }
 
 // ConfigureServerTiming must be paired with TimingListener. ConnState fires
@@ -101,10 +117,15 @@ func ConfigureServerTiming(server *http.Server) {
 			c.idle, c.writeFailed, c.firstWriteAt = false, false, time.Time{}
 		case http.StateIdle, http.StateClosed, http.StateHijacked:
 			finish, firstWrite, failed := c.finish, c.firstWriteAt, c.writeFailed
+			watch := c.idleWatch
+			c.idleWatch = nil
 			c.finish = nil
 			c.idle = state == http.StateIdle
 			c.readAt = time.Time{}
 			c.mu.Unlock()
+			if watch != nil {
+				watch.stop()
+			}
 			if finish != nil {
 				finish(time.Now(), firstWrite, failed || state == http.StateHijacked)
 			}
