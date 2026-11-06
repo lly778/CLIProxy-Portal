@@ -55,6 +55,13 @@ func (s *Server) downloadClientSync(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(clientsync.ScriptForPortal(s.Cfg.ExternalURL))
 }
 
+func (s *Server) downloadClientSyncBatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="Sync-Codex.bat"`)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(clientsync.BatchForPortal(s.Cfg.ExternalURL))
+}
+
 func (s *Server) loadClientModelView(r *http.Request, v *webui.AdminUpstreamsView) {
 	config, err := s.Store.ClientModels(r.Context())
 	if err != nil {

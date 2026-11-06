@@ -11,7 +11,7 @@
 
 {{define "client-model-settings"}}
 <section class="card upstream-card section-gap" id="client-models" data-client-model-settings>
-  <div class="section-head compact upstream-config-head"><div><h2>客户端模型同步</h2><p class="muted small">配置 Codex 可选模型与默认思考强度，保存后运行脚本即可同步。</p></div><div class="upstream-config-tools"><a class="button secondary" href="/downloads/codex-sync.ps1">下载同步脚本</a>{{if .ClientModels.Ready}}<button class="button secondary" type="button" data-client-model-open>配置模型与思考强度</button>{{end}}</div></div>
+  <div class="section-head compact upstream-config-head"><div><h2>客户端模型同步</h2><p class="muted small">配置 Codex 可选模型与默认思考强度，保存后运行脚本即可同步。</p></div><div class="upstream-config-tools"><a class="button secondary" href="/downloads/codex-sync.bat">下载同步脚本</a>{{if .ClientModels.Ready}}<button class="button secondary" type="button" data-client-model-open>配置模型与思考强度</button>{{end}}</div></div>
   {{if .ClientModels.Error}}<div class="alert danger" role="alert">{{.ClientModels.Error}}</div>{{end}}
   {{if .ClientModels.Ready}}
   <form id="client-model-form" method="post" action="/admin/upstreams/client-models" class="client-model-form">

@@ -107,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /models", s.withApproved(s.models))
 	mux.HandleFunc("GET /api/client-model-config", s.clientModelsGet)
 	mux.HandleFunc("GET /downloads/codex-sync.ps1", s.downloadClientSync)
+	mux.HandleFunc("GET /downloads/codex-sync.bat", s.downloadClientSyncBatch)
 	mux.HandleFunc("POST /models/test", s.withApproved(s.modelsTest))
 	mux.HandleFunc("GET /activity", s.withApproved(s.activity))
 	mux.HandleFunc("GET /logs/dialogue/{id}", s.withApproved(s.downloadDialogue))

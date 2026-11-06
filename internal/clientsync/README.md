@@ -12,26 +12,27 @@
 
 ## 运行
 
-从门户下载单个 `Sync-Codex.ps1`，地址已内置，无需解压或安装依赖。Windows PowerShell 5.1 和 PowerShell 7 均可使用。在文件上右键选择“使用 PowerShell 运行”，或从 PowerShell 执行：
+从门户下载单个 `Sync-Codex.bat`，双击即可运行，地址已内置，无需解压、安装依赖、填写 PS1 路径或修改文件关联。批处理使用系统自带的 Windows PowerShell 5.1，将内置脚本释放到独立临时目录，运行结束后删除临时脚本和目录；不会另外下载可执行脚本，也不修改持久执行策略。生成和释放时均会清理重复 BOM，并以单个 UTF-8 BOM 写入，中文提示兼容 Windows PowerShell 5.1。启动前先检查 PowerShell 语法；准备或语法检查失败会显示错误并暂停，不直接闪退。
+
+也可以从 PowerShell 或命令提示符带参数运行：
 
 ```powershell
 # 下载的文件不需要填写门户地址；无参数进入交互预览和应用确认。
-.\Sync-Codex.ps1
+.\Sync-Codex.bat
 
 # 自动应用；仍须交互输入尚未配置的 API Key。
-.\Sync-Codex.ps1 -Apply
+.\Sync-Codex.bat -Apply
 
-# 可选择替换已有的调用 Key；留空保留原 Key。
-.\Sync-Codex.ps1 -UpdateApiKey -Apply
+# 可选择替换已有的调用 Key。
+.\Sync-Codex.bat -UpdateApiKey -Apply
 
-# 指定独立 Codex 配置目录。
-.\Sync-Codex.ps1 -CodexHome C:\CodexInstance\.codex -Apply
-
-# 仓库源文件没有内置站点地址，开发时显式指定。
-.\Sync-Codex.ps1 -PortalUrl https://portal.example.com -Interactive
+# 指定独立 Codex 配置目录；含空格的路径加双引号。
+.\Sync-Codex.bat -CodexHome "C:\Codex Instance\.codex" -Apply
 ```
 
-无参数运行时先展示变更，最后确认处回车即可备份并应用，输入 `n` 取消；“是否更新 Key”仍默认沿用，只有输入 `y` 才提示换 Key。窗口等待回车后关闭。带参数运行未指定 `-Interactive` 或 `-Apply` 时仍仅预览。Windows 对 `.ps1` 的双击行为由系统文件关联决定，脚本不修改文件关联或持久执行策略。应用前完全退出 Codex；不会强制结束进程。文件权限通过 .NET 文件接口只写访问规则，不修改审计规则，不要求 `SeSecurityPrivilege`。
+无参数运行时先展示变更，最后确认处回车即可备份并应用，输入 `n` 取消；“是否更新 Key”仍默认沿用，只有输入 `y` 才提示换 Key。窗口等待回车后关闭。带参数运行未指定 `-Interactive` 或 `-Apply` 时仍仅预览。应用前完全退出 Codex；不会强制结束进程。文件权限通过 .NET 文件接口只写访问规则，不修改审计规则，不要求 `SeSecurityPrivilege`。
+
+仓库中的 `Sync-Codex.bat` 是下载生成器使用的启动模板，完整批处理文件由服务器嵌入脚本和站点地址后生成。原 `Sync-Codex.ps1` 作为同步逻辑源文件保留，Windows PowerShell 5.1 和 PowerShell 7 均可运行；开发时可显式传入 `-PortalUrl https://portal.example.com -Interactive`。
 
 脚本统一直接配置 Codex，没有模式、供应商列表或序号选择，也不读取其他配置管理器的数据。默认目录为 `$CODEX_HOME`，未设置时使用 `%USERPROFILE%\.codex`；`-CodexHome` 可显式覆盖。
 
@@ -62,7 +63,8 @@
 
 ## 接口与目录缓存
 
-- `GET /downloads/codex-sync.ps1`：公开下载单个脚本，仅注入服务器配置的公开门户地址，不含登录信息或 API Key。
+- `GET /downloads/codex-sync.bat`：页面的默认下载入口，公开下载单个可双击运行的批处理文件，内置同步脚本和服务器配置的公开门户地址，不含登录信息或 API Key。
+- `GET /downloads/codex-sync.ps1`：保留旧 PowerShell 下载地址，供已有链接兼容使用；页面默认提供批处理格式。
 - `GET /api/client-model-config`：公开读取已保存的模型默认配置、上游声明的 `supported_reasoning_levels` 与当前 `CPA_API_BASE_URL`，无需账号或 Key；每 IP 每分钟最多 60 次，`Cache-Control: no-store`。档位复用完整目录的 1 小时缓存、并发合并及失效规则；管理服务临时不可用时仍返回已保存的默认配置，但不回退到本机档位。无配置返回 404，读取失败返回 500，不调用任何模型。
 - 管理员的保存接口仍要求管理员角色及 CSRF，版本冲突返回 409；保存写入系统日志。不存在单独发布或暂停获取的开关。
 - `GET /admin/upstreams/client-models/catalog`：仅管理员可取完整目录，打开编辑弹窗时按需读取。包含停用、冷却和暂不可用模型，管理员已选但上游后来移除的名称仍可保留。汇总缓存与 OAuth 模型定义保持 1 小时，并发查询合并，修改后按同一版本失效。需要立即重新读取时使用上游管理顶部“刷新配置”；弹窗不另设“重新获取”按钮。
