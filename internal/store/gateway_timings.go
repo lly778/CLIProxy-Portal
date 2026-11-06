@@ -66,6 +66,9 @@ func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequest
 		VALUES(?,?,?,?,?,?)`, row.ID, row.UserID, row.StartedAt.UnixMilli(), row.TotalMS, stages.RequestReadMS, stages.ResponseStartedMS); err != nil {
 		return err
 	}
+	if err = saveGatewayFailure(ctx, tx, row); err != nil {
+		return err
+	}
 	// Match dialogue retention: unidentified requests (e.g. an upstream 429
 	// without X-CPA-TRACE-ID) must not evict the 100 linkable request details.
 	// Both classes are bounded independently, regardless of success or failure.
@@ -101,20 +104,20 @@ func (s *Store) GatewayTimingByID(ctx context.Context, id, keyHash string) (Gate
 	return row, err
 }
 
-// Classified gateway failures without a CPA trace cannot be joined to upstream
-// model metadata by ID. User/range filters apply before ordering and limiting.
+// Local failures have no trace, or have been reconciled without a CPA event.
+// Matched failures are shown through their upstream row, never a second row.
 func (s *Store) GatewayUntracedFailures(ctx context.Context, from, to time.Time, userID string, limit int) ([]GatewayRequestTiming, int64, error) {
-	where := ` WHERE TRIM(cpa_request_id)='' AND failure_reason<>'' AND started_at_ms>=? AND started_at_ms<?`
+	where := ` WHERE (f.request_id='' OR (f.checked_at_ms>0 AND json_array_length(f.upstream_json)=0)) AND f.started_at_ms>=? AND f.started_at_ms<?`
 	args := []any{from.UnixMilli(), to.UnixMilli()}
 	if userID != "" {
-		where += ` AND user_id=?`
+		where += ` AND f.user_id=?`
 		args = append(args, userID)
 	}
 	var count int64
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_request_timings`+where, args...).Scan(&count); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM gateway_request_failures f`+where, args...).Scan(&count); err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT id,user_id,api_key_hash,cpa_request_id,started_at_ms,ended_at_ms,start_source,request_read_ms,upstream_headers_ms,response_started_ms,total_ms,completed,status_code,failure_reason FROM gateway_request_timings` + where + ` ORDER BY started_at_ms DESC,id DESC LIMIT ?`
+	query := `SELECT f.id,f.user_id,f.api_key_hash,f.request_id,f.started_at_ms,f.ended_at_ms,COALESCE(d.start_source,'handler_started'),d.request_read_ms,d.upstream_headers_ms,d.response_started_ms,f.ended_at_ms-f.started_at_ms,0,f.status_code,COALESCE(NULLIF(d.failure_reason,''),f.failure_reason) FROM gateway_request_failures f LEFT JOIN gateway_request_timings d ON d.id=f.id` + where + ` ORDER BY f.started_at_ms DESC,f.id DESC LIMIT ?`
 	args = append(args, max(1, min(limit, 100)))
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

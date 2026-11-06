@@ -390,6 +390,9 @@ type EventsPage struct {
 // AnalyticsResponse is the stable subset consumed by the portal. CPAMP's
 // response can contain additional aggregates that are intentionally ignored.
 type AnalyticsResponse struct {
+	RequestLogData  *domain.RequestLogData    `json:"-"`
+	RequestLogUsers []domain.RequestUserDelta `json:"-"`
+	RequestLogNote  string                    `json:"-"`
 	// ModelStatsNote is a portal-only warning when complete actual-model
 	// aggregates cannot be derived. Never fall back to requested-model totals.
 	ModelStatsNote string `json:"-"`

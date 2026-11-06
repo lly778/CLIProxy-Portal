@@ -30,12 +30,13 @@ type actualModelEvent struct {
 }
 
 type actualModelSnapshot struct {
-	fromMS, toMS  int64
-	fullAt        time.Time
-	updatedAt     time.Time
-	rows          map[string]actualModelEvent
-	byModel       map[string]cpamp.ModelUsageStat
-	calls, tokens int64
+	fromMS, toMS        int64
+	fullAt              time.Time
+	updatedAt           time.Time
+	rows                map[string]actualModelEvent
+	byModel             map[string]cpamp.ModelUsageStat
+	calls, tokens       int64
+	successes, failures int64
 }
 
 func newActualModelSnapshot(req cpamp.AnalyticsRequest, now time.Time) *actualModelSnapshot {
@@ -74,6 +75,11 @@ func (s *actualModelSnapshot) adjust(event actualModelEvent, sign int64) {
 	}
 	s.calls += sign
 	s.tokens += sign * event.total
+	if event.failed {
+		s.failures += sign
+	} else {
+		s.successes += sign
+	}
 }
 
 func (s *actualModelSnapshot) validEvent(hash string, event actualModelEvent) bool {
@@ -99,7 +105,16 @@ func (s *actualModelSnapshot) addFull(event cpamp.EventRow) {
 }
 
 func (s *actualModelSnapshot) matches(summary *cpamp.UsageSummary) bool {
-	return summary != nil && s.calls == summary.TotalCalls && s.tokens == summary.TotalTokens
+	if summary == nil || s.calls != summary.TotalCalls || s.tokens != summary.TotalTokens {
+		return false
+	}
+	// A status-only correction must also invalidate the old checkpoint even
+	// when request and token totals have not changed. Older upstream responses
+	// without complete status counters can still validate model/token totals.
+	if summary.SuccessCalls >= 0 && summary.FailureCalls >= 0 && summary.SuccessCalls+summary.FailureCalls == summary.TotalCalls {
+		return s.successes == summary.SuccessCalls && s.failures == summary.FailureCalls
+	}
+	return true
 }
 
 func (s *actualModelSnapshot) models() []cpamp.ModelUsageStat {

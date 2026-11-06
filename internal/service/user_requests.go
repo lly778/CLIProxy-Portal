@@ -68,7 +68,7 @@ func (k *Keys) userRequests(ctx context.Context, userID string, from time.Time, 
 			page.Items = page.Items[:limit]
 		}
 		value.Events = &page
-		return value, nil
+		return k.annotateRequestFailures(fetchCtx, value)
 	})
 	if err != nil {
 		return cpamp.EventsResponse{}, err

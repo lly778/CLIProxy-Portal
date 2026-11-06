@@ -5,10 +5,25 @@ import (
 	"math"
 	"strings"
 
+	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/store"
 	"cliproxy-portal/internal/webui"
 )
+
+func requestLogHealthTrend(points []webui.UsagePointView, a cpamp.AnalyticsResponse) webui.HealthTrendView {
+	trend := timingHealthTrend(points, a.TimingStats)
+	if a.RequestLogNote != "" {
+		trend.SuccessPath = ""
+		trend.FailurePath = ""
+		for i := range trend.Points {
+			trend.Points[i].HasRequests = false
+			trend.Points[i].SuccessRate = "—"
+			trend.Points[i].FailureRate = "—"
+		}
+	}
+	return trend
+}
 
 func timingHealthTrend(points []webui.UsagePointView, stats *domain.UsageTimings) webui.HealthTrendView {
 	if stats == nil {

@@ -127,6 +127,11 @@ func (s *Server) usageViews(a cpamp.AnalyticsResponse, from, to time.Time) (webu
 		summary = webui.UsageSummaryView{Requests: compactNumber(x.TotalCalls), Successes: compactNumber(x.SuccessCalls), Failures: compactNumber(x.FailureCalls), InputTokens: compactNumber(x.InputTokens), OutputTokens: compactNumber(x.OutputTokens), CacheTokens: compactNumber(x.CachedTokens + x.CacheReadTokens + x.CacheCreationTokens), ReasoningTokens: compactNumber(x.ReasoningTokens), TotalTokens: compactNumber(x.TotalTokens), WindowLabel: from.In(s.Cfg.TimeZone).Format("01-02") + " 至 " + to.In(s.Cfg.TimeZone).Format("01-02")}
 		summary.AverageDuration = timingAverage(a.TimingStats)
 		summary.Latency = "—"
+		if a.RequestLogNote != "" {
+			summary.Requests = "—"
+			summary.Successes = "—"
+			summary.Failures = "—"
+		}
 		if x.AverageLatencyMS != nil {
 			summary.Latency = fmt.Sprintf("%.0f ms", *x.AverageLatencyMS)
 		}

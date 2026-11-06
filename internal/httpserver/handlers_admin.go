@@ -29,6 +29,9 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	summary, _, _, _ := s.usageViews(a, from, to)
 	statuses := []struct{ label, status string }{{"待审批", string(domain.StatusPending)}, {"已批准", string(domain.StatusApproved)}, {"已停用", string(domain.StatusSuspended)}, {"全部用户", ""}}
 	v := webui.AdminDashboardView{LayoutView: s.layout(u, currentToken(r), "管理概览", "admin-dashboard"), Usage: summary}
+	if a.RequestLogNote != "" {
+		v.Error = a.RequestLogNote
+	}
 	for _, x := range statuses {
 		n, _ := s.Store.CountUsers(r.Context(), x.status)
 		v.Counts = append(v.Counts, webui.CountView{Label: x.label, Value: strconv.Itoa(n)})
@@ -43,7 +46,7 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		byUser := map[string]*rank{}
 		var unlinked cpamp.UsageSummary
-		directory, directoryErr := s.usageDirectory(r.Context(), a.APIKeyStats)
+		directory, directoryErr := s.usageDirectory(r.Context(), a.APIKeyStats, a.RequestLogUsers)
 		if directoryErr != nil {
 			v.Error = "用户用量归属暂时不可用"
 		}
@@ -68,6 +71,20 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 			}
 			x.calls += stat.Calls
 			x.tokens += stat.TotalTokens
+		}
+		for _, d := range a.RequestLogUsers {
+			target, ok := directory.Users[d.UserID]
+			if !ok {
+				unlinked.TotalCalls += d.Calls
+				unlinked.FailureCalls += d.Calls
+				continue
+			}
+			x := byUser[target.ID]
+			if x == nil {
+				x = &rank{user: target}
+				byUser[target.ID] = x
+			}
+			x.calls += d.Calls
 		}
 		v.UnlinkedSummary, _, _, _ = s.usageViews(cpamp.AnalyticsResponse{Summary: &unlinked}, from, to)
 		ranks := make([]rank, 0, len(byUser))
@@ -149,7 +166,10 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
-	v.HealthTrend = timingHealthTrend(daily, a.TimingStats)
+	v.HealthTrend = requestLogHealthTrend(daily, a)
+	if a.RequestLogNote != "" {
+		v.Error = a.RequestLogNote
+	}
 	if a.TimingStats != nil && a.TimingStats.Note != "" {
 		v.Error = a.TimingStats.Note
 	}
@@ -158,7 +178,7 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		v.Error = "全局用量暂时不可用"
 	} else if userID == "" {
 		v.ShowUserStats = true
-		v.ByUserRequests, v.ByUserTokens, v.UnlinkedRequests, v.UnlinkedTokens, v.HasUnlinked, err = s.adminUsageByUser(r, a.APIKeyStats, name, formFrom, formTo)
+		v.ByUserRequests, v.ByUserTokens, v.UnlinkedRequests, v.UnlinkedTokens, v.HasUnlinked, err = s.adminUsageByUser(r, a.APIKeyStats, name, formFrom, formTo, a.RequestLogUsers)
 		if err != nil {
 			v.Error = "用户用量归属暂时不可用"
 		}
@@ -166,14 +186,14 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 	_ = s.UI.Render(w, webui.PageUsage, v)
 }
 
-func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat, rangeName, formFrom, formTo string) ([]webui.UserUsageView, []webui.UserUsageView, string, string, bool, error) {
+func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat, rangeName, formFrom, formTo string, deltas ...[]domain.RequestUserDelta) ([]webui.UserUsageView, []webui.UserUsageView, string, string, bool, error) {
 	type aggregate struct {
 		user          domain.User
 		calls, tokens int64
 	}
 	byUser := make(map[string]*aggregate)
 	var unlinkedCalls, unlinkedTokens int64
-	directory, err := s.usageDirectory(r.Context(), stats)
+	directory, err := s.usageDirectory(r.Context(), stats, deltas...)
 	if err != nil {
 		return nil, nil, "—", "—", false, err
 	}
@@ -192,6 +212,21 @@ func (s *Server) adminUsageByUser(r *http.Request, stats []cpamp.APIKeyUsageStat
 		}
 		item.calls += stat.Calls
 		item.tokens += stat.TotalTokens
+	}
+	for _, set := range deltas {
+		for _, d := range set {
+			user, ok := directory.Users[d.UserID]
+			if !ok {
+				unlinkedCalls += d.Calls
+				continue
+			}
+			item := byUser[user.ID]
+			if item == nil {
+				item = &aggregate{user: user}
+				byUser[user.ID] = item
+			}
+			item.calls += d.Calls
+		}
 	}
 	rows := make([]webui.UserUsageView, 0, len(byUser))
 	for _, item := range byUser {

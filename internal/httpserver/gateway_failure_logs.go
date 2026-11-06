@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"cliproxy-portal/internal/cpamp"
@@ -20,7 +21,19 @@ func (s *Server) supplementGatewayFailures(ctx context.Context, page cpamp.Event
 		rows, count = nil, 0
 	}
 	items := append([]cpamp.EventRow(nil), page.Items...)
+	upstreamIDs := map[[2]string]bool{}
+	for _, event := range page.Items {
+		if event.RequestID != "" {
+			upstreamIDs[[2]string{strings.ToLower(event.RequestID), strings.ToLower(event.APIKeyHash)}] = true
+		}
+	}
 	for _, row := range rows {
+		// An upstream event may arrive after the last failure reconciliation.
+		// Keep its now-visible row instead of adding the local placeholder.
+		if row.CPARequestID != "" && upstreamIDs[[2]string{strings.ToLower(row.CPARequestID), strings.ToLower(row.APIKeyHash)}] {
+			count--
+			continue
+		}
 		reason := "Upstream request failed"
 		switch row.FailureReason {
 		case "upload_interrupted", "upload_interrupted_legacy":
@@ -29,8 +42,10 @@ func (s *Server) supplementGatewayFailures(ctx context.Context, page cpamp.Event
 			reason = "Request preparation failed"
 		case "idle_timeout":
 			reason = "Gateway idle timeout: no I/O progress for 60 seconds"
+		case "connection_interrupted":
+			reason = "Connection interrupted or response incomplete"
 		}
-		e := cpamp.EventRow{PortalTimingID: row.ID, TimestampMS: row.StartedAt.UnixMilli(), APIKeyHash: row.APIKeyHash, Model: "—", Failed: true, FailSummary: reason}
+		e := cpamp.EventRow{PortalTimingID: row.ID, RequestID: row.CPARequestID, TimestampMS: row.StartedAt.UnixMilli(), APIKeyHash: row.APIKeyHash, Model: "—", Failed: true, FailSummary: reason}
 		if row.StatusCode >= 400 {
 			code := int64(row.StatusCode)
 			e.FailStatusCode = &code

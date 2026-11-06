@@ -36,6 +36,8 @@ type Keys struct {
 	actualModels        map[string]*actualModelSnapshot
 	timingMu            sync.Mutex
 	usageTimings        map[string]*usageTimingSnapshot
+	outcomeMu           sync.Mutex
+	usageOutcomes       map[string]*usageOutcomeSnapshot
 	UsageTimingLocation *time.Location
 	quota               quotaPoolCache
 	refreshMu           sync.Mutex
@@ -712,22 +714,29 @@ func (k *Keys) usage(ctx context.Context, userID string, from, to time.Time, eve
 			if !overview {
 				value = k.withUsageTimings(fetchCtx, cacheKey, userID, req, value, refresh)
 			}
-			return value, nil
+			data, err := k.requestLogSource(fetchCtx, []string{userID}, false, req, refresh)
+			if err != nil {
+				return value, err
+			}
+			value.RequestLogData = data
+			return k.withRequestLogStatus(value, req), nil
 		}
 		if !overview {
 			req.Include.EventsPage.Limit = k.actualModelInitialPageSize(req, refresh)
 		}
-		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
+		value, err := k.queryUsageForRequestLog(fetchCtx, req, userID, refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
 		req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
+		value = usageStatusFromTimeline(value)
 		if !overview {
 			value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
 			value = k.withUsageTimings(fetchCtx, cacheKey, userID, req, value, refresh)
 		}
 		value.WindowFromMS, value.WindowToMS = req.FromMS, req.ToMS
-		return usageStatusFromTimeline(value), nil
+		value = k.withRequestLogStatus(usageStatusFromModels(value), req)
+		return k.annotateRequestFailures(fetchCtx, value)
 	})
 	return analyticsPreview(value, events), err
 }
@@ -762,6 +771,31 @@ func usageStatusFromTimeline(value cpamp.AnalyticsResponse) cpamp.AnalyticsRespo
 	return value
 }
 
+// Full usage already maintains these counters with the model checkpoint. Use
+// them directly; lighter overview reads keep their existing upstream summary.
+func usageStatusFromModels(value cpamp.AnalyticsResponse) cpamp.AnalyticsResponse {
+	if value.Summary == nil || value.ModelStatsNote != "" || value.ModelStatsReconcileAtMS <= 0 {
+		return value
+	}
+	var calls, successes, failures int64
+	for _, m := range value.ModelStats {
+		calls += m.Calls
+		successes += m.SuccessCalls
+		failures += m.FailureCalls
+	}
+	if calls != value.Summary.TotalCalls || successes < 0 || failures < 0 || successes+failures != calls {
+		return value
+	}
+	summary := *value.Summary
+	summary.SuccessCalls, summary.FailureCalls = successes, failures
+	summary.SuccessRate = 0
+	if calls > 0 {
+		summary.SuccessRate = float64(successes) / float64(calls)
+	}
+	value.Summary = &summary
+	return value
+}
+
 func (k *Keys) GlobalUsage(ctx context.Context, from, to time.Time, events int) (cpamp.AnalyticsResponse, error) {
 	return k.globalUsage(ctx, from, to, events, false, false)
 }
@@ -780,25 +814,34 @@ func (k *Keys) globalUsage(ctx context.Context, from, to time.Time, events int, 
 	granularity := usageGranularity(from, to)
 	if overview {
 		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, APIKeyStats: true, Granularity: granularity}}
-		return k.queryUsageAnalytics(ctx, req, refresh)
+		return k.loadAnalytics(ctx, "global:overview:"+analyticsRangeKey(k.Now(), from, to), refresh, func(ctx context.Context) (cpamp.AnalyticsResponse, error) {
+			value, err := k.queryUsageForRequestLog(ctx, req, "", refresh)
+			if err != nil {
+				return value, err
+			}
+			req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
+			return k.withRequestLogStatus(value, req), nil
+		})
 	}
 	cacheKey := "global:usage:" + analyticsRangeKey(k.Now(), from, to)
 	value, err := k.loadAnalytics(ctx, cacheKey, refresh, func(fetchCtx context.Context) (cpamp.AnalyticsResponse, error) {
 		req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Include: cpamp.AnalyticsInclude{Summary: true, APIKeyStats: true, Granularity: granularity}}
 		req.Include.Timeline = true
 		req.Include.EventsPage = &cpamp.EventsPage{Limit: k.actualModelInitialPageSize(req, refresh)}
-		value, err := k.queryUsageAnalytics(fetchCtx, req, refresh)
+		value, err := k.queryUsageForRequestLog(fetchCtx, req, "", refresh)
 		if err != nil {
 			return cpamp.AnalyticsResponse{}, err
 		}
 		req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
+		value = usageStatusFromTimeline(value)
 		value = k.actualModelUsage(fetchCtx, req, value, 100, refresh)
 		value = k.withUsageTimings(fetchCtx, cacheKey, "", req, value, refresh)
 		value.WindowFromMS, value.WindowToMS = req.FromMS, req.ToMS
 		// Preserve the request-status summary used by CPAMP's timeline and
 		// request logs. Per-key aggregates are only for usage rankings; their
 		// success/failure counts may disagree even when total calls match.
-		return value, nil
+		value = k.withRequestLogStatus(usageStatusFromModels(value), req)
+		return k.annotateRequestFailures(fetchCtx, value)
 	})
 	return analyticsPreview(value, events), err
 }
@@ -844,7 +887,7 @@ func (k *Keys) globalRequests(ctx context.Context, limit int, refresh bool) (cpa
 			page.Items = page.Items[:limit]
 		}
 		value.Events = &page
-		return value, nil
+		return k.annotateRequestFailures(fetchCtx, value)
 	})
 	if err != nil {
 		return cpamp.EventsResponse{}, err
@@ -873,9 +916,79 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 	}
 	sort.Strings(normalized)
 	req := cpamp.AnalyticsRequest{FromMS: from.UnixMilli(), ToMS: to.UnixMilli(), NowMS: k.Now().UnixMilli(), TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: normalized}, Include: cpamp.AnalyticsInclude{APIKeyStats: true, Granularity: usageGranularity(from, to)}}
+	value, err := k.loadAnalytics(ctx, "key-usage:"+k.actualModelScopeKey(req), false, func(ctx context.Context) (cpamp.AnalyticsResponse, error) {
+		return k.apiKeyUsage(ctx, req, normalized, unique)
+	})
+	return append([]cpamp.APIKeyUsageStat(nil), value.APIKeyStats...), err
+}
+
+func (k *Keys) apiKeyUsage(ctx context.Context, req cpamp.AnalyticsRequest, normalized []string, unique map[string]struct{}) (cpamp.AnalyticsResponse, error) {
 	value, err := k.queryUsageAnalytics(ctx, req, false)
 	if err != nil {
-		return nil, err
+		return value, err
+	}
+	if k.Store != nil {
+		directory, readErr := k.Store.UserDirectoryFor(ctx, nil, normalized, false)
+		if readErr != nil {
+			return value, readErr
+		}
+		users := []string{}
+		for id := range directory.Users {
+			users = append(users, id)
+		}
+		req.FromMS, req.ToMS = value.WindowFromMS, value.WindowToMS
+		data, readErr := k.requestLogSource(ctx, users, false, req, false)
+		if readErr != nil {
+			return value, readErr
+		}
+		if data != nil && data.RequiredUpstreamMS > 0 && value.GeneratedAtMS > 0 && value.GeneratedAtMS < data.RequiredUpstreamMS {
+			value, err = k.queryUsageAnalytics(ctx, req, true)
+			if err != nil {
+				return value, err
+			}
+		}
+		if data != nil && data.Note != "" {
+			return value, errors.New(data.Note)
+		}
+		value.RequestLogData = data
+		byHash := map[string]cpamp.APIKeyUsageStat{}
+		for _, s := range value.APIKeyStats {
+			if _, ok := unique[s.APIKeyHash]; ok {
+				byHash[s.APIKeyHash] = s
+			}
+		}
+		for _, d := range requestLogDeltas(data, req.FromMS, req.ToMS) {
+			// This partial query supplies counts/tokens to user lists. CPAMP's
+			// per-key status rollups are not the canonical status summary; do not
+			// reclassify those counters using a different event-based baseline.
+			if d.calls == 0 {
+				continue
+			}
+			hash := d.key
+			if hash == "" {
+				for _, h := range normalized {
+					if directory.Owners[h] == d.user {
+						hash = h
+						break
+					}
+				}
+			}
+			if _, ok := unique[hash]; !ok {
+				continue
+			}
+			s := byHash[hash]
+			s.APIKeyHash = hash
+			s.Calls += d.calls
+			s.FailureCalls += d.calls
+			if s.Calls > 0 {
+				s.SuccessRate = float64(s.SuccessCalls) / float64(s.Calls)
+			}
+			byHash[hash] = s
+		}
+		value.APIKeyStats = nil
+		for _, s := range byHash {
+			value.APIKeyStats = append(value.APIKeyStats, s)
+		}
 	}
 	stats := make([]cpamp.APIKeyUsageStat, 0, len(normalized))
 	for _, stat := range value.APIKeyStats {
@@ -883,7 +996,8 @@ func (k *Keys) APIKeyUsage(ctx context.Context, hashes []string, from, to time.T
 			stats = append(stats, stat)
 		}
 	}
-	return stats, nil
+	value.APIKeyStats = stats
+	return value, nil
 }
 
 func usageGranularity(from, to time.Time) string {
@@ -1912,6 +2026,11 @@ func (k *Keys) putCache(key string, value cpamp.AnalyticsResponse) {
 	}
 	if value.TimingStats != nil && value.TimingStats.ReconcileAtMS > 0 {
 		if due := time.UnixMilli(value.TimingStats.ReconcileAtMS); due.Before(expiresAt) {
+			expiresAt = due
+		}
+	}
+	if value.RequestLogData != nil && value.RequestLogData.ReconcileAtMS > 0 {
+		if due := time.UnixMilli(value.RequestLogData.ReconcileAtMS); due.Before(expiresAt) {
 			expiresAt = due
 		}
 	}

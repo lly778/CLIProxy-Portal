@@ -38,6 +38,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	analytics = s.usageWithGatewayFailures(r.Context(), analytics, from, to, u.ID, 10)
 	summary, _, _, requests := s.usageViews(analytics, from, to)
 	v := webui.DashboardView{LayoutView: s.layout(u, currentToken(r), "账户概览", "dashboard"), Greeting: u.Name + "，你好", StatusCard: s.statusCard(u), Key: s.keyView(u), Usage: summary, RecentUsage: requests}
+	if analytics.RequestLogNote != "" {
+		v.Notice = analytics.RequestLogNote
+	}
 	if msg := r.URL.Query().Get("quota_msg"); msg != "" {
 		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
 	}
@@ -245,7 +248,10 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "我的使用量", "usage"), FormAction: "/usage", From: formFrom, To: formTo, Range: rangeName, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests, ModelStatsNote: a.ModelStatsNote}
-	v.HealthTrend = timingHealthTrend(daily, a.TimingStats)
+	v.HealthTrend = requestLogHealthTrend(daily, a)
+	if a.RequestLogNote != "" {
+		v.Error = a.RequestLogNote
+	}
 	if a.TimingStats != nil && a.TimingStats.Note != "" {
 		v.Error = a.TimingStats.Note
 	}

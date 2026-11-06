@@ -275,6 +275,9 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 		SELECT id,user_id,started_at_ms,total_ms,request_read_ms,response_started_ms FROM gateway_request_timings WHERE total_ms>=0`); err != nil {
 		return fmt.Errorf("seed gateway timing samples: %w", err)
 	}
+	if err := s.migrateRequestOutcomes(ctx); err != nil {
+		return fmt.Errorf("migrate request outcomes: %w", err)
+	}
 	// Only retained detail can recover old stage boundaries; pruned history stays
 	// NULL rather than inventing a breakdown or discarding its total duration.
 	if _, err := s.db.ExecContext(ctx, `UPDATE gateway_timing_samples AS sample
