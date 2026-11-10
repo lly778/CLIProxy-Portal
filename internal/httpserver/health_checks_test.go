@@ -36,21 +36,21 @@ func TestKeyReconcileHealthView(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	fake := &healthReconcileCPAMP{}
 	s := &Server{Cfg: config.Config{TimeZone: time.UTC}, Keys: service.NewKeys(db, fake)}
-	if v := s.keyReconcileHealthView(); v.Component != "Key 对账" || v.Status != "warning" || v.StatusLabel != "未检查" {
+	if v := s.keyReconcileHealthView(); v.Component != "Key 对账" || v.Status != "warning" || v.StatusLabel != "未检查" || v.Metric != "等待检查" || v.CheckedAt != "—" {
 		t.Fatalf("unchecked reconcile view = %+v", v)
 	}
 	for _, tc := range []struct {
-		failed        bool
-		status, label string
+		failed                bool
+		status, label, metric string
 	}{
-		{false, "healthy", "正常"}, {true, "warning", "正在重试"}, {false, "healthy", "正常"},
+		{false, "healthy", "正常", "对账正常"}, {true, "warning", "正在重试", "正在重试"}, {false, "healthy", "正常", "对账正常"},
 	} {
 		fake.err = nil
 		if tc.failed {
 			fake.err = errors.New("upstream unavailable")
 		}
 		_ = s.Keys.Reconcile(t.Context())
-		if v := s.keyReconcileHealthView(); v.Status != tc.status || v.StatusLabel != tc.label || v.CheckedAt == "" {
+		if v := s.keyReconcileHealthView(); v.Status != tc.status || v.StatusLabel != tc.label || v.CheckedAt == "" || v.Metric != tc.metric || v.Message == "" {
 			t.Fatalf("reconcile view = %+v, want %s/%s", v, tc.status, tc.label)
 		}
 	}

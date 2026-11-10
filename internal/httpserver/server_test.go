@@ -78,6 +78,28 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": aliases})
 		case r.URL.Path == "/v0/management/auth-files" && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "runtime-1", "physicalName": "plus.json", "provider": "codex", "auth_index": "auth-1", "account": "upstream@example.com", "disabled": upstreamDisabled}}})
+		case r.URL.Path == "/v0/management/auth-files/models" && r.Method == http.MethodGet:
+			models := []map[string]any{}
+			for _, id := range []string{"gpt-disabled", "gpt-enabled"} {
+				excluded := false
+				for _, name := range oauthExcluded {
+					excluded = excluded || name == id
+				}
+				if excluded || upstreamDisabled {
+					continue
+				}
+				keepOriginal := true
+				for _, alias := range oauthModelAliases {
+					if alias.Name == id {
+						models = append(models, map[string]any{"id": alias.Alias})
+						keepOriginal = alias.Fork
+					}
+				}
+				if keepOriginal {
+					models = append(models, map[string]any{"id": id})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"models": models})
 		case r.URL.Path == "/v0/management/auth-files/status" && r.Method == http.MethodPatch:
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -155,7 +177,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 				t.Errorf("decode analytics: %v", err)
 			}
 			response := map[string]any{"generated_at_ms": time.Now().UnixMilli()}
-			if req.Include.Summary && req.Include.Timeline {
+			if req.Include.Summary && (req.Include.Timeline || req.Include.APIKeyStats) {
 				lastUsageAnalytics = req
 			}
 			if req.Include.Timeline {
@@ -513,10 +535,10 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 		t.Fatalf("admin navigation still links legacy system pages: %s", adminSystemPage)
 	}
 	upstreamsPage := getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(upstreamsPage, "data-quota-refresh-form") || strings.Contains(upstreamsPage, "quota-refresh-status") {
-		t.Fatalf("upstream quota refresh should retain its button without a status message: %s", upstreamsPage)
+	if !strings.Contains(upstreamsPage, "/admin/upstreams/refresh") || strings.Contains(upstreamsPage, "data-quota-refresh-form") || strings.Contains(upstreamsPage, "quota-refresh-status") {
+		t.Fatal("upstream configuration refresh should be the shared refresh entry")
 	}
-	if !strings.Contains(upstreamsPage, "上游账号") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
+	if !strings.Contains(upstreamsPage, "Codex 凭证") || !strings.Contains(upstreamsPage, "upstream@example.com") || !strings.Contains(upstreamsPage, "已启用") {
 		t.Fatalf("admin upstream account page missing state: %s", upstreamsPage)
 	}
 	if !strings.Contains(upstreamsPage, `class="badge neutral">5H</span>`) || !strings.Contains(upstreamsPage, `class="badge neutral">7D</span>`) || !strings.Contains(upstreamsPage, `<small class="muted">PLUS</small>`) || !strings.Contains(upstreamsPage, ">80%<") || !strings.Contains(upstreamsPage, ">60%<") || strings.Contains(upstreamsPage, "切换说明") {
@@ -538,6 +560,9 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/presets/"+presetID+"/delete", url.Values{"csrf_token": {adminCSRF}}, http.StatusSeeOther)
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	upstreamID := extract(t, upstreamsPage, `/admin/upstreams/([a-f0-9]{64})/status`)
+	mu.Lock()
+	statusChangesBeforeToggle := upstreamStatusChanges
+	mu.Unlock()
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/"+upstreamID+"/status", url.Values{"csrf_token": {adminCSRF}, "disabled": {"true"}}, http.StatusSeeOther)
 	upstreamsPage = getBody(t, adminClient, portal.URL+"/admin/upstreams", http.StatusOK)
 	if !strings.Contains(upstreamsPage, "已停用") {
@@ -546,7 +571,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	adminCSRF = extract(t, upstreamsPage, `name="csrf_token" value="([^"]+)"`)
 	postForm(t, adminClient, portal.URL+"/admin/upstreams/"+upstreamID+"/status", url.Values{"csrf_token": {adminCSRF}, "disabled": {"false"}}, http.StatusSeeOther)
 	mu.Lock()
-	if upstreamDisabled || upstreamStatusChanges != 2 {
+	if upstreamDisabled || upstreamStatusChanges != statusChangesBeforeToggle+2 {
 		mu.Unlock()
 		t.Fatalf("upstream state disabled=%v changes=%d", upstreamDisabled, upstreamStatusChanges)
 	}
@@ -710,6 +735,7 @@ func TestRegistrationLoginApprovalAndOneTimeKey(t *testing.T) {
 	mu.Lock()
 	oauthModelAliases = []cpamp.OAuthModelAlias{{Name: "gpt-enabled", Alias: "gpt-test", Fork: true}}
 	mu.Unlock()
+	keysService.InvalidateUpstreamReadCache()
 	dashboard = getBody(t, client, portal.URL+"/dashboard", http.StatusOK)
 	if strings.Contains(dashboard, `<span class="chip mono">gpt-test</span>`) || !strings.Contains(dashboard, `<span class="chip mono">gpt-fail</span>`) {
 		t.Fatal("dashboard did not hide the configured model alias")

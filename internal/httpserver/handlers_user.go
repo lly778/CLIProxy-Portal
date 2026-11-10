@@ -252,6 +252,9 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	if a.RequestLogNote != "" {
 		v.Error = a.RequestLogNote
 	}
+	if a.AGYUsageNote != "" {
+		v.Notice = a.AGYUsageNote
+	}
 	if a.TimingStats != nil && a.TimingStats.Note != "" {
 		v.Error = a.TimingStats.Note
 	}
@@ -372,6 +375,14 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 	items, err := s.Keys.TestKey(r.Context(), u.ID)
 	if err == nil {
 		items, err = s.Keys.VisibleModels(cpamp.WithUpstreamReadCache(r.Context()), items)
+	}
+	if err == nil {
+		additional, agyErr := s.Keys.AGYVisibleModels(r.Context(), u.ID)
+		if agyErr != nil {
+			err = agyErr
+		} else {
+			items = append(items, additional...)
+		}
 	}
 	s.renderModels(w, r, items, err)
 }

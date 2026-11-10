@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const credentialsSnapshotVersion = 2
+
 const credentialsSnapshotName = "portal/backup/credentials.json"
 
 type esxiCredentials struct {
@@ -25,13 +27,17 @@ type credentialSnapshot struct {
 	GitHubToken     string           `json:"github_token,omitempty"`
 	ESXi            *esxiCredentials `json:"esxi,omitempty"`
 	CloudflareToken string           `json:"cloudflare_token,omitempty"`
+	AGY             *agyCredentials  `json:"agy"`
 }
 
 var tunnelTokenValue = regexp.MustCompile(`^[A-Za-z0-9._/+=-]+$`)
 var inlineTunnelToken = regexp.MustCompile(`--token(?:=|[ \t]+)["']?([A-Za-z0-9._/+=-]+)`)
 
 func (v credentialSnapshot) validate() error {
-	if v.Version != 1 || !repositoryPattern.MatchString(v.Repository) || ValidateToken(v.GitHubToken) != nil {
+	if v.AGY != nil && v.AGY.validate() != nil {
+		return errors.New("AGY 凭据或重建配置无效")
+	}
+	if v.Version != credentialsSnapshotVersion || !repositoryPattern.MatchString(v.Repository) || ValidateToken(v.GitHubToken) != nil {
 		return errors.New("备份 GitHub 凭据格式无效")
 	}
 	if v.ESXi != nil {
@@ -56,9 +62,14 @@ func snapshotCredentials(dir, work, repository, hostEtc string) (Source, error) 
 	if err != nil {
 		return Source{}, errors.New("GitHub 凭据无法读取")
 	}
-	v := credentialSnapshot{Version: 1, Repository: repository, GitHubToken: token}
+	v := credentialSnapshot{Version: credentialsSnapshotVersion, Repository: repository, GitHubToken: token}
 	if hostEtc == "" {
 		return writeCredentialSnapshot(v, work)
+	}
+	hostRoot := filepath.Dir(hostEtc)
+	v.AGY, err = snapshotAGY(hostEtc, filepath.Join(hostRoot, "var/lib/cliproxy-agy"), filepath.Join(hostRoot, "root/cliproxy-portal"))
+	if err != nil {
+		return Source{}, err
 	}
 	esxiFile := filepath.Join(hostEtc, "cliproxy-esxi/esxi.json")
 	if _, err := os.Lstat(esxiFile); err == nil {

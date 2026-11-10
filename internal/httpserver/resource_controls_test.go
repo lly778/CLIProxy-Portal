@@ -105,7 +105,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		t.Fatal("impossible total budget saved")
 	}
 	page = getBody(t, client, server.URL+"/admin/system", 200)
-	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || strings.Contains(page, "CPA 套件 CPU") || !strings.Contains(page, "整机 CPU 使用率上限") || !strings.Contains(page, "CPA 套件内存") || !strings.Contains(page, "120 / 768 MiB") || !strings.Contains(page, "整机可用 410 / 926 MiB") {
+	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || strings.Contains(page, "CPA 套件 CPU") || !strings.Contains(page, "整机 CPU 使用率上限") || !strings.Contains(page, "服务合计内存") || !strings.Contains(page, "120 / 768 MiB") || !strings.Contains(page, "整机可用 410 / 926 MiB") {
 		t.Fatal("panel does not distinguish suite usage from host availability")
 	}
 	// Values shown in the table are escaped, including user-controlled names.
@@ -176,7 +176,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		t.Fatal("ESXi display scope mixed with suite memory", view)
 	}
 	hostPage := getBody(t, client, server.URL+"/admin/system", 200)
-	for _, label := range []string{"宿主机 CPU", "宿主机内存（右轴 MiB）", "CPA 套件内存"} {
+	for _, label := range []string{"宿主机 CPU", "宿主机内存（右轴 MiB）", "服务合计内存"} {
 		if !strings.Contains(hostPage, label) {
 			t.Fatal("ESXi labels missing", label)
 		}

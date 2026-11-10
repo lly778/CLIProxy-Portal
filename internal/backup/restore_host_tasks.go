@@ -17,6 +17,7 @@ type hostRestorePlan struct {
 	Ready   bool                `json:"ready"`
 	ESXi    bool                `json:"esxi"`
 	Tunnel  bool                `json:"tunnel"`
+	AGY     bool                `json:"agy,omitempty"`
 }
 
 func HostRecoveryPending(dir string) bool {
@@ -32,7 +33,7 @@ func prepareHostRestore(dir string, p PortalRestorePolicy, restored string) erro
 	if err != nil {
 		return err
 	}
-	plan := hostRestorePlan{Version: 1, Policy: p, ESXi: v.ESXi != nil, Tunnel: v.CloudflareToken != ""}
+	plan := hostRestorePlan{Version: 1, Policy: p, ESXi: v.ESXi != nil, Tunnel: v.CloudflareToken != "", AGY: v.AGY != nil}
 	// Archived units and scripts are references only. The pending record holds
 	// no credentials and installation always uses compiled-in program assets.
 	path := filepath.Join(dir, hostRestoreName)
@@ -107,7 +108,11 @@ func resumeHostRestoreWith(ctx context.Context, dir string, installer hostInstal
 	if err := writeJSON(filepath.Join(dir, "restore-status.json"), status); err != nil {
 		return err
 	}
-	if err := installer.installTasks(ctx, plan.ESXi, plan.Tunnel); err != nil {
+	installErr := installer.installTasks(ctx, plan.ESXi, plan.Tunnel)
+	if installErr == nil && plan.AGY {
+		installErr = installer.installAGY(ctx)
+	}
+	if err := installErr; err != nil {
 		status.Running = false
 		status.Phase = "host_pending"
 		status.FailedPhase = "install_host"
@@ -132,6 +137,9 @@ func resumeHostRestoreWith(ctx context.Context, dir string, installer hostInstal
 	status.FinishedAt = time.Now().UTC()
 	status.PhaseStartedAt = status.FinishedAt
 	status.Message = "CPA、CPAMP 及数据已恢复，宿主机任务和配套凭据已还原；请重新登录"
+	if plan.AGY {
+		status.Message += "；AGY 服务、账号凭据和内部密钥已重建还原，会话不恢复"
+	}
 	var missing []string
 	if !plan.ESXi {
 		missing = append(missing, "备份未含宿主机监测凭据，保留当前监测配置")

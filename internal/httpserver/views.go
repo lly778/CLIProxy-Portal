@@ -189,9 +189,15 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 	if s.Store != nil && e.PortalTimingID != "" {
 		if timing, err := s.Store.GatewayTimingByID(contextBackground(), e.PortalTimingID, e.APIKeyHash); err == nil {
 			view.TotalLatency, view.LatencyDetail = requestTimingDisplay(timing, e)
-			view.InputTokens, view.OutputTokens, view.CacheTokens = "—", "—", "—"
-			view.ReasoningTokens, view.TotalTokens, view.ReasoningEffort = "—", "—", "—"
+			if e.PortalUsageKnown == nil {
+				view.InputTokens, view.OutputTokens, view.CacheTokens = "—", "—", "—"
+				view.ReasoningTokens, view.TotalTokens, view.ReasoningEffort = "—", "—", "—"
+			}
 		}
+	}
+	if e.PortalUsageKnown != nil && !*e.PortalUsageKnown {
+		view.InputTokens, view.OutputTokens, view.CacheTokens = "—", "—", "—"
+		view.ReasoningTokens, view.TotalTokens = "—", "—"
 	}
 	if s.Store != nil && e.RequestID != "" && e.APIKeyHash != "" {
 		if timing, err := s.Store.GatewayTimingByCPARequest(contextBackground(), strings.ToLower(e.RequestID), strings.ToLower(e.APIKeyHash)); err == nil {

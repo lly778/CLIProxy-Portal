@@ -10,9 +10,6 @@ type systemCheckSnapshot struct {
 	storageReady bool
 	healthReady  bool
 	retrying     bool
-	lastSyncAt   string
-	nextSyncAt   string
-	syncInterval string
 }
 
 func (s *Server) mergeSystemChecks(next systemCheckSnapshot) systemCheckSnapshot {
@@ -26,9 +23,6 @@ func (s *Server) mergeSystemChecks(next systemCheckSnapshot) systemCheckSnapshot
 		s.systemChecks.checks = append([]webui.HealthCheckView(nil), next.checks...)
 		s.systemChecks.healthReady = true
 		s.systemChecks.retrying = next.retrying
-		s.systemChecks.lastSyncAt = next.lastSyncAt
-		s.systemChecks.nextSyncAt = next.nextSyncAt
-		s.systemChecks.syncInterval = next.syncInterval
 	}
 	result := s.systemChecks
 	result.storage = append([]webui.HealthCheckView(nil), result.storage...)
@@ -54,12 +48,16 @@ func compactStorageViews(items []webui.HealthCheckView) []webui.HealthCheckView 
 	other := webui.HealthCheckView{Component: "其他存储", Status: "healthy", StatusLabel: "正常", Message: "交互记录、CPA 与容器日志合计", Metric: "—"}
 	complete, count := true, 0
 	var total int64
+	hasAGY := false
 	for _, item := range items {
 		if item.Component == "门户 SQLite" || item.Component == "CPAMP SQLite" {
 			result = append(result, item)
 			continue
 		}
 		count++
+		if item.Component == "AGY 数据" {
+			hasAGY = true
+		}
 		if item.CheckedAt != "" && (other.CheckedAt == "" || item.CheckedAt < other.CheckedAt) {
 			other.CheckedAt = item.CheckedAt
 		}
@@ -83,6 +81,13 @@ func compactStorageViews(items []webui.HealthCheckView) []webui.HealthCheckView 
 		other.Message = "交互记录及日志占用暂未全部获取"
 		if other.Status == "healthy" {
 			other.Status, other.StatusLabel = "warning", "需关注"
+		}
+	}
+	if hasAGY {
+		if complete {
+			other.Message = "交互记录、AGY 数据与日志文件合计"
+		} else {
+			other.Message = "交互记录、AGY 数据及日志占用暂未全部获取"
 		}
 	}
 	return append(result, other)

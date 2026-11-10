@@ -18,6 +18,7 @@ type hostLogMetrics struct {
 	CPAMainLogBytes  *int64            `json:"cpa_main_log_bytes"`
 	CPAResponseBytes *int64            `json:"cpa_response_log_bytes"`
 	ContainerBytes   map[string]*int64 `json:"container_log_bytes"`
+	AGYDataBytes     *int64            `json:"agy_data_bytes"`
 }
 
 func readHostLogMetrics(path string, now time.Time) (hostLogMetrics, error) {
@@ -42,7 +43,7 @@ func readHostLogMetrics(path string, now time.Time) (hostLogMetrics, error) {
 	if metrics.GeneratedAt.IsZero() || now.Sub(metrics.GeneratedAt) > hostLogMetricsMaxAge || metrics.GeneratedAt.Sub(now) > time.Minute {
 		return hostLogMetrics{}, errors.New("host log metrics are stale")
 	}
-	for _, value := range []*int64{metrics.CPAMainLogBytes, metrics.CPAResponseBytes, metrics.ContainerBytes["portal"], metrics.ContainerBytes["cpamp"], metrics.ContainerBytes["cpa"]} {
+	for _, value := range []*int64{metrics.CPAMainLogBytes, metrics.CPAResponseBytes, metrics.ContainerBytes["portal"], metrics.ContainerBytes["cpamp"], metrics.ContainerBytes["cpa"], metrics.AGYDataBytes} {
 		if value != nil && *value < 0 {
 			return hostLogMetrics{}, errors.New("negative host log size")
 		}
@@ -57,8 +58,13 @@ func (s *Server) hostLogHealthViews() []webui.HealthCheckView {
 		return webui.HealthCheckView{Component: component, Status: "warning", StatusLabel: "待采集", Metric: "—", Message: "宿主机占用数据暂不可用", CheckedAt: s.formatTime(now)}
 	}
 	main, responses, docker := newView("CPA 主日志"), newView("CPA 请求/响应日志"), newView("容器运行日志")
+	views := []webui.HealthCheckView{main, responses, docker}
+	agyConfigured := s.Keys != nil && s.Keys.AGY != nil
 	if err != nil {
-		return []webui.HealthCheckView{main, responses, docker}
+		if agyConfigured {
+			views = append(views, newView("AGY 数据"))
+		}
+		return views
 	}
 	checkedAt := s.formatTime(metrics.GeneratedAt)
 	if metrics.CPAMainLogBytes != nil {
@@ -96,5 +102,15 @@ func (s *Server) hostLogHealthViews() []webui.HealthCheckView {
 			docker.Metric = fileSizeLabel(total) + "（已获取部分）"
 		}
 	}
-	return []webui.HealthCheckView{main, responses, docker}
+	views = []webui.HealthCheckView{main, responses, docker}
+	if agyConfigured || metrics.AGYDataBytes != nil && *metrics.AGYDataBytes > 0 {
+		v := newView("AGY 数据")
+		if metrics.AGYDataBytes != nil {
+			v.StorageBytes, v.StorageSizeKnown = *metrics.AGYDataBytes, true
+			v.Status, v.StatusLabel, v.Metric = "healthy", "正常", fileSizeLabel(*metrics.AGYDataBytes)
+			v.Message, v.CheckedAt = "AGY 数据目录 · 含会话、恢复索引及文件日志", checkedAt
+		}
+		views = append(views, v)
+	}
+	return views
 }

@@ -227,6 +227,9 @@ func (d *dockerPortal) OriginalDeployment(ctx context.Context) (deploymentState,
 			return deploymentState{}, err
 		}
 		for _, item := range info.Env {
+			if strings.HasPrefix(item, "PORTAL_AGY_BASE_URL=") && strings.TrimPrefix(item, "PORTAL_AGY_BASE_URL=") != "" {
+				d.portalAGY = true
+			}
 			if strings.HasPrefix(item, "PORTAL_HOST_METRICS_PATH=") {
 				d.portalHostMetrics = strings.TrimPrefix(item, "PORTAL_HOST_METRICS_PATH=")
 			}
@@ -237,13 +240,13 @@ func (d *dockerPortal) OriginalDeployment(ctx context.Context) (deploymentState,
 		return deploymentState{}, err
 	}
 	if !names[d.policy.UpstreamContainer] && !names[d.policy.ManagerContainer] {
-		return deploymentState{Images: d.images, Missing: true, HostMetricsPath: d.portalHostMetrics}, nil
+		return deploymentState{Images: d.images, Missing: true, HostMetricsPath: d.portalHostMetrics, AGY: d.portalAGY}, nil
 	}
 	if !names[d.policy.UpstreamContainer] || !names[d.policy.ManagerContainer] {
 		return deploymentState{}, errors.New("上游部署不完整，请管理员先确认残留容器")
 	}
 	images, err := captureImagesWith(ctx, d.policy, d.output)
-	return deploymentState{Images: images, HostMetricsPath: d.portalHostMetrics}, err
+	return deploymentState{Images: images, HostMetricsPath: d.portalHostMetrics, AGY: d.portalAGY}, err
 }
 
 func (d *dockerPortal) DesiredDeployment() deploymentState {
@@ -251,7 +254,7 @@ func (d *dockerPortal) DesiredDeployment() deploymentState {
 	if d.hostESXi {
 		path = "/data/esxi-metrics.json"
 	}
-	return deploymentState{Images: d.images, HostMetricsPath: path}
+	return deploymentState{Images: d.images, HostMetricsPath: path, AGY: d.hostAGY || d.portalAGY}
 }
 
 func (d *dockerPortal) RestoreDeployment(state deploymentState) error {
@@ -263,6 +266,7 @@ func (d *dockerPortal) RestoreDeployment(state deploymentState) error {
 	d.rollbackMissing = state.Missing
 	d.hostESXi = false
 	d.portalHostMetrics = state.HostMetricsPath
+	d.portalAGY = state.AGY
 	return nil
 }
 

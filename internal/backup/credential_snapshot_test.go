@@ -125,9 +125,9 @@ func TestCredentialsAndScheduleCommitOrRollbackTogether(t *testing.T) {
 
 func TestInvalidCredentialErrorsNeverExposeSecret(t *testing.T) {
 	for _, v := range []credentialSnapshot{
-		{Version: 1, Repository: "owner/private", GitHubToken: "bad-secret"},
-		{Version: 1, Repository: "owner/private", GitHubToken: strings.Repeat("x", 30), CloudflareToken: "bad-secret"},
-		{Version: 1, Repository: "owner/private", GitHubToken: strings.Repeat("x", 30), ESXi: &esxiCredentials{URL: "http://bad-secret", Password: "bad-secret"}},
+		{Version: credentialsSnapshotVersion, Repository: "owner/private", GitHubToken: "bad-secret"},
+		{Version: credentialsSnapshotVersion, Repository: "owner/private", GitHubToken: strings.Repeat("x", 30), CloudflareToken: "bad-secret"},
+		{Version: credentialsSnapshotVersion, Repository: "owner/private", GitHubToken: strings.Repeat("x", 30), ESXi: &esxiCredentials{URL: "http://bad-secret", Password: "bad-secret"}},
 	} {
 		_, err := writeCredentialSnapshot(v, t.TempDir())
 		if err == nil || strings.Contains(err.Error(), "bad-secret") {

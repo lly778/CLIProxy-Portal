@@ -11,6 +11,7 @@ import (
 // GatewayRequestTiming contains only server-side timestamps and durations.
 // It is saved independently of dialogue extraction, including empty/error bodies.
 type GatewayRequestTiming struct {
+	AGY               *AGYUsage
 	ID                string
 	UserID            string
 	APIKeyHash        string
@@ -66,8 +67,13 @@ func (s *Store) SaveGatewayRequestTiming(ctx context.Context, row GatewayRequest
 		VALUES(?,?,?,?,?,?)`, row.ID, row.UserID, row.StartedAt.UnixMilli(), row.TotalMS, stages.RequestReadMS, stages.ResponseStartedMS); err != nil {
 		return err
 	}
-	if err = saveGatewayFailure(ctx, tx, row); err != nil {
+	if err = saveAGYUsage(ctx, tx, row); err != nil {
 		return err
+	}
+	if row.AGY == nil {
+		if err = saveGatewayFailure(ctx, tx, row); err != nil {
+			return err
+		}
 	}
 	// Match dialogue retention: unidentified requests (e.g. an upstream 429
 	// without X-CPA-TRACE-ID) must not evict the 100 linkable request details.

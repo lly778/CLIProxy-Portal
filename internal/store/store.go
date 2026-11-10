@@ -278,6 +278,9 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 	if err := s.migrateRequestOutcomes(ctx); err != nil {
 		return fmt.Errorf("migrate request outcomes: %w", err)
 	}
+	if err := s.migrateAGY(ctx); err != nil {
+		return fmt.Errorf("migrate AGY usage: %w", err)
+	}
 	// Only retained detail can recover old stage boundaries; pruned history stays
 	// NULL rather than inventing a breakdown or discarding its total duration.
 	if _, err := s.db.ExecContext(ctx, `UPDATE gateway_timing_samples AS sample

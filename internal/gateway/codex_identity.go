@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,20 +30,33 @@ func (g *Gateway) applyCodexIdentityCompatibility(r *http.Request) (func(), erro
 		}
 	}
 	spools := g.identitySpools()
+	var wire, decoded *os.File
+	var size, decodedSize int64
+	if buffered, ok := r.Body.(*spooledBody); ok {
+		spools = buffered.spools
+		wire = buffered.wire
+		size = buffered.size
+		decoded = buffered.decoded
+		decodedSize = buffered.decodedSize
+	}
 	cleanup := spools.close
-	wire, err := spools.create()
-	if err != nil {
-		return cleanup, err
+	if wire == nil {
+		wire, err = spools.create()
+		if err != nil {
+			return cleanup, err
+		}
+		size, err = identityCopy(r.Context(), wire, r.Body)
+		if err != nil {
+			return cleanup, err
+		}
+		_ = r.Body.Close()
 	}
-	size, err := identityCopy(r.Context(), wire, r.Body)
-	if err != nil {
-		return cleanup, err
-	}
-	_ = r.Body.Close()
 	r.Body = io.NopCloser(io.NewSectionReader(wire, 0, size))
 	r.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(io.NewSectionReader(wire, 0, size)), nil }
 
-	decoded, decodedSize, err := decodeIdentitySpool(r.Context(), spools, wire, size, encoding)
+	if decoded == nil {
+		decoded, decodedSize, err = decodeIdentitySpool(r.Context(), spools, wire, size, encoding)
+	}
 	if err != nil {
 		if r.Context().Err() != nil {
 			return cleanup, r.Context().Err()

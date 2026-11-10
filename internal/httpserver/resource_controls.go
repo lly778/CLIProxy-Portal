@@ -74,6 +74,15 @@ func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	q := s.Resources.Snapshot()
 	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: "—", Observed: "—", Fresh: q.Fresh, Updated: "等待监测"}
 	v.ESXi = s.Cfg.HostMetricsPath != ""
+	v.AGYConfigured = s.Keys != nil && s.Keys.AGY != nil
+	if v.AGYConfigured {
+		v.AGYTasks = "其中：AGY 任务 —"
+		v.AGYResident = "—"
+		if status, err := s.Keys.AGY.Status(ctx); err == nil {
+			v.AGYTasks = fmt.Sprintf("其中：AGY 任务 %d", status.ActiveSessions)
+			v.AGYResident = fmt.Sprintf("%d / %d", status.Sessions, status.MaxSessions)
+		}
+	}
 	countsCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	if counts, err := s.Store.ResourceCounts(countsCtx, time.Now()); err == nil {

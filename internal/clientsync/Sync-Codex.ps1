@@ -305,6 +305,14 @@ function Build-Catalog($Config, [string]$HomePath, [string]$OldToml) {
         Set-Field $entry 'supported_in_api' $true
         Set-Field $entry 'priority' $entries.Count
         Set-Field $entry 'use_responses_lite' $false
+        # AGY supports client-executed tool discovery and image content. Migrate
+        # stale local entries so Codex can advertise those client capabilities.
+        if ($id.StartsWith('agy/', [StringComparison]::OrdinalIgnoreCase)) {
+            Set-Field $entry 'supports_search_tool' $true
+            # The bridge forwards embedded images as ACP image content blocks.
+            # Override stale text-only fallback entries as well as new entries.
+            Set-Field $entry 'input_modalities' @('text', 'image')
+        }
         $effort = [string]$model.default_reasoning
         if ($effort) {
             Set-Field $entry 'default_reasoning_level' $effort

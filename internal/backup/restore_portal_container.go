@@ -42,7 +42,19 @@ func (d *dockerPortal) recreatePortal(ctx context.Context) error {
 		metrics = "/data/esxi-metrics.json"
 	}
 	environment := map[string]string{"PORTAL_HOST_METRICS_PATH": metrics, "CPAMP_BASE_URL": "http://host.docker.internal:18317", "CPA_UPSTREAM_URL": strings.Replace(strings.TrimSuffix(d.policy.UpstreamHealthURL, "/"), "127.0.0.1", "host.docker.internal", 1)}
-	data, err := json.Marshal(map[string]any{"services": map[string]any{"cliproxy-portal": map[string]any{"environment": environment}}})
+	service := map[string]any{"environment": environment}
+	if d.portalAGY || d.hostAGY && !d.agyRollback {
+		h.output = d.output
+		gateway, err := h.agyGateway(ctx)
+		if err != nil {
+			return err
+		}
+		environment["PORTAL_AGY_BASE_URL"] = "http://" + gateway + ":18320"
+		environment["PORTAL_AGY_SECRET_FILE"] = "/run/secrets/portal_agy_secret"
+		service["extra_hosts"] = []string{"host.docker.internal:host-gateway"}
+		service["volumes"] = []map[string]any{{"type": "bind", "source": defaultPortalRoot + "/secrets/portal_agy_secret", "target": "/run/secrets/portal_agy_secret", "read_only": true}}
+	}
+	data, err := json.Marshal(map[string]any{"services": map[string]any{"cliproxy-portal": service}})
 	if err != nil {
 		return err
 	}

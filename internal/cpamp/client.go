@@ -390,6 +390,8 @@ type EventsPage struct {
 // AnalyticsResponse is the stable subset consumed by the portal. CPAMP's
 // response can contain additional aggregates that are intentionally ignored.
 type AnalyticsResponse struct {
+	AGYSource       *AnalyticsResponse        `json:"-"`
+	AGYUsageNote    string                    `json:"-"`
 	RequestLogData  *domain.RequestLogData    `json:"-"`
 	RequestLogUsers []domain.RequestUserDelta `json:"-"`
 	RequestLogNote  string                    `json:"-"`
@@ -543,6 +545,7 @@ type EventRow struct {
 	PortalUserID           string `json:"-"`
 	PortalUserLabel        string `json:"-"`
 	PortalResourceObserved bool   `json:"-"`
+	PortalUsageKnown       *bool  `json:"-"`
 
 	RequestID           string `json:"request_id,omitempty"`
 	EventHash           string `json:"event_hash"`

@@ -1,5 +1,7 @@
 package webui
 
+import "cliproxy-portal/internal/agy"
+
 // LayoutView is embedded by every page view. CSRFToken is rendered into
 // state-changing forms when non-empty. All strings are escaped by html/template.
 type LayoutView struct {
@@ -551,6 +553,12 @@ type UpstreamAccountQuotaView struct {
 }
 
 type AdminUpstreamsView struct {
+	HideChannel   bool
+	AGYConfigured bool
+	AGY           agy.Settings
+	AGYError      string
+	AGYAccount    UpstreamAccountView
+	AGYLoggedIn   bool
 	LayoutView
 	ClientModels                  ClientModelsView
 	Channel                       string
@@ -645,20 +653,16 @@ type AdminPolicyView struct {
 
 type AdminSystemView struct {
 	LayoutView
-	Resources    ResourceView
-	Backup       BackupView
-	Storage      []HealthCheckView
-	Checks       []HealthCheckView
-	LastSyncAt   string
-	NextSyncAt   string
-	SyncInterval string
-	HealthReady  bool
-	Retrying     bool
-	Messages     []NoticeView
-	AuditError   string
-	Entries      []AuditView
-	Shown        string
-	Total        string
+	Resources  ResourceView
+	Backup     BackupView
+	Storage    []HealthCheckView
+	Checks     []HealthCheckView
+	Retrying   bool
+	Messages   []NoticeView
+	AuditError string
+	Entries    []AuditView
+	Shown      string
+	Total      string
 }
 
 type BackupView struct {

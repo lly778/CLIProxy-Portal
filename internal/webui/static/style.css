@@ -724,18 +724,11 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .health-card-head { display: flex; gap: 8px; align-items: center; }
 .health-card-head h2 { flex: 1; margin: 0; font-size: 15px; }
 .health-card p { min-height: 45px; margin: 15px 0 7px; color: var(--muted); }
-.sync-panel { margin-top: 17px; }
-.sync-panel .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .system-health-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .system-health-card { display: flex; flex-direction: column; min-width: 0; min-height: 188px; padding: 22px 24px; }
 .system-health-card .health-card-metric { display: block; margin-top: 20px; color: var(--text); font-size: 25px; font-weight: 750; line-height: 1.2; letter-spacing: -.02em; }
 .system-health-card p { min-height: 0; margin: 8px 0 0; font-size: 13px; line-height: 1.55; }
 .system-health-card .health-card-foot { margin-top: auto; padding-top: 16px; }
-.system-health-grid .sync-panel { min-height: 0; margin-top: 0; }
-.system-health-grid .sync-panel .detail-grid { grid-template-columns: 1fr 1fr; gap: 10px 16px; margin: 16px 0 0; }
-.system-health-grid .sync-panel .detail-grid dt { margin-bottom: 3px; }
-.system-health-grid .sync-panel .detail-grid dd { font-size: 13px; }
-.system-health-grid .sync-panel .field-help { min-height: 0; margin-top: 17px; }
 .error-card { width: min(100%, 560px); padding: 54px 28px; text-align: center; }
 .error-code { color: #d6deeb; font-size: 82px; font-weight: 800; letter-spacing: -.08em; line-height: 1; }
 .error-card h1 { margin: 14px 0 8px; }
@@ -744,9 +737,6 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   #storage .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }
   .dashboard-summary-grid > .summary-card:last-child,
   #health .system-health-grid > .system-health-card:last-child { grid-column: 1 / -1; }
-}
-@media (min-width: 600px) and (max-width: 1080px) {
-  #health .system-health-grid .sync-panel .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 /* Logged-in pages share one outer content width. Narrow forms keep only their
@@ -875,7 +865,7 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
   .system-health-card .health-card-head h2 { flex: 1 1 60px; min-width: 0; }
   .system-health-card .health-card-head .status-dot, .system-health-card .health-card-head .badge { flex: 0 0 auto; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .detail-grid, .sync-panel .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .filter-inline, .filter-bar { align-items: stretch; }
   .filter-inline > *, .filter-bar > * { flex: 1 1 auto; width: 100% !important; }
   .upstream-header-actions .button { width: 100%; min-width: 0; }
@@ -1054,6 +1044,10 @@ body.is-masonry-sorting, body.is-masonry-sorting * { cursor: grabbing !important
 .client-model-dialog[open] { display: flex; flex-direction: column; gap: 20px; }
 .client-model-dialog > .section-head { margin: 0; align-items: flex-start; flex-wrap: nowrap; }
 .client-model-dialog::backdrop { background: rgb(15 23 42 / .4); }
+.agy-account-dialog { width: min(640px, calc(100% - 32px)); }
+.agy-account-dialog > p { margin: 0; }
+.agy-account-dialog form > label { display: grid; gap: 8px; }
+.agy-account-dialog form input { min-width: 0; width: 100%; }
 .client-model-close, .client-model-remove { display: inline-grid; place-items: center; flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 24px; cursor: pointer; }
 .client-model-close:hover, .client-model-remove:hover { color: var(--danger); background: var(--surface-soft); }
 .client-model-close:focus-visible, .client-model-remove:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

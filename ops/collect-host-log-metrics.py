@@ -42,7 +42,36 @@ def docker_log_size(container):
     return regular_file_size(path) if path else None
 
 
-def collect(cpa_log_dir):
+def directory_size(path):
+    """Count regular files once, without following directory/file symlinks.
+
+    quota-home links back to the CLI directory; following it would double count.
+    A disappearing child is normal during session pruning or WAL rotation.
+    """
+    def walk(current, root=False):
+        try:
+            info = os.lstat(current)
+            if stat.S_ISLNK(info.st_mode):
+                if root:
+                    raise OSError("storage root is a symlink")
+                return 0
+            if stat.S_ISREG(info.st_mode):
+                if root:
+                    raise OSError("storage root is not a directory")
+                return info.st_size
+            if not stat.S_ISDIR(info.st_mode):
+                return 0
+            with os.scandir(current) as entries:
+                return sum(walk(entry.path) for entry in entries)
+        except FileNotFoundError:
+            return 0
+    try:
+        return walk(path, root=True)
+    except OSError:
+        return None
+
+
+def collect(cpa_log_dir, agy_data_dir="/var/lib/cliproxy-agy"):
     log_dir = pathlib.Path(cpa_log_dir)
     response_sizes = [regular_file_size(path) for path in glob.glob(str(log_dir / "v1-responses-*.log"))]
     return {
@@ -54,6 +83,7 @@ def collect(cpa_log_dir):
             else None
         ),
         "container_log_bytes": {label: docker_log_size(name) for label, name in CONTAINERS.items()},
+        "agy_data_bytes": directory_size(agy_data_dir),
     }
 
 
@@ -61,9 +91,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cpa-log-dir", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--agy-data-dir", default="/var/lib/cliproxy-agy")
     args = parser.parse_args()
     output = pathlib.Path(args.output)
-    payload = json.dumps(collect(args.cpa_log_dir), ensure_ascii=False, separators=(",", ":")) + "\n"
+    payload = json.dumps(collect(args.cpa_log_dir, args.agy_data_dir), ensure_ascii=False, separators=(",", ":")) + "\n"
     fd, temporary = tempfile.mkstemp(prefix=".host-log-metrics-", dir=output.parent)
     try:
         os.fchmod(fd, 0o644)

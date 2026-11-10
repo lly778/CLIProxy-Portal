@@ -80,3 +80,33 @@ func TestIncompleteTimingShowsOnlyObservedStages(t *testing.T) {
 		t.Fatalf("unobserved stages presented as measured: %s %s", total, detail)
 	}
 }
+
+func TestAGYMeasuredUsageSurvivesPortalTimingAndUnknownKeepsEffort(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "portal.db"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now().UTC()
+	timing := store.GatewayRequestTiming{ID: "agy-usage", UserID: "owner", APIKeyHash: "key", CPARequestID: "agy:agy-usage", StartedAt: now, EndedAt: now.Add(time.Second), TotalMS: 1000, Completed: true, StatusCode: 200}
+	if err = st.SaveGatewayRequestTiming(t.Context(), timing); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{Store: st, Cfg: config.Config{TimeZone: time.UTC}}
+	known := true
+	e := cpamp.EventRow{PortalTimingID: timing.ID, PortalUsageKnown: &known, APIKeyHash: "key", TimestampMS: now.UnixMilli(), ReasoningEffort: "high", InputTokens: 310, OutputTokens: 40, CacheReadTokens: 210, ReasoningTokens: 30, TotalTokens: 350}
+	view := s.requestView(e)
+	if view.InputTokens != "310" || view.OutputTokens != "40" || view.CacheTokens != "210" || view.ReasoningTokens != "30" || view.TotalTokens != "350" || view.ReasoningEffort != reasoningEffortLabel("high") || view.TotalLatency != "1000 ms" {
+		t.Fatalf("measured AGY fields hidden: %+v", view)
+	}
+	known = false
+	view = s.requestView(e)
+	if view.InputTokens != "—" || view.TotalTokens != "—" || view.ReasoningEffort != reasoningEffortLabel("high") {
+		t.Fatalf("unknown usage invented / effort hidden: %+v", view)
+	}
+	e.PortalUsageKnown = nil
+	view = s.requestView(e)
+	if view.TotalTokens != "—" {
+		t.Fatal("gateway-only failure invented model usage")
+	}
+}

@@ -130,8 +130,11 @@ func (k *Keys) antigravityQuotasForFiles(ctx context.Context, files []cpamp.Auth
 // one provider is unavailable. Shared views never receive credential identities.
 func (k *Keys) UpstreamQuotas(ctx context.Context) []UpstreamQuotaPool {
 	pools := []UpstreamQuotaPool{}
-	if pool, _ := k.UpstreamQuota(ctx); pool.TotalAccounts > 0 {
+	if pool := k.agyQuotaPool(ctx); pool.TotalAccounts > 0 {
 		pools = append(pools, pool)
+	}
+	if pool, _ := k.UpstreamQuota(ctx); pool.TotalAccounts > 0 {
+		pools = append([]UpstreamQuotaPool{pool}, pools...)
 	}
 	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)

@@ -46,8 +46,8 @@ func TestSystemCheckSnapshotKeepsTheOtherSection(t *testing.T) {
 	s := &Server{}
 	first := s.mergeSystemChecks(systemCheckSnapshot{
 		storage: []webui.HealthCheckView{{Component: "门户 SQLite", Metric: "1 MB"}}, storageReady: true,
-		checks: []webui.HealthCheckView{{Component: "模型网关", Status: "healthy"}}, healthReady: true,
-		lastSyncAt: "首次检查", retrying: true,
+		checks: []webui.HealthCheckView{{Component: "模型网关", Status: "healthy", CheckedAt: "首次检查"}}, healthReady: true,
+		retrying: true,
 	})
 	if !first.storageReady || !first.healthReady {
 		t.Fatalf("initial snapshot = %#v", first)
@@ -55,14 +55,14 @@ func TestSystemCheckSnapshotKeepsTheOtherSection(t *testing.T) {
 	storageOnly := s.mergeSystemChecks(systemCheckSnapshot{
 		storage: []webui.HealthCheckView{{Component: "门户 SQLite", Metric: "2 MB"}}, storageReady: true,
 	})
-	if storageOnly.storage[0].Metric != "2 MB" || storageOnly.checks[0].Status != "healthy" || !storageOnly.retrying || storageOnly.lastSyncAt != "首次检查" {
+	if storageOnly.storage[0].Metric != "2 MB" || storageOnly.checks[0].Status != "healthy" || !storageOnly.retrying || storageOnly.checks[0].CheckedAt != "首次检查" {
 		t.Fatalf("storage check changed health snapshot: %#v", storageOnly)
 	}
 	healthOnly := s.mergeSystemChecks(systemCheckSnapshot{
-		checks: []webui.HealthCheckView{{Component: "模型网关", Status: "error"}}, healthReady: true,
-		lastSyncAt: "再次检查", retrying: false,
+		checks: []webui.HealthCheckView{{Component: "模型网关", Status: "error", CheckedAt: "再次检查"}}, healthReady: true,
+		retrying: false,
 	})
-	if healthOnly.storage[0].Metric != "2 MB" || healthOnly.checks[0].Status != "error" || healthOnly.retrying || healthOnly.lastSyncAt != "再次检查" {
+	if healthOnly.storage[0].Metric != "2 MB" || healthOnly.checks[0].Status != "error" || healthOnly.retrying || healthOnly.checks[0].CheckedAt != "再次检查" {
 		t.Fatalf("health check changed storage snapshot: %#v", healthOnly)
 	}
 }

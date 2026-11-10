@@ -41,6 +41,8 @@ func OAuthChannelLabel(channel string) string {
 		return "Codex"
 	case "antigravity":
 		return "Antigravity"
+	case "agy":
+		return "Antigravity CLI（ACP）"
 	case "claude":
 		return "Claude"
 	case "gemini":
@@ -70,6 +72,43 @@ func (k *Keys) OAuthChannels(ctx context.Context) ([]string, error) {
 	return k.oauthChannels(ctx, false)
 }
 
+// OAuthAccountChannels is for display only. An absent map means this client
+// cannot establish account presence. Disabled/cooling credentials still count.
+// Routing snapshots retain configured channels even after the last account is removed.
+func (k *Keys) OAuthAccountChannels(ctx context.Context) (map[string]bool, error) {
+	if _, ok := k.CPAMP.(interface {
+		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
+	}); !ok {
+		return nil, nil
+	}
+	files, err := k.upstreamAuthFiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	found := map[string]bool{}
+	for _, file := range files {
+		if strings.TrimSpace(file.Name) == "" || strings.TrimSpace(file.Provider) == "" {
+			continue
+		}
+		channel, err := NormalizeOAuthChannel(file.Provider)
+		if err == nil {
+			found[channel] = true
+		}
+	}
+	if k.AGY != nil && k.Store != nil {
+		settings, err := k.Store.AGYSettings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		account, accountErr := k.agyAccount(ctx)
+		if accountErr != nil {
+			return nil, accountErr
+		}
+		found["agy"] = account.LoggedIn && len(settings.Models) > 0
+	}
+	return found, nil
+}
+
 // Mutating routing settings must not silently omit configured channels when
 // discovery fails. The read-only channel picker retains its fallback behavior.
 func (k *Keys) oauthChannels(ctx context.Context, strict bool) ([]string, error) {
@@ -95,6 +134,15 @@ func (k *Keys) readOAuthChannels(ctx context.Context, strict bool) ([]string, er
 		}
 	}
 	found := map[string]bool{"codex": true}
+	if k.AGY != nil {
+		settings, e := k.Store.AGYSettings(ctx)
+		if e != nil {
+			return nil, e
+		}
+		if len(settings.Models) > 0 {
+			found["agy"] = true
+		}
+	}
 	add := func(value string) {
 		if strings.TrimSpace(value) == "" {
 			return

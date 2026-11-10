@@ -14,6 +14,16 @@ import (
 // Reapplying disabled=false invokes CPA's post-persist registration hook without
 // toggling the credential off or refreshing its OAuth token.
 func (k *Keys) refreshOAuthRegistrations(ctx context.Context, channels ...string) error {
+	filtered := []string{}
+	for _, c := range channels {
+		if c != "agy" {
+			filtered = append(filtered, c)
+		}
+	}
+	channels = filtered
+	if len(channels) == 0 {
+		return nil
+	}
 	ctx, cancel := context.WithTimeout(cpamp.WithFreshUpstreamReads(ctx), 30*time.Second)
 	defer cancel()
 	_, ok := k.CPAMP.(interface {

@@ -18,7 +18,7 @@ func archiveSources(t *testing.T, sources []Source) []Source {
 		value any
 	}{
 		{backupSettingsName, portableBackupSettings{Version: 1, Repository: "owner/private", Hour: 3, Weekday: 1, Retain: 3}},
-		{credentialsSnapshotName, credentialSnapshot{Version: 1, Repository: "owner/private", GitHubToken: "test-only-github-secret-token"}},
+		{credentialsSnapshotName, credentialSnapshot{Version: credentialsSnapshotVersion, Repository: "owner/private", GitHubToken: "test-only-github-secret-token"}},
 		{sourcesSnapshotName, append([]Source{}, sources...)},
 		{restorePolicySnapshotName, PortalRestorePolicy{Container: "test-portal"}},
 	}
@@ -42,7 +42,7 @@ func archiveSources(t *testing.T, sources []Source) []Source {
 func credentialDirectory(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := writeJSON(filepath.Join(dir, filepath.FromSlash(credentialsSnapshotName)), credentialSnapshot{Version: 1, Repository: "owner/private", GitHubToken: "test-only-github-secret-token"}); err != nil {
+	if err := writeJSON(filepath.Join(dir, filepath.FromSlash(credentialsSnapshotName)), credentialSnapshot{Version: credentialsSnapshotVersion, Repository: "owner/private", GitHubToken: "test-only-github-secret-token"}); err != nil {
 		t.Fatal(err)
 	}
 	return dir

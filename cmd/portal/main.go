@@ -15,6 +15,7 @@ import (
 	"time"
 	_ "time/tzdata"
 
+	"cliproxy-portal/internal/agy"
 	"cliproxy-portal/internal/backup"
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/cpamp"
@@ -32,6 +33,13 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "--official-tool-policy" {
+		return agy.RunOfficialToolPolicy(os.Stdin, os.Stdout)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "agy-service" {
+		return agy.RunService()
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		return backupCommand(os.Args[2:])
 	}
@@ -201,6 +209,16 @@ func serve(cfg config.Config, st *store.Store) error {
 	}
 	accounts := service.NewAccounts(st, secret)
 	keys := service.NewKeys(st, client)
+	if cfg.AGYBaseURL != "" {
+		shared, readErr := config.ReadTextSecret(cfg.AGYSecretFile)
+		if readErr != nil {
+			return fmt.Errorf("read AGY service secret: %w", readErr)
+		}
+		keys.AGY, err = agy.NewClient(cfg.AGYBaseURL, shared)
+		if err != nil {
+			return err
+		}
+	}
 	keys.CacheTTL = cfg.UsageCacheTTL
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	app, err := httpserver.New(cfg, st, accounts, keys, secret, logger)
@@ -229,6 +247,10 @@ func serve(cfg config.Config, st *store.Store) error {
 		captureVault = vault
 		captureGateway = proxy
 		proxy.Resources = app.Resources
+		proxy.AGY = keys.AGY
+		if proxy.AGY != nil {
+			proxy.AGY.ImageBaseURL = cfg.CPAAPIBaseURL
+		}
 		app.CaptureVault = vault
 		gatewayServer = newGatewayServer(cfg.GatewayListenAddr, proxy.Handler())
 	}

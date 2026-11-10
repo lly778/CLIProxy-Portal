@@ -7,4 +7,6 @@ type ResourceView struct {
 	Mode, State, StateClass, CPU, Memory, Available, Active, Processing, Rejected, Observed, Updated, Warning, StateHelp string
 	Fresh                                                                                                                bool
 	ESXi                                                                                                                 bool
+	AGYConfigured                                                                                                        bool
+	AGYTasks, AGYResident                                                                                                string
 }

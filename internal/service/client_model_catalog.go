@@ -34,6 +34,10 @@ func (k *Keys) readClientModelCatalog(ctx context.Context) ([]ClientCatalogModel
 	if err != nil {
 		return nil, err
 	}
+	present, err := k.OAuthAccountChannels(ctx)
+	if err != nil {
+		return nil, err
+	}
 	_, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
@@ -69,6 +73,9 @@ func (k *Keys) readClientModelCatalog(ctx context.Context) ([]ClientCatalogModel
 		}
 	}
 	for _, channel := range channels {
+		if present != nil && !present[channel] {
+			continue
+		}
 		definitions, definitionErr := k.upstreamModelDefinitions(ctx, channel)
 		if definitionErr != nil {
 			var status *cpamp.HTTPError
@@ -169,6 +176,14 @@ func (k *Keys) readClientModelCatalog(ctx context.Context) ([]ClientCatalogModel
 		if !changed {
 			break
 		}
+	}
+	additional, agyErr := k.agyCatalog(ctx)
+	if agyErr != nil {
+		return nil, agyErr
+	}
+	for _, m := range additional {
+		add(m.ID)
+		setLevels(m.ID, m.SupportedReasoningLevels)
 	}
 	sort.Slice(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
 	return models, nil

@@ -32,11 +32,14 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	if a.RequestLogNote != "" {
 		v.Error = a.RequestLogNote
 	}
+	if a.AGYUsageNote != "" {
+		v.Notice = a.AGYUsageNote
+	}
 	for _, x := range statuses {
 		n, _ := s.Store.CountUsers(r.Context(), x.status)
 		v.Counts = append(v.Counts, webui.CountView{Label: x.label, Value: strconv.Itoa(n)})
 	}
-	v.Health = []webui.HealthCheckView{s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context()), s.keyReconcileHealthView()}
+	v.Health = []webui.HealthCheckView{s.gatewayHealthView(r.Context()), s.modelUpstreamHealthView(r.Context()), s.keyReconcileHealthView()}
 	if usageErr != nil {
 		v.Error = "全局用量暂时不可用"
 	} else {
@@ -112,6 +115,9 @@ func (s *Server) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	upstreams, upstreamErr := s.Keys.EnabledUpstreams(ctx)
 	if upstreamErr != nil {
 		v.UpstreamsError = "上游配置暂时不可用"
+		if len(upstreams) > 0 {
+			v.UpstreamsError = "部分上游配置暂时不可用"
+		}
 	}
 	for _, row := range upstreams {
 		v.Upstreams = append(v.Upstreams, webui.UpstreamSummaryView{Channel: row.Channel, Label: service.OAuthChannelLabel(row.Channel), Accounts: row.Accounts, Models: row.Models, ModelsReady: row.ModelsReady})
@@ -166,6 +172,9 @@ func (s *Server) adminUsage(w http.ResponseWriter, r *http.Request) {
 		summary.WindowLabel = "最近 24 小时"
 	}
 	v := webui.UsageView{LayoutView: s.layout(u, currentToken(r), "全局使用量", "admin-usage"), FormAction: "/admin/usage", UserID: userID, Target: target, From: formFrom, To: formTo, Range: name, IsAdmin: true, Summary: summary, Daily: daily, Trend: usageTrend(daily), ByModelRequests: modelsByRequests, ByModelTokens: modelsByTokens, Requests: requests}
+	if a.AGYUsageNote != "" {
+		v.Notice = a.AGYUsageNote
+	}
 	v.HealthTrend = requestLogHealthTrend(daily, a)
 	if a.RequestLogNote != "" {
 		v.Error = a.RequestLogNote
@@ -703,6 +712,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	layout := s.layout(currentUser(r), currentToken(r), "上游管理", "admin-upstreams")
 	v := s.adminUpstreamChannelView(r, channel, layout, true)
 	s.loadClientModelView(r, &v)
+	s.loadAGYView(r, &v)
 	s.loadOAuthPresetViews(r, &v)
 	v.PresetCardOrder, v.PresetLayoutError = s.upstreamCardOrder(r.Context(), "presets")
 	channels, channelErr := s.Keys.OAuthChannels(r.Context())
@@ -742,16 +752,35 @@ func (s *Server) adminUpstreamRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Keys.InvalidateUpstreamReadCache()
+	message := "已请求刷新上游配置"
+	if s.Keys.AGY != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 55*time.Second)
+		if err := s.refreshAGYModels(ctx); err != nil {
+			message = "已刷新上游配置，AGY 模型目录暂时无法读取"
+		}
+		if _, err := s.Keys.AGYQuota(ctx, true); err != nil {
+			message = "已刷新上游配置，AGY 额度暂时无法读取"
+		}
+		cancel()
+	}
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
-		clientConfigJSON(w, http.StatusOK, map[string]string{"message": "已请求刷新上游配置"})
+		clientConfigJSON(w, http.StatusOK, map[string]string{"message": message})
 		return
 	}
-	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", "已请求刷新上游配置"), http.StatusSeeOther)
+	http.Redirect(w, r, upstreamRedirectURL(channel, "msg", message), http.StatusSeeOther)
 }
 
 func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layout webui.LayoutView, showMessages bool) webui.AdminUpstreamsView {
-	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity"}
-	v.SupportsIdentityCompatibility = channel != "" && channel != "codex"
+	v := webui.AdminUpstreamsView{LayoutView: layout, Channel: channel, ChannelLabel: service.OAuthChannelLabel(channel), SupportsQuota: channel == "codex" || channel == "antigravity", SupportsReasoning: channel == "codex" || channel == "antigravity" || channel == "agy"}
+	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
+	if accountsErr == nil && len(accounts) == 0 && channel != "agy" {
+		v.HideChannel = true
+		if msg := strings.TrimSpace(r.URL.Query().Get("msg")); showMessages && msg != "" {
+			v.Flash = &webui.FlashView{Kind: "success", Message: msg}
+		}
+		return v
+	}
+	v.SupportsIdentityCompatibility = channel != "" && channel != "codex" && channel != "agy"
 	if v.SupportsIdentityCompatibility {
 		enabled, err := s.Store.EnabledCodexIdentityChannels(r.Context())
 		if err != nil {
@@ -762,7 +791,6 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 			v.IdentityCompatibilityReady = s.Cfg.GatewayListenAddr != ""
 		}
 	}
-	accounts, accountsErr := s.Keys.UpstreamAccounts(r.Context(), channel)
 	quotas := map[string]service.UpstreamAccountQuota{}
 	if accountsErr == nil && v.SupportsQuota {
 		var quotaErr error
@@ -1005,7 +1033,6 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	u := currentUser(r)
-	now := time.Now().UTC()
 	v := webui.AdminSystemView{LayoutView: s.layout(u, currentToken(r), "系统管理", "admin-system")}
 	v.Resources = s.resourceView(r.Context())
 	if msg := r.URL.Query().Get("resource_msg"); msg != "" {
@@ -1022,27 +1049,30 @@ func (s *Server) adminSystem(w http.ResponseWriter, r *http.Request) {
 		next.storageReady = true
 	}
 	if scope != "storage" {
-		next.checks = append(next.checks, s.gatewayHealthView(r.Context()), s.cpaUpstreamHealthView(r.Context()))
+		next.checks = append(next.checks, s.gatewayHealthView(r.Context()), s.modelUpstreamHealthView(r.Context()))
 		next.retrying = s.Keys.Reconcile(r.Context()) != nil
-		next.lastSyncAt = "由后台每次启动后执行"
-		next.nextSyncAt = s.formatTime(now.Add(s.Cfg.ReconcileInterval))
-		next.syncInterval = s.Cfg.ReconcileInterval.String()
+		next.checks = append(next.checks, s.keyReconcileHealthView())
 		next.healthReady = true
 	}
 	snapshot := s.mergeSystemChecks(next)
 	if snapshot.storageReady {
 		v.Storage = compactStorageViews(snapshot.storage)
 	} else {
-		v.Storage = compactStorageViews(uncheckedSystemViews("门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志"))
+		names := []string{"门户 SQLite", "CPAMP SQLite", "交互记录存储", "CPA 主日志", "CPA 请求/响应日志", "容器运行日志"}
+		if s.Keys != nil && s.Keys.AGY != nil {
+			names = append(names, "AGY 数据")
+		}
+		v.Storage = compactStorageViews(uncheckedSystemViews(names...))
 	}
 	if snapshot.healthReady {
 		v.Checks = snapshot.checks
-		v.HealthReady = true
 		v.Retrying = snapshot.retrying
-		v.LastSyncAt, v.NextSyncAt, v.SyncInterval = snapshot.lastSyncAt, snapshot.nextSyncAt, snapshot.syncInterval
 	} else {
-		v.Checks = uncheckedSystemViews("模型网关", "CPA 上游")
-		v.LastSyncAt, v.NextSyncAt, v.SyncInterval = "—", "—", s.Cfg.ReconcileInterval.String()
+		upstream := "CPA 上游"
+		if s.Keys != nil && s.Keys.AGY != nil {
+			upstream = "模型上游"
+		}
+		v.Checks = uncheckedSystemViews("模型网关", upstream, "Key 对账")
 	}
 	if v.Retrying {
 		v.Messages = append(v.Messages, webui.NoticeView{Kind: "warning", Title: "Key 对账失败", Message: "系统会按计划继续重试。"})

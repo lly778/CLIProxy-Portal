@@ -224,7 +224,10 @@ func TestInterruptedUploadIsLoggedWithoutCallingUpstream(t *testing.T) {
 		t.Fatalf("interrupted upload lost/misclassified: %+v, upstream calls %d", row, calls.Load())
 	}
 	totals, err := st.GatewayTimingTotals(t.Context(), start, time.Now().Add(time.Second), "capture-owner", start, time.Hour)
-	if err != nil || len(totals) != 1 || totals[0].StageSamples != 1 || totals[0].WaitMS != 0 || totals[0].UploadMS+totals[0].ResponseMS != row.TotalMS {
+	// Failure projections use Unix-millisecond endpoint subtraction, which
+	// can differ by one millisecond from the saved monotonic duration.
+	saved, readErr := st.GatewayTimingByID(t.Context(), row.ID, row.APIKeyHash)
+	if err != nil || readErr != nil || len(totals) != 1 || totals[0].StageSamples != 1 || totals[0].WaitMS != 0 || totals[0].UploadMS+totals[0].ResponseMS != saved.TotalMS {
 		t.Fatalf("interrupted stages: %+v %v", totals, err)
 	}
 }

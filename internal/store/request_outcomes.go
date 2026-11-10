@@ -22,7 +22,7 @@ func (s *Store) migrateRequestOutcomes(ctx context.Context) error {
 		INSERT OR IGNORE INTO gateway_request_failures(id,user_id,api_key_hash,request_id,started_at_ms,ended_at_ms,status_code,failure_reason)
 		SELECT id,user_id,lower(trim(api_key_hash)),lower(trim(cpa_request_id)),started_at_ms,MAX(ended_at_ms,started_at_ms+total_ms),status_code,
 		CASE WHEN failure_reason<>'' THEN failure_reason WHEN status_code>=400 THEN 'upstream_request_failed' ELSE 'connection_interrupted' END
-		FROM gateway_request_timings WHERE (completed=0 AND (status_code<>0 OR cpa_request_id<>'' OR failure_reason<>'')) OR status_code>=400 OR failure_reason<>''`)
+		FROM gateway_request_timings WHERE ((completed=0 AND (status_code<>0 OR cpa_request_id<>'' OR failure_reason<>'')) OR status_code>=400 OR failure_reason<>'') AND cpa_request_id NOT LIKE 'agy:%'`)
 	return err
 }
 

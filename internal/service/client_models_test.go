@@ -19,7 +19,7 @@ type clientCatalogAPI struct {
 
 func (f *clientCatalogAPI) ListAPIKeys(context.Context) ([]string, error) { return f.keys, nil }
 func (f *clientCatalogAPI) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {
-	return []cpamp.AuthFile{{Provider: "codex", Disabled: true}, {Provider: "antigravity", Unavailable: true}}, nil
+	return []cpamp.AuthFile{{Name: "codex.json", Provider: "codex", Disabled: true}, {Name: "antigravity.json", Provider: "antigravity", Unavailable: true}}, nil
 }
 func (f *clientCatalogAPI) ListOAuthModelDefinitions(_ context.Context, channel string) ([]cpamp.OAuthModelDefinition, error) {
 	return []cpamp.OAuthModelDefinition{{ID: channel + "-offline", ThinkingLevels: []string{"low", "medium", "high"}}, {ID: "hidden-original", ThinkingLevels: []string{"low", "medium", "high", "xhigh"}}, {ID: "custom-source", ThinkingLevels: []string{"low", "high"}}}, nil

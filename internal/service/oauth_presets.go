@@ -55,7 +55,7 @@ func (k *Keys) oauthChannelPresetSnapshot(ctx context.Context, channel string) (
 		return OAuthChannelPreset{}, err
 	}
 	caps := map[string]string{}
-	if channel == "codex" || channel == "antigravity" {
+	if channel == "codex" || channel == "antigravity" || channel == "agy" {
 		caps, _, err = k.OAuthReasoningCaps(ctx, channel)
 		if err != nil {
 			return OAuthChannelPreset{}, err
@@ -83,6 +83,13 @@ func (k *Keys) oauthChannelPresetSnapshot(ctx context.Context, channel string) (
 }
 
 func canonicalizeOAuthPreset(snapshot *OAuthChannelPreset) {
+	if snapshot.Channel == "agy" {
+		for i := range snapshot.Aliases {
+			if !strings.HasPrefix(snapshot.Aliases[i].Alias, "agy/") {
+				snapshot.Aliases[i].Alias = "agy/" + snapshot.Aliases[i].Alias
+			}
+		}
+	}
 	sort.Slice(snapshot.Models, func(i, j int) bool {
 		return strings.ToLower(snapshot.Models[i].ID) < strings.ToLower(snapshot.Models[j].ID)
 	})
@@ -200,7 +207,7 @@ func (k *Keys) validateOAuthChannelPreset(ctx context.Context, snapshot OAuthCha
 	if err := validateOAuthAliasNames(settings, snapshot.Aliases); err != nil {
 		return fmt.Errorf("预设中的模型别名无效：%w", err)
 	}
-	if channel != "codex" && channel != "antigravity" && len(snapshot.ReasoningCaps) > 0 {
+	if channel != "codex" && channel != "antigravity" && channel != "agy" && len(snapshot.ReasoningCaps) > 0 {
 		return errors.New("该渠道暂不支持思考强度上限")
 	}
 	for id, cap := range snapshot.ReasoningCaps {
@@ -217,6 +224,9 @@ func (k *Keys) applyOAuthChannelPreset(ctx context.Context, snapshot OAuthChanne
 	channel, err := oauthPresetChannel(snapshot)
 	if err != nil {
 		return err
+	}
+	if channel == "agy" {
+		return k.applyAGYChannel(ctx, snapshot)
 	}
 	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {

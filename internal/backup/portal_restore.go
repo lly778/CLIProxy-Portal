@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -64,6 +65,7 @@ type deploymentState struct {
 	Images          map[string]string `json:"images,omitempty"`
 	Missing         bool              `json:"missing,omitempty"`
 	HostMetricsPath string            `json:"host_metrics_path,omitempty"`
+	AGY             bool              `json:"agy,omitempty"`
 }
 type deploymentController interface {
 	OriginalDeployment(context.Context) (deploymentState, error)
@@ -423,6 +425,13 @@ func prepareTarget(target restoreTarget, staged string) error {
 		if err = inheritOwner(owner, f); err != nil {
 			return err
 		}
+		// A newly added secret has no previous file owner to inherit. The
+		// portal must be able to read it before post-commit host installation.
+		if target.Path == defaultPortalRoot+"/secrets/portal_agy_secret" && runtime.GOOS == "linux" {
+			if err = f.Chown(10001, 10001); err != nil {
+				return errors.New("AGY 门户密钥权限无法设置")
+			}
+		}
 		mode := os.FileMode(0o600)
 		if entry != nil && entry.IsDir() {
 			mode = 0o700
@@ -445,6 +454,9 @@ func prepareTarget(target restoreTarget, staged string) error {
 }
 
 func rollbackDatabaseTransaction(ctx context.Context, dir string, p PortalRestorePolicy, service portalController, j *databaseTransaction) error {
+	if driver, ok := service.(*dockerPortal); ok && j.Credentials.AGY {
+		driver.agyRollback = true
+	}
 	if err := trustedHostDirectory(filepath.Join(dir, j.Rollback)); err != nil {
 		return err
 	}
@@ -542,6 +554,9 @@ func recoverDatabaseTransaction(ctx context.Context, dir string, p PortalRestore
 	}
 	if err := p.validate(j.Mode); err != nil {
 		return err
+	}
+	if driver, ok := service.(*dockerPortal); ok {
+		driver.hostAGY = j.Credentials.AGY
 	}
 	targets, err := restoreTargets(p, dir, j.Mode)
 	if err != nil {

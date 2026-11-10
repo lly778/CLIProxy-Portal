@@ -123,6 +123,7 @@ func (k *Keys) prepareOAuthPreset(ctx context.Context, requested OAuthPresetSnap
 		indices[entry.Channel] = i
 	}
 	for _, entry := range requested.Channels {
+		canonicalizeOAuthPreset(&entry)
 		channel, _ := oauthPresetChannel(entry)
 		index, ok := indices[channel]
 		if !ok {

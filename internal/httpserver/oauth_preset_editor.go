@@ -91,6 +91,36 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		presetEditorJSON(w, 400, map[string]string{"error": "调用预设内容无效"})
 		return
 	}
+	present, presenceErr := s.Keys.OAuthAccountChannels(r.Context())
+	if presenceErr != nil {
+		presetEditorJSON(w, 502, map[string]string{"error": "读取上游账号失败，请刷新配置后重试"})
+		return
+	}
+	visible := service.OAuthPresetSnapshot{Version: snapshot.Version}
+	for _, entry := range snapshot.Channels {
+		if present == nil || present[entry.Channel] {
+			visible.Channels = append(visible.Channels, entry)
+		}
+	}
+	snapshot = visible
+	// Saved presets can predate a newly connected provider. Offer those live
+	// catalogs too, but leave every added model off until explicitly selected.
+	if !live && !creating {
+		known := map[string]bool{}
+		for _, entry := range snapshot.Channels {
+			known[entry.Channel] = true
+		}
+		available, err := s.Keys.OAuthChannels(r.Context())
+		if err != nil {
+			presetEditorJSON(w, 502, map[string]string{"error": "读取上游渠道失败，请刷新配置后重试"})
+			return
+		}
+		for _, channel := range available {
+			if !known[channel] && (present == nil || present[channel]) {
+				snapshot.Channels = append(snapshot.Channels, service.OAuthChannelPreset{Channel: channel})
+			}
+		}
+	}
 	channels := []presetEditorChannel{}
 	catalogChanged := false
 	for _, entry := range snapshot.Channels {
@@ -114,7 +144,7 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 				catalogChanged = true
 			}
 			row := presetEditorModel{ID: model.ID, Enabled: exists && target.Enabled && model.WildcardRule == "", WildcardRule: model.WildcardRule, Aliases: []string{}, ReasoningCap: entry.ReasoningCaps[key], ReasoningLabels: map[string]string{}}
-			if entry.Channel == "codex" || entry.Channel == "antigravity" {
+			if entry.Channel == "codex" || entry.Channel == "antigravity" || entry.Channel == "agy" {
 				for _, level := range service.OAuthReasoningLevels(entry.Channel, model) {
 					if level != "ultra" {
 						row.ReasoningLevels = append(row.ReasoningLevels, level)
@@ -233,6 +263,28 @@ func (s *Server) adminOAuthPresetEdit(w http.ResponseWriter, r *http.Request) {
 	if decoder.Decode(&snapshot) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 		presetEditorJSON(w, 400, map[string]string{"error": "调用预设内容格式无效"})
 		return
+	}
+	// Editing visible channels must preserve saved rules for absent providers.
+	if !creating {
+		var previous service.OAuthPresetSnapshot
+		if json.Unmarshal([]byte(preset.Payload), &previous) != nil {
+			presetEditorJSON(w, 400, map[string]string{"error": "原调用预设内容无效"})
+			return
+		}
+		present, err := s.Keys.OAuthAccountChannels(r.Context())
+		if err != nil {
+			presetEditorJSON(w, 502, map[string]string{"error": "读取上游账号失败，请稍后重试"})
+			return
+		}
+		included := map[string]bool{}
+		for _, entry := range snapshot.Channels {
+			included[entry.Channel] = true
+		}
+		for _, entry := range previous.Channels {
+			if present != nil && !present[entry.Channel] && !included[entry.Channel] {
+				snapshot.Channels = append(snapshot.Channels, entry)
+			}
+		}
 	}
 	if err := s.Keys.ValidateOAuthPreset(r.Context(), snapshot); err != nil {
 		presetEditorJSON(w, 400, map[string]string{"error": err.Error()})

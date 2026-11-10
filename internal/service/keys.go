@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"cliproxy-portal/internal/agy"
 	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/security"
@@ -23,6 +24,7 @@ import (
 )
 
 type Keys struct {
+	AGY                 *agy.Client
 	Store               *store.Store
 	CPAMP               cpamp.API
 	Now                 func() time.Time
@@ -179,12 +181,15 @@ func NewKeys(st *store.Store, api cpamp.API) *Keys {
 // concurrent clicks cannot fan out into duplicate provider requests.
 func (k *Keys) StartQuotaRefresh(channels ...string) (QuotaRefreshStatus, error) {
 	selected := map[string]bool{"codex": true, "antigravity": true}
+	if k.AGY != nil {
+		selected["agy"] = true
+	}
 	if len(channels) > 0 {
 		channel, err := selectedOAuthChannel(channels)
 		if err != nil {
 			return QuotaRefreshStatus{}, err
 		}
-		if channel != "codex" && channel != "antigravity" {
+		if channel != "codex" && channel != "antigravity" && !(channel == "agy" && k.AGY != nil) {
 			return QuotaRefreshStatus{}, errors.New("该渠道暂未接入额度查询")
 		}
 		selected = map[string]bool{channel: true}
@@ -192,7 +197,7 @@ func (k *Keys) StartQuotaRefresh(channels ...string) (QuotaRefreshStatus, error)
 	typed, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
-	if !ok {
+	if !ok && !selected["agy"] {
 		return QuotaRefreshStatus{}, errors.New("CPAMP 客户端不支持手动刷新额度")
 	}
 	now := k.Now()
@@ -237,10 +242,30 @@ func (k *Keys) runQuotaRefresh(client interface {
 	defer cancel()
 	k.quotaFetchMu.Lock()
 	defer k.quotaFetchMu.Unlock()
-	files, err := k.upstreamAuthFiles(ctx)
-	if err != nil {
-		k.finishQuotaRefresh(0, 0, "无法读取上游账号，请稍后再试")
-		return
+	agyAttempts, agySucceeded := 0, 0
+	if selected["agy"] && k.AGY != nil {
+		account, err := k.agyAccount(ctx)
+		if err != nil {
+			agyAttempts = 1
+		} else if account.LoggedIn {
+			agyAttempts = 1
+			if _, err = k.AGYQuota(ctx, true); err == nil {
+				agySucceeded = 1
+			}
+		}
+	}
+	var files []cpamp.AuthFile
+	readFailed := 0
+	if selected["codex"] || selected["antigravity"] {
+		var err error
+		files, err = k.upstreamAuthFiles(ctx)
+		if err != nil {
+			if agyAttempts == 0 {
+				k.finishQuotaRefresh(0, 0, "无法读取上游账号，请稍后再试")
+				return
+			}
+			readFailed = 1
+		}
 	}
 	eligible := make([]cpamp.AuthFile, 0, len(files))
 	seen := make(map[string]struct{}, len(files))
@@ -258,11 +283,11 @@ func (k *Keys) runQuotaRefresh(client interface {
 			break
 		}
 	}
-	if len(eligible) == 0 {
+	if len(eligible) == 0 && agyAttempts == 0 {
 		k.finishQuotaRefresh(0, 0, "没有可刷新的上游账号")
 		return
 	}
-	succeeded := 0
+	succeeded := agySucceeded
 	for _, file := range eligible {
 		if ctx.Err() != nil {
 			break
@@ -288,7 +313,7 @@ func (k *Keys) runQuotaRefresh(client interface {
 			k.dropRefreshedQuota(rowKey)
 		}
 	}
-	failed := len(eligible) - succeeded
+	failed := len(eligible) + agyAttempts + readFailed - succeeded
 	k.invalidateQuota()
 	message := fmt.Sprintf("已刷新 %d 个账号", succeeded)
 	if failed > 0 {
@@ -590,6 +615,10 @@ func (k *Keys) TestModel(ctx context.Context, userID, model, cpaBaseURL string) 
 		requestBody["max_completion_tokens"] = 16
 	} else {
 		requestBody["max_tokens"] = 1
+	}
+	if strings.HasPrefix(model, agy.Prefix) {
+		base.Path = strings.TrimSuffix(base.Path, "/v1/chat/completions") + "/v1/responses"
+		requestBody = map[string]any{"model": model, "input": "Reply with OK.", "stream": false}
 	}
 	payload, err := json.Marshal(requestBody)
 	if err != nil {
@@ -997,7 +1026,7 @@ func (k *Keys) apiKeyUsage(ctx context.Context, req cpamp.AnalyticsRequest, norm
 		}
 	}
 	value.APIKeyStats = stats
-	return value, nil
+	return withAGYUsage(value), nil
 }
 
 func usageGranularity(from, to time.Time) string {
@@ -1021,6 +1050,9 @@ func (k *Keys) UpstreamAccounts(ctx context.Context, channels ...string) ([]Upst
 }
 
 func (k *Keys) readUpstreamAccounts(ctx context.Context, channel string) ([]UpstreamAccount, error) {
+	if channel == "agy" {
+		return []UpstreamAccount{}, nil
+	}
 	_, ok := k.CPAMP.(interface {
 		ListAuthFiles(context.Context) ([]cpamp.AuthFile, error)
 	})
@@ -1225,6 +1257,9 @@ func (k *Keys) OAuthModelSettings(ctx context.Context, channels ...string) ([]OA
 }
 
 func (k *Keys) readOAuthModelSettings(ctx context.Context, channel string) ([]OAuthModelSetting, []string, error) {
+	if channel == "agy" {
+		return k.agyModelSettings(ctx)
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
@@ -1270,6 +1305,9 @@ func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpa
 }
 
 func (k *Keys) readOAuthModelAliases(ctx context.Context, channel string) ([]cpamp.OAuthModelAlias, string, error) {
+	if channel == "agy" {
+		return k.agyAliases(ctx)
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)
 	})

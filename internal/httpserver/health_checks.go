@@ -24,15 +24,17 @@ type databaseSpace struct {
 
 func (s *Server) keyReconcileHealthView() webui.HealthCheckView {
 	status := s.Keys.LastReconcileStatus()
-	v := webui.HealthCheckView{Component: "Key 对账", Status: "warning", StatusLabel: "未检查"}
+	v := webui.HealthCheckView{Component: "Key 对账", Status: "warning", StatusLabel: "未检查", Metric: "等待检查", Message: "尚未完成 Key 对账", CheckedAt: "—"}
 	if status.CheckedAt.IsZero() {
 		return v
 	}
 	v.CheckedAt = s.formatTime(status.CheckedAt)
 	if status.Retrying {
 		v.StatusLabel = "正在重试"
+		v.Metric, v.Message = "正在重试", "对账未完成，系统将自动重试"
 	} else {
 		v.Status, v.StatusLabel = "healthy", "正常"
+		v.Metric, v.Message = "对账正常", "门户与上游 Key 状态已同步"
 	}
 	return v
 }
@@ -308,5 +310,47 @@ func (s *Server) cpaUpstreamHealthView(ctx context.Context) webui.HealthCheckVie
 	} else {
 		v.Status, v.StatusLabel, v.Metric, v.Message = "error", "异常", "需检查", "CPA 模型接口不可达"
 	}
+	return v
+}
+
+func (s *Server) modelUpstreamHealthView(ctx context.Context) webui.HealthCheckView {
+	start := time.Now()
+	v := s.cpaUpstreamHealthView(ctx)
+	if s.Keys == nil || s.Keys.AGY == nil {
+		return v
+	}
+	v.Component = "模型上游"
+	cpaOK := v.Status == "healthy"
+	message := "AGY 桥接服务不可达"
+	agyOK := false
+	_, statusErr := s.Keys.AGY.Status(ctx)
+	if statusErr == nil {
+		accountCtx, done := context.WithTimeout(ctx, 2*time.Second)
+		account, err := s.Keys.AGYAccount(accountCtx)
+		done()
+		switch {
+		case err != nil:
+			message = "AGY 账号状态暂不可读取"
+		case !account.LoggedIn:
+			message = "AGY 服务可达 · 未登录"
+		default:
+			message = "AGY 服务可达"
+			agyOK = true
+		}
+	}
+	if s.Cfg.CPAUpstreamURL == "" {
+		v.Message = message
+	} else {
+		v.Message += " · " + message
+	}
+	switch {
+	case agyOK && (cpaOK || s.Cfg.CPAUpstreamURL == ""):
+		v.Status, v.StatusLabel, v.Metric = "healthy", "正常", "服务可用"
+	case cpaOK || agyOK:
+		v.Status, v.StatusLabel, v.Metric = "warning", "需关注", "部分可用"
+	default:
+		v.Status, v.StatusLabel, v.Metric = "error", "异常", "需检查"
+	}
+	v.Latency = time.Since(start).Round(time.Millisecond).String()
 	return v
 }

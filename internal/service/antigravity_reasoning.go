@@ -17,7 +17,7 @@ const antigravityThinkingPath = "generationConfig.thinkingConfig."
 var antigravityEffortBudgets = map[string]int{"none": 0, "minimal": 512, "low": 1024, "medium": 8192, "high": 24576, "xhigh": 32768, "max": 128000}
 
 func validateReasoningChannel(channel string) error {
-	if channel != "codex" && channel != "antigravity" {
+	if channel != "codex" && channel != "antigravity" && channel != "agy" {
 		return errors.New("该渠道暂不支持思考强度上限")
 	}
 	return nil

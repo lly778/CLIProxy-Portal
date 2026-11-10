@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -119,6 +120,10 @@ func (w *requestIdleWatch) stop() {
 }
 
 func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
+	if g.AGY != nil && strings.HasPrefix(r.URL.Path, "/v1/agy/images/") {
+		g.serveAGYImage(w, r)
+		return
+	}
 	if !isDialoguePath(r.Method, r.URL.Path) {
 		g.serveResourceHTTP(w, r)
 		return

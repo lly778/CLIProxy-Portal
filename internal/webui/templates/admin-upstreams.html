@@ -2,11 +2,34 @@
 <div>
 <div class="page-head upstream-page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">按 OAuth 渠道管理上游凭证、模型启停及用户侧别名。更改会影响该渠道的后续请求调度。</p></div><div class="filter-inline upstream-header-actions"><form method="post" action="/admin/upstreams/refresh" class="inline-form" data-upstream-config-refresh><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="channel" value="{{.Channel}}"><button class="button secondary" type="submit">刷新配置</button></form></div></div>
 {{if .ChannelPanels}}{{range .ChannelPanels}}
-<div class="section-gap">{{template "upstream-credentials" .}}</div>
-{{end}}{{else}}<div class="section-gap">{{template "upstream-credentials" .}}</div>{{end}}
+{{if and (ne .Channel "agy") (not .HideChannel)}}<div class="section-gap">{{template "upstream-credentials" .}}</div>{{end}}
+{{end}}{{else}}{{if and (ne .Channel "agy") (not .HideChannel)}}<div class="section-gap">{{template "upstream-credentials" .}}</div>{{end}}{{end}}
+{{template "agy-settings" .}}
 {{template "upstream-presets" .}}
 {{template "client-model-settings" .}}
 </div>
+{{end}}
+
+{{define "agy-settings"}}
+<section class="card upstream-card section-gap" id="agy" data-agy-account data-csrf="{{.CSRFToken}}">
+  <div class="section-head compact upstream-credentials-head"><div><h2>Antigravity CLI（ACP）</h2><p class="muted small">官方账号与模型额度</p></div>{{if .AGYConfigured}}<button class="button secondary" type="button" data-agy-account-open>账号管理</button>{{else}}<span class="badge warning">尚未配置</span>{{end}}</div>
+  {{if .AGYError}}<p class="muted small upstream-quota-error" role="status">{{.AGYError}}</p>{{end}}
+  {{if .AGYConfigured}}{{if .AGYLoggedIn}}
+  <div class="upstream-list"><article class="upstream-row upstream-row-grouped">
+    <div class="upstream-identity"><span class="upstream-icon" aria-hidden="true">A</span><div class="upstream-main"><strong>{{unobfuscatedEmail .AGYAccount.Account}}</strong><span class="muted">Google 官方账号</span></div></div>
+    <div class="upstream-account-quotas upstream-account-quota-groups">{{range .AGYAccount.QuotaGroups}}<section class="upstream-quota-group" aria-label="{{.Label}}额度"><strong class="upstream-quota-group-label">{{.Label}}</strong><div class="upstream-quota-windows">{{range .Quotas}}{{template "upstream-account-quota-row" .}}{{end}}</div></section>{{else}}<span class="muted small">{{.AGYAccount.QuotaStatus}}</span>{{end}}</div>
+    <div class="upstream-actions"><span class="badge success">已启用</span></div>
+  </article></div>
+  {{else}}<p class="muted small">尚未登录 Google 账号</p>{{end}}
+  <dialog class="client-model-dialog agy-account-dialog" data-agy-account-dialog aria-labelledby="agy-account-title">
+    <div class="section-head compact"><div><h2 id="agy-account-title">账号管理</h2><p class="muted small">{{if .AGYLoggedIn}}当前账号：{{unobfuscatedEmail .AGYAccount.Account}}{{else}}使用 Google 官方授权登录{{end}}</p></div><button class="client-model-close" type="button" data-agy-account-close aria-label="关闭">×</button></div>
+    <p class="muted small">切换或退出账号会结束当前 AGY 运行会话，客户端聊天记录保留。</p>
+    <div class="button-row"><button class="button primary" type="button" data-agy-login-start>{{if .AGYLoggedIn}}切换账号{{else}}登录 Google 账号{{end}}</button>{{if .AGYLoggedIn}}<button class="button danger-outline" type="button" data-agy-logout>退出当前账号</button>{{end}}</div>
+    <form data-agy-login-form hidden><p><a class="button secondary" href="#" target="_blank" rel="noopener noreferrer" data-agy-auth-link>打开 Google 授权页面</a></p><label>授权码或回调地址<input type="text" name="code" autocomplete="off" spellcheck="false" required></label><div class="button-row section-gap"><button class="button primary" type="submit">完成登录</button></div></form>
+    <p class="muted small" data-agy-account-status role="status" aria-live="polite"></p>
+  </dialog>
+  <script src="/static/agy-account.js?v={{assetVersion "agy-account.js"}}" defer></script>{{end}}
+</section>
 {{end}}
 
 {{define "client-model-settings"}}
@@ -106,7 +129,7 @@
 </section>
 {{end}}
 
-{{define "upstream-model-summary"}}
+{{define "upstream-model-summary"}}{{if not .HideChannel}}
 <section class="upstream-config-section">
   <div class="section-head compact"><div><h3>{{.ChannelLabel}}</h3></div><div class="button-row">
   {{if .SupportsIdentityCompatibility}}<form method="post" action="/admin/upstreams/codex-identity" class="codex-identity-toggle" data-codex-identity-toggle>
@@ -127,6 +150,6 @@
     </span>{{end}}{{end}}{{if not $hasEnabled}}<span class="muted small">暂无已启用模型</span>{{end}}
   </div></div>
 </section>
-{{end}}
+{{end}}{{end}}
 
 {{define "upstream-account-quota-row"}}<div class="upstream-account-quota"><div class="upstream-quota-heading"><span class="badge neutral">{{.Label}}</span><strong>{{.RemainingPercent}}%</strong>{{if .Plan}}<small class="muted">{{.Plan}}</small>{{end}}</div><div class="quota-progress {{.StatusClass}}" role="progressbar" aria-label="{{.Label}}额度剩余" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.RemainingPercent}}"><span style="width:{{.RemainingPercent}}%"></span></div><small class="muted">重置 {{.ResetAt}}</small></div>{{end}}

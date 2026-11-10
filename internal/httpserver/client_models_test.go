@@ -33,7 +33,9 @@ func (f *clientModelsAPI) ListModelsWithAPIKey(_ context.Context, key string) (c
 	}
 	return cpamp.ModelListResponse{Data: []cpamp.Model{{ID: "public"}}}, nil
 }
-func (f *clientModelsAPI) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) { return nil, nil }
+func (f *clientModelsAPI) ListAuthFiles(context.Context) ([]cpamp.AuthFile, error) {
+	return []cpamp.AuthFile{{Name: "codex-test.json", Provider: "codex"}}, nil
+}
 func (f *clientModelsAPI) ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error) {
 	return nil, nil
 }

@@ -43,11 +43,17 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 		return
 	}
 	current, currentErr := s.Keys.OAuthPresetSnapshot(r.Context())
+	present, presenceErr := s.Keys.OAuthAccountChannels(r.Context())
+	if presenceErr != nil {
+		v.PresetError = "上游账号暂时不可用"
+		return
+	}
 	// Compare exact current inputs, rather than keeping a time-based database cache.
 	// JSON parsing, sorting and applied-state comparisons are shared by unchanged visits.
 	digest := sha256.New()
 	_, _ = fmt.Fprintf(digest, "%t\n", currentErr == nil)
 	_ = json.NewEncoder(digest).Encode(current)
+	_ = json.NewEncoder(digest).Encode(present)
 	for _, preset := range presets {
 		for _, value := range []string{preset.ID, preset.Name, preset.Payload} {
 			_, _ = fmt.Fprintf(digest, "%d:%s", len(value), value)
@@ -67,8 +73,12 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 		row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt), Summary: "预设内容无法解析"}
 		if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil && service.ValidateOAuthPresetFormat(snapshot) == nil {
 			row.Applied = currentErr == nil && service.OAuthPresetSnapshotsEqual(current, snapshot)
-			enabled, total, aliases, caps := 0, 0, 0, 0
+			enabled, total, aliases, caps, visibleChannels := 0, 0, 0, 0, 0
 			for _, entry := range snapshot.Channels {
+				if present != nil && !present[entry.Channel] {
+					continue
+				}
+				visibleChannels++
 				prefix := service.OAuthChannelLabel(entry.Channel) + " · "
 				total += len(entry.Models)
 				aliases += len(entry.Aliases)
@@ -107,7 +117,7 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 					row.ReasoningCaps = append(row.ReasoningCaps, prefix+name+" · "+reasoningEffortLabel(entry.ReasoningCaps[model]))
 				}
 			}
-			row.Summary = fmt.Sprintf("%d 个渠道 · 启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", len(snapshot.Channels), enabled, total, aliases, caps)
+			row.Summary = fmt.Sprintf("%d 个渠道 · 启用 %d/%d 个模型 · %d 条别名 · %d 个强度上限", visibleChannels, enabled, total, aliases, caps)
 		}
 		v.Presets = append(v.Presets, row)
 	}

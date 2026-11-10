@@ -9,10 +9,13 @@ import (
 )
 
 type restoredCredentials struct {
-	GitHub bool `json:"github,omitempty"`
-	ESXi   bool `json:"esxi,omitempty"`
-	Tunnel bool `json:"tunnel,omitempty"`
-	Key    bool `json:"key,omitempty"`
+	GitHub          bool `json:"github,omitempty"`
+	ESXi            bool `json:"esxi,omitempty"`
+	Tunnel          bool `json:"tunnel,omitempty"`
+	Key             bool `json:"key,omitempty"`
+	AGY             bool `json:"agy,omitempty"`
+	AGYOAuth        bool `json:"agy_oauth,omitempty"`
+	AGYInstallation bool `json:"agy_installation,omitempty"`
 }
 
 type credentialRestoreController interface {
@@ -60,6 +63,7 @@ func prepareMissingRecoveryKey(restored, dir, keyFile string) (bool, error) {
 func (d *dockerPortal) prepareCredentials(restored, dir string, p PortalRestorePolicy) (restoredCredentials, error) {
 	flags, err := prepareCredentialTargets(restored, dir, d.recoveryKeyFile, p)
 	d.hostESXi = flags.ESXi
+	d.hostAGY = flags.AGY
 	return flags, err
 }
 
@@ -73,6 +77,11 @@ func credentialTargets(dir string, flags restoredCredentials) []restoreTarget {
 		{flags.Key, "recovery.key", filepath.Join(dir, "recovery.key")},
 		{flags.ESXi, "esxi.json", "/etc/cliproxy-esxi/esxi.json"},
 		{flags.Tunnel, "tunnel-token", "/etc/cliproxy-cloudflared/tunnel-token"},
+		{flags.AGY, "agy-service-secret", agySecretPath},
+		{flags.AGY, "agy-portal-secret", defaultPortalRoot + "/secrets/portal_agy_secret"},
+		{flags.AGY, "agy-config.json", agyConfigPath},
+		{flags.AGYOAuth, "agy-oauth", agyTokenPath},
+		{flags.AGYInstallation, "agy-installation", agyHome + "/agy/installation_id"},
 	} {
 		if target.enabled {
 			targets = append(targets, restoreTarget{Path: target.path, Archive: "portal/backup/runtime/" + target.name, Kind: "file"})
@@ -98,12 +107,32 @@ func prepareCredentialTargets(restored, dir, keyFile string, p PortalRestorePoli
 		return flags, errors.New("备份设置和 GitHub 凭据的仓库不一致")
 	}
 	flags.GitHub, flags.ESXi, flags.Tunnel = true, v.ESXi != nil, v.CloudflareToken != ""
+	flags.AGY = v.AGY != nil
+	if flags.AGY {
+		flags.AGYOAuth = len(v.AGY.OAuth) > 0
+		flags.AGYInstallation = v.AGY.InstallationID != ""
+	}
 	key, err := ReadKey(keyFile)
 	if err != nil {
 		return flags, errors.New("无法保留本次恢复使用的备份密钥")
 	}
 	flags.Key = true
 	data := map[string][]byte{"github.token": []byte(v.GitHubToken + "\n"), "recovery.key": []byte(hex.EncodeToString(key) + "\n")}
+	if flags.AGY {
+		data["agy-service-secret"] = []byte(v.AGY.Secret + "\n")
+		data["agy-portal-secret"] = []byte(v.AGY.Secret + "\n")
+		data["agy-config.json"], _ = json.Marshal(struct {
+			MaxSessions int  `json:"max_sessions"`
+			MemoryMiB   int  `json:"memory_mib"`
+			LoggedIn    bool `json:"logged_in"`
+		}{v.AGY.MaxSessions, v.AGY.MemoryMiB, flags.AGYOAuth})
+		if flags.AGYOAuth {
+			data["agy-oauth"] = v.AGY.OAuth
+		}
+		if flags.AGYInstallation {
+			data["agy-installation"] = []byte(v.AGY.InstallationID + "\n")
+		}
+	}
 	if v.ESXi != nil {
 		data["esxi.json"], _ = json.Marshal(v.ESXi)
 	}

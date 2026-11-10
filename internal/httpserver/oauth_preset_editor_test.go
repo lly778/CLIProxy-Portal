@@ -108,7 +108,7 @@ func TestPresetEditorSavesDraftBeforeApplyAndPreservesErrors(t *testing.T) {
 		}
 	}
 	page = getBody(t, client, portal.URL+"/admin/upstreams", http.StatusOK)
-	if !strings.Contains(page, `data-preset-edit="/admin/upstreams/presets/editor/edit"`) || !strings.Contains(page, "保存并应用") {
+	if !strings.Contains(page, `data-preset-edit="/admin/upstreams/presets/editor/edit"`) || !strings.Contains(page, "data-preset-editor-form") {
 		t.Fatal("missing editor trigger or action")
 	}
 	post := func(name, revision, action, payload, token string, status int) map[string]any {

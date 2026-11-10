@@ -199,7 +199,7 @@ func requestLogDeltas(data *domain.RequestLogData, from, to int64) []requestDelt
 func (k *Keys) withRequestLogStatus(value cpamp.AnalyticsResponse, req cpamp.AnalyticsRequest) cpamp.AnalyticsResponse {
 	data := value.RequestLogData
 	if data == nil {
-		return value
+		return withAGYUsage(value)
 	}
 	value.RequestLogNote = data.Note
 	deltas := requestLogDeltas(data, req.FromMS, req.ToMS)
@@ -264,10 +264,11 @@ func (k *Keys) withRequestLogStatus(value cpamp.AnalyticsResponse, req cpamp.Ana
 		}
 		sort.Slice(value.Timeline, func(i, j int) bool { return value.Timeline[i].BucketMS < value.Timeline[j].BucketMS })
 	}
-	return value
+	return withAGYUsage(value)
 }
 
 func (k *Keys) annotateRequestFailures(ctx context.Context, value cpamp.AnalyticsResponse) (cpamp.AnalyticsResponse, error) {
+	value = withAGYUsage(value)
 	if k.Store == nil || value.Events == nil {
 		return value, nil
 	}

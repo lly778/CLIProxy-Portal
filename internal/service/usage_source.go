@@ -65,6 +65,10 @@ func usageSourceCovers(have, want cpamp.AnalyticsInclude) bool {
 }
 
 func usageSourceProjection(value cpamp.AnalyticsResponse, include cpamp.AnalyticsInclude) cpamp.AnalyticsResponse {
+	if value.AGYSource != nil {
+		native := usageSourceProjection(*value.AGYSource, include)
+		value.AGYSource = &native
+	}
 	if !include.Summary {
 		value.Summary = nil
 	} else if value.Summary != nil {
@@ -233,6 +237,10 @@ func usageSourceKeySubset(value cpamp.AnalyticsResponse, req cpamp.AnalyticsRequ
 		}
 	}
 	value.APIKeyStats = stats
+	if value.AGYSource != nil {
+		native := usageSourceKeySubset(*value.AGYSource, req)
+		value.AGYSource = &native
+	}
 	return value
 }
 
@@ -243,5 +251,9 @@ func (k *Keys) fetchUsageSource(ctx context.Context, req cpamp.AnalyticsRequest)
 			err = errors.New("analytics query failed")
 		}
 	}()
-	return k.CPAMP.Analytics(ctx, req)
+	value, err = k.CPAMP.Analytics(ctx, req)
+	if err == nil && k.AGY != nil {
+		value.AGYSource, err = k.readAGYUsage(ctx, req)
+	}
+	return value, err
 }

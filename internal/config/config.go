@@ -11,6 +11,8 @@ import (
 )
 
 type Config struct {
+	AGYBaseURL          string
+	AGYSecretFile       string
 	ListenAddr          string
 	DatabasePath        string
 	ExternalURL         string
@@ -41,6 +43,8 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load time zone: %w", err)
 	}
 	cfg := Config{
+		AGYBaseURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("PORTAL_AGY_BASE_URL")), "/"),
+		AGYSecretFile:       env("PORTAL_AGY_SECRET_FILE", "/run/secrets/portal_agy_secret"),
 		ListenAddr:          env("PORTAL_LISTEN_ADDR", ":18080"),
 		DatabasePath:        env("PORTAL_DATABASE_PATH", "/data/portal.db"),
 		ExternalURL:         strings.TrimRight(env("PORTAL_EXTERNAL_URL", "http://localhost:18080"), "/"),

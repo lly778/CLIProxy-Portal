@@ -1,0 +1,31 @@
+[Unit]
+Description=CLIProxy Portal Antigravity ACP bridge
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=portal-agy
+Group=portal-agy
+WorkingDirectory=/var/lib/cliproxy-agy/workspace
+EnvironmentFile=/etc/cliproxy-agy/runtime.env
+LoadCredential=portal_agy_secret:/etc/cliproxy-agy/service.secret
+Environment=PORTAL_AGY_SECRET_FILE=%d/portal_agy_secret
+ExecStart=/opt/cliproxy-agy/bin/portal-agy
+Restart=on-failure
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
+Slice=cliproxy.slice
+MemoryMax=768M
+TasksMax=128
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/cliproxy-agy
+RestrictSUIDSGID=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

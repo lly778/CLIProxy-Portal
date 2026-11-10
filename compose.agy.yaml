@@ -1,0 +1,8 @@
+# Optional: provision ops/agy before including this file. No public worker port.
+services:
+  cliproxy-portal:
+    environment:
+      PORTAL_AGY_BASE_URL: "${PORTAL_AGY_BASE_URL:-http://172.19.0.1:18320}"
+      PORTAL_AGY_SECRET_FILE: "/run/secrets/portal_agy_secret"
+    volumes:
+      - ./secrets/portal_agy_secret:/run/secrets/portal_agy_secret:ro

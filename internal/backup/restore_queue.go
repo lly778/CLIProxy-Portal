@@ -113,6 +113,7 @@ func RequestRestore(dir string, archive io.Reader, key []byte, mode string) erro
 }
 
 func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, newController func(PortalRestorePolicy, string) portalController) error {
+	agyRebuilt := false
 	lock := filepath.Join(dir, "runner.lock")
 	f, err := os.OpenFile(lock, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -205,6 +206,7 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 			}
 			if completed, err := LoadRestoreStatus(dir); err == nil {
 				s.Warning = completed.Warning
+				agyRebuilt = driver.hostAGY
 			}
 		}
 		if jobErr != nil && autoHost && !DatabaseRecoveryPending(dir) {
@@ -229,6 +231,9 @@ func restoreTick(ctx context.Context, dir, policyFile string, now time.Time, new
 		}
 		if job.Mode == RebuildRestoreMode {
 			s.Message += "；备份设置和配套凭据已恢复，后续备份沿用本次恢复密钥"
+			if agyRebuilt {
+				s.Message += "；AGY 服务和凭据已重建，会话不恢复"
+			}
 		} else {
 			s.Message += "；备份设置已恢复，GitHub 令牌沿用当前配置；已有恢复密钥保持不变，缺失时保留本次恢复使用的密钥"
 		}

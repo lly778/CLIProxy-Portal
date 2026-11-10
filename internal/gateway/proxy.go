@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"cliproxy-portal/internal/agy"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -27,6 +28,7 @@ import (
 const modelListLimit = 2 << 20
 
 type Gateway struct {
+	AGY          *agy.Client
 	Resources    *resourcecontrol.Controller
 	upstream     *url.URL
 	keys         *service.Keys
@@ -118,6 +120,12 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 				r.Body = &measuredRequestBody{ReadCloser: r.Body, measurement: measurement, remaining: r.ContentLength}
 			}
 		}
+	}
+	if g.AGY != nil {
+		if g.routeAGY(w, r, measurement, capture) {
+			return
+		}
+		defer r.Body.Close()
 	}
 	identityCleanup, identityErr := g.applyCodexIdentityCompatibility(r)
 	if identityCleanup != nil {
@@ -531,6 +539,19 @@ func (g *Gateway) filterModelList(resp *http.Response) error {
 			return err
 		}
 		filtered = append(filtered, item)
+	}
+	if g.AGY != nil {
+		owner, keyErr := g.store.KeyByHash(resp.Request.Context(), cpamp.HashAPIKey(apiKey(resp.Request)))
+		if keyErr == nil && owner.Status == "active" {
+			models, readErr := g.keys.AGYVisibleModels(resp.Request.Context(), owner.UserID)
+			if readErr != nil {
+				return readErr
+			}
+			for _, m := range models {
+				item, _ := json.Marshal(m)
+				filtered = append(filtered, item)
+			}
+		}
 	}
 	var envelope map[string]json.RawMessage
 	if err := json.Unmarshal(data, &envelope); err != nil {

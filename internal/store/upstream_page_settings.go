@@ -18,7 +18,7 @@ type upstreamPageSettings struct {
 // It is request-local, so another administrator's saved settings remain visible immediately.
 func (s *Store) WithUpstreamPageSettings(ctx context.Context) context.Context {
 	value := &upstreamPageSettings{values: make(map[string]string)}
-	rows, err := s.db.QueryContext(ctx, `SELECT key,value FROM settings WHERE key IN (?,?) OR key LIKE 'codex_identity_compatibility:%'`, clientModelsKey, "upstream_card_layout:presets")
+	rows, err := s.db.QueryContext(ctx, `SELECT key,value FROM settings WHERE key IN (?,?,?) OR key LIKE 'codex_identity_compatibility:%'`, clientModelsKey, "upstream_card_layout:presets", agySettingsKey)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

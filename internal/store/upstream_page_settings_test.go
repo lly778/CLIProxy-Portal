@@ -3,6 +3,7 @@ package store
 import (
 	"testing"
 
+	"cliproxy-portal/internal/agy"
 	"cliproxy-portal/internal/domain"
 )
 
@@ -19,7 +20,24 @@ func TestUpstreamPageSettingsBatchIsRequestLocalAndIndependent(t *testing.T) {
 	if err := s.SetCodexIdentityCompatibility(ctx, "antigravity", true); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SaveAGYSettings(ctx, agy.Settings{Models: []agy.Model{{ID: "gemini"}}, Rules: []agy.ModelRule{{ID: "gemini", Enabled: true}}}, 0); err != nil {
+		t.Fatal(err)
+	}
 	page := s.WithUpstreamPageSettings(ctx)
+	before, err := s.AGYSettings(page)
+	if err != nil || len(before.Models) != 1 || !before.Rules[0].Enabled {
+		t.Fatal("batched AGY settings missing")
+	}
+	updated := before
+	updated.Rules = append([]agy.ModelRule(nil), before.Rules...)
+	updated.Rules[0].Enabled = false
+	if err = s.SaveAGYSettings(ctx, updated, before.Revision); err != nil {
+		t.Fatal(err)
+	}
+	still, err := s.AGYSettings(page)
+	if err != nil || !still.Rules[0].Enabled {
+		t.Fatal("AGY page snapshot changed mid-request")
+	}
 	if err := s.SetUpstreamCardOrder(ctx, "presets", []string{"second"}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +62,10 @@ func TestUpstreamPageSettingsBatchIsRequestLocalAndIndependent(t *testing.T) {
 		t.Fatal("caller modified another channel's shared settings")
 	}
 	next := s.WithUpstreamPageSettings(ctx)
+	fresh, err := s.AGYSettings(next)
+	if err != nil || fresh.Rules[0].Enabled {
+		t.Fatal("new AGY request reused stale settings")
+	}
 	order, err = s.UpstreamCardOrder(next, "presets")
 	if err != nil || order[0] != "second" {
 		t.Fatal("new request reused old database settings")

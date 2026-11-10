@@ -28,6 +28,9 @@ func (k *Keys) upstreamAuthFiles(ctx context.Context) ([]cpamp.AuthFile, error) 
 }
 
 func (k *Keys) upstreamModelDefinitions(ctx context.Context, channel string) ([]cpamp.OAuthModelDefinition, error) {
+	if channel == "agy" {
+		return k.agyDefinitions(ctx)
+	}
 	return upstreamView(ctx, k, "definitions:"+channel, func(ctx context.Context) ([]cpamp.OAuthModelDefinition, error) {
 		reader, ok := k.CPAMP.(interface {
 			ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
