@@ -44,8 +44,8 @@ func TestActualModelUsagePaginatesAliasesAndPreservesAnalytics(t *testing.T) {
 		}},
 	}
 	fake := &actualModelCPAMP{pages: []cpamp.AnalyticsResponse{{Events: &cpamp.EventsResponse{Items: []cpamp.EventRow{
-		{RequestedModel: "alias", ResponseModel: "gpt-6.1-sol", TotalTokens: 20},
-		{RequestedModel: "gpt-6-sol", Model: "gpt-6-sol", TotalTokens: 10, Failed: true},
+		{APIKeyHash: "historical", RequestedModel: "alias", ResponseModel: "gpt-6.1-sol", TotalTokens: 20},
+		{APIKeyHash: "active", RequestedModel: "gpt-6-sol", Model: "gpt-6-sol", TotalTokens: 10, Failed: true},
 	}}}}}
 	req := cpamp.AnalyticsRequest{FromMS: 1, ToMS: 200, NowMS: 200, TimeZone: "Asia/Shanghai", Filters: cpamp.AnalyticsFilters{APIKeyHashes: []string{"historical", "active"}}}
 	got := NewKeys(nil, fake).actualModelUsage(t.Context(), req, initial, 1)
@@ -134,7 +134,7 @@ func TestUsageScopesCacheActualModelStats(t *testing.T) {
 			fake := &actualModelCPAMP{pages: []cpamp.AnalyticsResponse{{
 				Summary:    &cpamp.UsageSummary{TotalCalls: 1, TotalTokens: 147416},
 				ModelStats: []cpamp.ModelUsageStat{{Model: "gpt-6-sol", Calls: 1, TotalTokens: 147416}},
-				Events:     &cpamp.EventsResponse{TotalCount: 1, Items: []cpamp.EventRow{{RequestedModel: "gpt-6-sol", ResolvedModel: "gpt-6.1-sol", TotalTokens: 147416}}},
+				Events:     &cpamp.EventsResponse{TotalCount: 1, Items: []cpamp.EventRow{{APIKeyHash: strings.Repeat("a", 64), RequestedModel: "gpt-6-sol", ResolvedModel: "gpt-6.1-sol", TotalTokens: 147416}}},
 			}}}
 			keys := NewKeys(st, fake)
 			for i := 0; i < 2; i++ {

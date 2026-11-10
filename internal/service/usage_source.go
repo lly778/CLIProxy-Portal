@@ -252,6 +252,19 @@ func (k *Keys) fetchUsageSource(ctx context.Context, req cpamp.AnalyticsRequest)
 		}
 	}()
 	value, err = k.CPAMP.Analytics(ctx, req)
+	// Validate the fetched page before the shared source can cache or publish
+	// it. Reuse the request's key scope; no extra ownership/database read.
+	if err == nil && req.Include.EventsPage != nil && value.Events != nil && len(req.Filters.APIKeyHashes) > 0 {
+		allowed := make(map[string]bool, len(req.Filters.APIKeyHashes))
+		for _, hash := range req.Filters.APIKeyHashes {
+			allowed[hash] = true
+		}
+		for _, event := range value.Events.Items {
+			if !allowed[event.APIKeyHash] {
+				return cpamp.AnalyticsResponse{}, errors.New("cpamp request events outside key scope")
+			}
+		}
+	}
 	if err == nil && k.AGY != nil {
 		value.AGYSource, err = k.readAGYUsage(ctx, req)
 	}

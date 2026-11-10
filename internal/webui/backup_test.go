@@ -165,7 +165,7 @@ func TestBackupNarrowOverviewKeepsDetailsAndActionsTogether(t *testing.T) {
 		".backup-status.detail-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }",
 		".backup-status.detail-grid > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: baseline; gap: 12px; }",
 		".backup-status.detail-grid dt { margin: 0; }",
-		".backup-overview > .button-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 16px 0 0; }",
+		".backup-overview > .button-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 15px 0 0; }",
 		".backup-overview > .button-row > .button { min-width: 0; width: 100%; }",
 	} {
 		if !strings.Contains(narrow, rule) {

@@ -155,10 +155,21 @@ func (f statusModelCPAMP) Analytics(ctx context.Context, req cpamp.AnalyticsRequ
 func TestStatusOnlyCorrectionInvalidatesModelCheckpoint(t *testing.T) {
 	k, f, now := modelHistoryFixture(t)
 	k.CPAMP = statusModelCPAMP{f}
-	first := queryModelHistory(t, k, *now, false)
+	// Keep the selected range fixed while expiring the cache. Advancing a
+	// rolling seven-day range would also remove a row near its old boundary.
+	from, to := now.Add(-7*24*time.Hour), *now
+	read := func() cpamp.AnalyticsResponse {
+		t.Helper()
+		value, err := k.GlobalUsage(t.Context(), from, to, 0)
+		if err != nil || value.ModelStatsNote != "" {
+			t.Fatal("complete model statistics unavailable", err, value.ModelStatsNote)
+		}
+		return value
+	}
+	first := read()
 	f.rows[10].Failed = true
 	*now = now.Add(k.CacheTTL + time.Second)
-	next := queryModelHistory(t, k, *now, false)
+	next := read()
 	if next.Summary.TotalCalls != first.Summary.TotalCalls || next.Summary.TotalTokens != first.Summary.TotalTokens || next.Summary.FailureCalls != 1 || next.Summary.SuccessCalls+next.Summary.FailureCalls != next.Summary.TotalCalls {
 		t.Fatal("status-only correction left stale incremental success/failure counters")
 	}

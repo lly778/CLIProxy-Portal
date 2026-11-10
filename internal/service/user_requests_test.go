@@ -116,6 +116,9 @@ func TestUserRequestsFailuresAreNotCachedAndForeignEventsAreRejected(t *testing.
 			if page, err := k.UserRequests(t.Context(), u.ID, u.CreatedAt, 100); err != nil || len(page.Items) != 1 || len(fake.requests) != 2 {
 				t.Fatal("failed query was cached")
 			}
+			if page, err := k.UserRequests(t.Context(), u.ID, u.CreatedAt, 100); err != nil || len(page.Items) != 1 || len(fake.requests) != 2 {
+				t.Fatal("valid retry did not reuse the cache")
+			}
 		})
 	}
 	for _, limit := range []int{-1, 0, 101, 5000} {

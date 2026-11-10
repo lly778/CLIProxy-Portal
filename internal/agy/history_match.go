@@ -1,5 +1,58 @@
 package agy
 
+// Codex may put a reasoning item after the tool calls from the same assistant
+// response when replaying history. Only canonicalize contiguous reasoning/call
+// runs: never cross a user message, tool result, or visible assistant message.
+// All item contents and the relative order of calls/reasoning remain intact.
+func canonicalHistoryItems(items []map[string]any) []map[string]any {
+	var out []map[string]any
+	for start := 0; start < len(items); {
+		end, calls, displaced := start, false, false
+		for end < len(items) {
+			kind := stringField(items[end], "type")
+			if kind == "reasoning" {
+				displaced = displaced || calls
+			} else if isCallItem(kind) {
+				calls = true
+			} else {
+				break
+			}
+			end++
+		}
+		if displaced {
+			if out == nil {
+				out = append([]map[string]any(nil), items...)
+			}
+			next := start
+			for _, reasoning := range []bool{true, false} {
+				for _, item := range items[start:end] {
+					if (item["type"] == "reasoning") == reasoning {
+						out[next] = item
+						next++
+					}
+				}
+			}
+		}
+		start = max(start+1, end)
+	}
+	if out != nil {
+		return out
+	}
+	return items
+}
+
+// Keep the actual item positions in sync with fingerprints, so suffix slicing
+// and renamed tool-ID matching still refer to the same records.
+func canonicalSessionHistory(s *session) {
+	if len(s.items) > 0 {
+		items := canonicalHistoryItems(s.items)
+		if &items[0] != &s.items[0] || len(s.history) != len(items) {
+			s.history = requestFingerprints(items)
+		}
+		s.items = items
+	}
+}
+
 // A renamed ID is accepted only when the entire preceding transcript still
 // matches, including every function name, argument and result. Results alone
 // can never establish an alias or cross an owner boundary.

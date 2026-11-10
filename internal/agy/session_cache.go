@@ -283,6 +283,7 @@ func (d *sessionDiskCache) find(owner string, r request, live map[string]bool) (
 			return nil, fail(409, "ambiguous_session", "无法确认 AGY 会话，请新建对话")
 		}
 		found = &session{ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+		canonicalSessionHistory(found)
 		found.advertisedTools, found.loadedTools = v.AdvertisedTools, v.LoadedTools
 		found.officialVersion = v.OfficialToolsVersion
 		found.tools = filterClientTools(found.tools)

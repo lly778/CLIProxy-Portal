@@ -558,6 +558,7 @@ func (m *Manager) find(owner string, r request) (*session, error) {
 			continue
 		}
 		s.mu.Lock()
+		canonicalSessionHistory(s)
 		match := s.responses[r.Previous] && r.Previous != ""
 		for _, v := range r.Items {
 			if r.Previous != "" {
@@ -777,6 +778,7 @@ func (m *Manager) remember(s *session, out *response) {
 		s.history = append(s.history, itemFingerprint(v))
 		s.items = append(s.items, v)
 	}
+	canonicalSessionHistory(s)
 	if len(s.responses) > 256 {
 		s.cancel()
 	}

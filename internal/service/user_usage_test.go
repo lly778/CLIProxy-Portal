@@ -31,7 +31,7 @@ func TestUserUsageStatusUsesCompleteTimelineAndCachesCorrection(t *testing.T) {
 			{BucketMS: from.UnixMilli(), Calls: 300, Success: 299, Failure: 1},
 			{BucketMS: from.Add(time.Hour).UnixMilli(), Calls: 203, Success: 203},
 		},
-		Events: &cpamp.EventsResponse{Items: []cpamp.EventRow{{Failed: true}}},
+		Events: &cpamp.EventsResponse{Items: []cpamp.EventRow{{APIKeyHash: strings.Repeat("a", 64), Failed: true}}},
 	}}
 	keys := NewKeys(st, fake)
 	for _, refresh := range []bool{false, false, true, false} {

@@ -125,6 +125,7 @@ func parseRequest(b []byte) (request, error) {
 	if len(r.Items) > 4096 {
 		return r, fail(413, "context_too_large", "输入消息数量超过 AGY 接入限制")
 	}
+	r.Items = canonicalHistoryItems(r.Items)
 	flat := []tool{}
 	names := map[string]bool{}
 	var flatten func([]tool, string, int) error
@@ -260,14 +261,21 @@ func parseRequest(b []byte) (request, error) {
 func itemFingerprint(v map[string]any) string {
 	x := map[string]any{}
 	image := v["type"] == "image_generation_call"
-	for k, v := range v {
+	reasoning := v["type"] == "reasoning"
+	for k, value := range v {
+		// Codex fills these absent optional fields with JSON null when it
+		// records a reasoning item. Only absence/null are interchangeable;
+		// non-null content and encrypted data remain part of the identity.
+		if reasoning && value == nil && (k == "content" || k == "encrypted_content") {
+			continue
+		}
 		// Clients may discard this transport convenience field. The actual
 		// image bytes remain authoritative for history/cache matching.
 		if image && k == "result_url" {
 			continue
 		}
 		if k != "id" && k != "status" {
-			x[k] = v
+			x[k] = value
 		}
 	}
 	if x["type"] == nil && x["role"] != nil {

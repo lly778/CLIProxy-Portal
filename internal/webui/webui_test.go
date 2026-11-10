@@ -1184,17 +1184,16 @@ func TestAdminAccountButtonsFillWrappedMediumRowsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	css := string(asset)
+	css := strings.ReplaceAll(string(asset), "\r\n", "\n")
 	rule := `.admin-action-list > .admin-action-item > form > .button { width: 100%; justify-self: stretch; }`
-	medium := "@media (min-width: 761px) and (max-width: 1080px) {\n  " + rule + "\n"
-	if !strings.Contains(css, medium) || strings.Count(css, rule) != 1 {
+	_, block, found := strings.Cut(css, "@media (min-width: 761px) and (max-width: 1080px) {")
+	block, _, _ = strings.Cut(block, "\n}")
+	if !found || !strings.Contains(block, rule) || strings.Count(css, rule) != 1 {
 		t.Fatal("full-width wrapped buttons must be confined to the medium breakpoint")
 	}
 	if !strings.Contains(css, `.account-actions-card .button { width: 116px; }`) {
 		t.Fatal("wide-page inline buttons must keep their original compact width")
 	}
-	_, block, _ := strings.Cut(css, "@media (min-width: 761px) and (max-width: 1080px) {")
-	block, _, _ = strings.Cut(block, "\n}")
 	for _, rule := range []string{
 		`.detail-hero > .detail-hero-main { min-width: 0; }`,
 		`.detail-hero > .stack-actions { flex: 0 1 200px; min-width: 0; justify-items: stretch; }`,
