@@ -109,9 +109,7 @@ func resumeHostRestoreWith(ctx context.Context, dir string, installer hostInstal
 		return err
 	}
 	installErr := installer.installTasks(ctx, plan.ESXi, plan.Tunnel)
-	if installErr == nil && plan.AGY {
-		installErr = installer.installAGY(ctx)
-	}
+	// AGY mounts are prepared during service.Start before health validation.
 	if err := installErr; err != nil {
 		status.Running = false
 		status.Phase = "host_pending"

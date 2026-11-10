@@ -103,17 +103,6 @@ func (d *dockerPortal) Verify(ctx context.Context, p PortalRestorePolicy) error 
 }
 
 func (d *dockerPortal) Stop(ctx context.Context) error {
-	if d.hostAGY {
-		h := hostInstaller{}
-		if d.installer != nil {
-			h = *d.installer
-		}
-		if _, err := os.Lstat(h.path("/etc/systemd/system/cliproxy-agy.service")); err == nil {
-			if err = h.command(ctx, "systemctl", "stop", "cliproxy-agy"); err != nil {
-				return err
-			}
-		}
-	}
 	names := []string{d.policy.Container}
 	if d.rebuild {
 		names = append(names, d.policy.ManagerContainer, d.policy.UpstreamContainer)
@@ -138,17 +127,6 @@ func (d *dockerPortal) Stop(ctx context.Context) error {
 }
 
 func (d *dockerPortal) Start(ctx context.Context) error {
-	if d.agyRollback {
-		h := hostInstaller{}
-		if d.installer != nil {
-			h = *d.installer
-		}
-		if _, err := os.Lstat(h.path("/etc/systemd/system/cliproxy-agy.service")); err == nil {
-			if err = h.command(ctx, "systemctl", "start", "cliproxy-agy"); err != nil {
-				return err
-			}
-		}
-	}
 	if d.rebuild && !d.rollbackMissing {
 		reportRestorePhase(ctx, "rebuild_services")
 		if err := d.compose(ctx, "up"); err != nil {
@@ -166,6 +144,15 @@ func (d *dockerPortal) Start(ctx context.Context) error {
 					return errors.New("新建上游服务回退失败")
 				}
 			}
+		}
+	}
+	if d.hostAGY && !d.agyRollback {
+		h := hostInstaller{}
+		if d.installer != nil {
+			h = *d.installer
+		}
+		if err := h.installAGY(ctx); err != nil {
+			return err
 		}
 	}
 	reportRestorePhase(ctx, "start_portal")

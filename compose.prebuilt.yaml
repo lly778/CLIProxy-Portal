@@ -1,6 +1,9 @@
 services:
   cliproxy-portal:
-    image: alpine:3.22
+    image: cliproxy-portal-runtime:bookworm
+    build:
+      context: ./ops/agy
+      dockerfile: Dockerfile.runtime
     container_name: cliproxy-portal
     restart: unless-stopped
     cgroup_parent: "${PORTAL_RESOURCE_CGROUP_PARENT:-cliproxy.slice}"

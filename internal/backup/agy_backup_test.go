@@ -20,14 +20,12 @@ func agyFixture(t *testing.T) (hostInstaller, *[]string, *agyCredentials) {
 	for path, data := range map[string][]byte{
 		agySecretPath: []byte(a.Secret), defaultPortalRoot + "/secrets/portal_agy_secret": []byte(a.Secret),
 		agyTokenPath: a.OAuth, agyHome + "/agy/installation_id": []byte(a.InstallationID),
-		"/etc/cliproxy-agy/runtime.env":            []byte("AGY_MAX_SESSIONS=3\n"),
-		"/etc/systemd/system/cliproxy-agy.service": []byte("MemoryMax=512M\n"),
+		"/etc/cliproxy-agy/runtime.env": []byte("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MIB=512\n"),
 	} {
 		if err := h.write(path, data, 0600, false); err != nil {
 			t.Fatal(err)
 		}
 	}
-	h.output = func(context.Context, ...string) ([]byte, error) { return []byte("172.23.0.1 "), nil }
 	h.agyDownload = func(context.Context) error {
 		return h.write("/opt/cliproxy-agy/bin/agy", []byte("official-test-fixture"), 0755, false)
 	}
@@ -103,6 +101,25 @@ func TestAGYSnapshotRejectsPartialCredentialsAndSymlinks(t *testing.T) {
 	}
 }
 
+func TestAGYSnapshotRequiresCompleteContainerSettings(t *testing.T) {
+	for _, settings := range []string{
+		"AGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MIB=512\n",
+		"PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\n",
+		"PORTAL_AGY_EMBEDDED=true\nAGY_CONTAINER_MEMORY_MIB=512\n",
+		"PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_MAX_SESSIONS=4\nAGY_CONTAINER_MEMORY_MIB=512\n",
+	} {
+		t.Run(settings, func(t *testing.T) {
+			h, _, _ := agyFixture(t)
+			if err := h.write("/etc/cliproxy-agy/runtime.env", []byte(settings), 0600, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := snapshotAGY(h.path("/etc"), h.path(agyHome), h.path(defaultPortalRoot)); err == nil {
+				t.Fatal("incomplete or ambiguous container settings accepted")
+			}
+		})
+	}
+}
+
 func TestAGYRebuildUsesTrustedAssetsAndInvalidatesOldSessions(t *testing.T) {
 	h, commands, a := agyFixture(t)
 	if err := h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mib":512,"logged_in":true}`), 0600, false); err != nil {
@@ -120,15 +137,15 @@ func TestAGYRebuildUsesTrustedAssetsAndInvalidatesOldSessions(t *testing.T) {
 	if err = h.installAGY(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	unit, _ := os.ReadFile(h.path("/etc/systemd/system/cliproxy-agy.service"))
+	dockerfile, _ := os.ReadFile(h.path(defaultPortalRoot + "/ops/agy/Dockerfile.runtime"))
 	env, _ := os.ReadFile(h.path("/etc/cliproxy-agy/runtime.env"))
-	if !bytes.Contains(unit, []byte(" agy-service")) || !bytes.Contains(unit, []byte("MemoryMax=512M")) || !bytes.Contains(env, []byte("172.23.0.1:18320")) {
+	if !bytes.Contains(dockerfile, []byte("debian:bookworm-slim")) || !bytes.Contains(env, []byte("PORTAL_AGY_EMBEDDED=true")) || !bytes.Contains(env, []byte("AGY_CONTAINER_MEMORY_MIB=512")) {
 		t.Fatal("AGY not rebuilt with trusted settings")
 	}
 	if strings.Contains(strings.Join(*commands, "\n"), a.Secret) {
 		t.Fatal("service key exposed in command")
 	}
-	for _, expected := range []string{"chown portal-agy:portal-agy " + agyTokenPath, "chown 10001:10001", "systemctl restart cliproxy-agy.service"} {
+	for _, expected := range []string{"chown -R --no-dereference 10001:10001 " + agyHome, "chown 10001:10001"} {
 		if !strings.Contains(strings.Join(*commands, "\n"), expected) {
 			t.Fatal("missing AGY rebuild step", expected)
 		}
@@ -220,7 +237,7 @@ func TestAGYHostRebuildFailureRemainsPendingAndRetries(t *testing.T) {
 	}
 	originalRun := h.run
 	h.run = func(ctx context.Context, args ...string) error {
-		if strings.Join(args, " ") == "systemctl restart cliproxy-agy.service" {
+		if strings.Join(args, " ") == "systemctl enable --now cliproxy-portal-log-metrics.timer" {
 			return errors.New("fixture startup failure")
 		}
 		return originalRun(ctx, args...)
@@ -280,7 +297,7 @@ func TestAGYPortalRestoreRegeneratesPrivateEndpointAndSecretMount(t *testing.T) 
 		t.Fatal("invalid compose overlay")
 	}
 	svc := overlay.Services["cliproxy-portal"]
-	if svc.Environment["PORTAL_AGY_BASE_URL"] != "http://172.23.0.1:18320" || len(svc.Volumes) != 1 || svc.Volumes[0].Target != "/run/secrets/portal_agy_secret" || !svc.Volumes[0].ReadOnly {
-		t.Fatal("AGY routing or private credential mount missing")
+	if svc.Environment["PORTAL_AGY_BASE_URL"] != "http://127.0.0.1:18320" || svc.Environment["PORTAL_AGY_EMBEDDED"] != "true" || len(svc.Volumes) != 3 || svc.Volumes[0].Target != "/run/secrets/portal_agy_secret" || !svc.Volumes[0].ReadOnly {
+		t.Fatal("embedded AGY routing or private mounts missing")
 	}
 }

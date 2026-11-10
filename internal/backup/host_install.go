@@ -23,7 +23,6 @@ const autoBootstrap = "builtin-cpamp-v1"
 type hostInstaller struct {
 	root        string // Test-only filesystem root; production uses absolute host paths.
 	run         func(context.Context, ...string) error
-	output      func(context.Context, ...string) ([]byte, error)
 	agyDownload func(context.Context) error
 }
 
@@ -128,9 +127,8 @@ func (h hostInstaller) install(ctx context.Context) error {
 			return err
 		}
 	}
-	// Provision fixed AGY paths and its user outside the sandboxed backup
-	// runner. A later rebuild never needs to grant that runner write access
-	// to /etc/passwd or /etc/group merely to create a service account.
+	// Provision fixed AGY paths outside the sandboxed backup runner.
+	// The combined container uses its own fixed UID/GID; no host user is needed.
 	if err := h.prepareAGYHost(ctx); err != nil {
 		return err
 	}

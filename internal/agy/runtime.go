@@ -1,46 +1,47 @@
 package agy
 
 import (
-	"context"
 	"errors"
+	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
-func RunService() error {
-	secretFile := env("PORTAL_AGY_SECRET_FILE", "/run/secrets/portal_agy_secret")
-	b, e := os.ReadFile(secretFile)
-	if e != nil {
-		return errors.New("AGY service secret cannot be read")
+const embeddedAddress = "127.0.0.1:18320"
+
+// StartEmbedded runs the bridge in the portal process. The official CLI stays
+// an external, read-only mounted executable; its data lives on a separate bind.
+func StartEmbedded(secret string) (func(), <-chan error, error) {
+	command := env("AGY_COMMAND", "/opt/cliproxy-agy/bin/agy")
+	info, err := os.Stat(command)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		return nil, nil, errors.New("AGY official CLI must be installed externally and mounted executable")
 	}
-	limit, _ := strconv.Atoi(env("AGY_MAX_SESSIONS", "3"))
-	m, e := NewManager(RuntimeConfig{Command: env("AGY_COMMAND", "/usr/local/bin/agy"), Home: env("AGY_HOME", "/data"), Secret: strings.TrimSpace(string(b)), MaxSessions: limit})
-	if e != nil {
-		return e
+	limit, err := strconv.Atoi(env("AGY_MAX_SESSIONS", "3"))
+	if err != nil || limit < 1 || limit > 16 {
+		return nil, nil, errors.New("invalid AGY session limit")
 	}
-	defer m.Close()
-	s := &http.Server{Addr: env("PORTAL_AGY_LISTEN_ADDR", ":18320"), Handler: m.Handler(), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 16 << 10, IdleTimeout: 90 * time.Second}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
+	l, err := net.Listen("tcp", embeddedAddress)
+	if err != nil {
+		return nil, nil, err
+	}
+	m, err := NewManager(RuntimeConfig{Command: command, Home: env("AGY_HOME", "/var/lib/cliproxy-agy"), Secret: secret, MaxSessions: limit})
+	if err != nil {
+		_ = l.Close()
+		return nil, nil, err
+	}
+	s := &http.Server{Handler: m.Handler(), ReadHeaderTimeout: 10 * time.Second, MaxHeaderBytes: 16 << 10, IdleTimeout: 90 * time.Second}
 	errs := make(chan error, 1)
-	go func() { errs <- s.ListenAndServe() }()
-	select {
-	case e := <-errs:
-		if !errors.Is(e, http.ErrServerClosed) {
-			return e
-		}
-	case <-ctx.Done():
-		c, done := context.WithTimeout(context.Background(), 10*time.Second)
-		defer done()
-		return s.Shutdown(c)
-	}
-	return nil
+	go func() { errs <- s.Serve(l) }()
+	return func() {
+		_ = s.Close()
+		m.Close()
+	}, errs, nil
 }
+
 func env(k, v string) string {
 	if s := strings.TrimSpace(os.Getenv(k)); s != "" {
 		return s

@@ -80,7 +80,7 @@ func snapshotAGY(etc, home, portal string) (*agyCredentials, error) {
 	// install-host prepares empty fixed directories even before AGY is
 	// configured. Only actual configuration/credential files mark it present.
 	configured := false
-	for _, file := range []string{filepath.Join(dir, "service.secret"), filepath.Join(dir, "runtime.env"), filepath.Join(etc, "systemd/system/cliproxy-agy.service"), filepath.Join(portal, "secrets/portal_agy_secret"), filepath.Join(home, "agy/antigravity-oauth-token")} {
+	for _, file := range []string{filepath.Join(dir, "service.secret"), filepath.Join(dir, "runtime.env"), filepath.Join(portal, "secrets/portal_agy_secret"), filepath.Join(home, "agy/antigravity-oauth-token")} {
 		if _, err := os.Lstat(file); !errors.Is(err, os.ErrNotExist) {
 			configured = true
 			break
@@ -108,7 +108,7 @@ func snapshotAGY(etc, home, portal string) (*agyCredentials, error) {
 	if !bytes.Equal(bytes.TrimSpace(secret), bytes.TrimSpace(portalSecret)) {
 		return nil, errors.New("AGY 门户和服务密钥不一致，停止备份")
 	}
-	a := &agyCredentials{Secret: strings.TrimSpace(string(secret)), MaxSessions: 3, MemoryMiB: 768}
+	a := &agyCredentials{Secret: strings.TrimSpace(string(secret))}
 	a.OAuth, err = privateAGYFile(filepath.Join(home, "agy/antigravity-oauth-token"), false)
 	if err != nil {
 		return nil, err
@@ -118,35 +118,42 @@ func snapshotAGY(etc, home, portal string) (*agyCredentials, error) {
 		return nil, err
 	}
 	a.InstallationID = strings.TrimSpace(string(id))
-	// Read scalar limits, never save or replay an environment file or unit.
-	for _, entry := range []struct {
-		file, prefix string
-		value        *int
-		suffix       string
-	}{
-		{filepath.Join(dir, "runtime.env"), "AGY_MAX_SESSIONS=", &a.MaxSessions, ""},
-		{filepath.Join(etc, "systemd/system/cliproxy-agy.service"), "MemoryMax=", &a.MemoryMiB, "M"},
-	} {
-		if trustedDeploymentFile(entry.file) != nil {
-			return nil, errors.New("AGY 服务配置缺失或权限无效")
+	// Only the combined-container scalar configuration is supported.
+	runtimeFile := filepath.Join(dir, "runtime.env")
+	if trustedDeploymentFile(runtimeFile) != nil {
+		return nil, errors.New("AGY 容器配置缺失或权限无效")
+	}
+	data, err := os.ReadFile(runtimeFile)
+	if err != nil || len(data) > 1<<20 {
+		return nil, errors.New("AGY 容器配置无法读取")
+	}
+	seen := make(map[string]bool)
+	embedded := false
+	for _, line := range strings.Split(string(data), "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || k != "PORTAL_AGY_EMBEDDED" && k != "AGY_MAX_SESSIONS" && k != "AGY_CONTAINER_MEMORY_MIB" {
+			continue
 		}
-		data, err := os.ReadFile(entry.file)
-		if err != nil || len(data) > 1<<20 {
-			return nil, errors.New("AGY 服务配置无法读取")
+		if seen[k] {
+			return nil, errors.New("AGY 容器配置含重复项")
 		}
-		for _, line := range strings.Split(string(data), "\n") {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(line), entry.prefix); ok {
-				v = strings.TrimSuffix(v, entry.suffix)
-				n, e := strconv.Atoi(v)
-				if e != nil {
-					return nil, errors.New("AGY 资源限制格式不支持")
-				}
-				*entry.value = n
-			}
+		seen[k] = true
+		if k == "PORTAL_AGY_EMBEDDED" {
+			embedded = v == "true"
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, errors.New("AGY 容器资源配置无效")
+		}
+		if k == "AGY_MAX_SESSIONS" {
+			a.MaxSessions = n
+		} else {
+			a.MemoryMiB = n
 		}
 	}
-	if a.validate() != nil {
-		return nil, errors.New("AGY 凭据或资源配置无效")
+	if !embedded || a.validate() != nil {
+		return nil, errors.New("AGY 容器凭据或资源配置无效")
 	}
 	return a, nil
 }

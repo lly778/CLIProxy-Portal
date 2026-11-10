@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	portalops "cliproxy-portal/ops"
 	"compress/gzip"
 	"context"
 	"crypto/sha512"
@@ -10,14 +11,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
 	"runtime"
-	"strings"
 	"time"
-
-	portalops "cliproxy-portal/ops"
 )
 
 // Fixed official release, checksums from Google's platform updater manifests.
@@ -27,71 +24,23 @@ var agyReleases = map[string]struct{ URL, SHA512 string }{
 	"arm64": {"https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.4-5037094733742080/linux-arm/cli_linux_arm64.tar.gz", "564b9e6841ab4631e370d674c52f6eac75fa066fd6f61b1af39cb186dc57d835921d68e598293c7e5237d5605b90c0d3977805c7890f99dd8d9cc2e7471d8ff8"},
 }
 
-func (h hostInstaller) agyGateway(ctx context.Context) (string, error) {
-	var b []byte
-	var err error
-	args := []string{"network", "inspect", "cpamp_default", "--format", "{{range .IPAM.Config}}{{.Gateway}} {{end}}"}
-	if h.output != nil {
-		b, err = h.output(ctx, args...)
-	} else {
-		b, err = dockerOutput(ctx, args...)
-	}
-	if err != nil {
-		return "", errors.New("AGY 恢复无法读取 Docker 私网网关")
-	}
-	for _, field := range strings.Fields(string(b)) {
-		ip := net.ParseIP(field)
-		if ip != nil && ip.To4() != nil && ip.IsPrivate() {
-			return ip.String(), nil
-		}
-	}
-	return "", errors.New("AGY 恢复需要 Docker IPv4 私网网关")
-}
-
+// The bridge runs inside the portal; only external CLI/data mounts are prepared.
 func (h hostInstaller) installAGY(ctx context.Context) error {
-	var config struct {
+	var c struct {
 		MaxSessions int  `json:"max_sessions"`
 		MemoryMiB   int  `json:"memory_mib"`
 		LoggedIn    bool `json:"logged_in"`
 	}
-	if readDeploymentSnapshot(h.path(agyConfigPath), &config) != nil || config.MaxSessions < 1 || config.MaxSessions > 16 || config.MemoryMiB < 128 || config.MemoryMiB > 4096 {
-		return errors.New("AGY 恢复配置缺失或无效")
+	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMiB < 128 || c.MemoryMiB > 4096 {
+		return errors.New("AGY 恢复配置无效")
 	}
-	secret, err := privateAGYFile(h.path(agySecretPath), true)
-	if err != nil {
+	if _, err := privateAGYFile(h.path(agySecretPath), true); err != nil {
 		return err
 	}
-	if len(strings.TrimSpace(string(secret))) < 32 {
-		return errors.New("AGY 恢复密钥无效")
-	}
-	gateway, err := h.agyGateway(ctx)
-	if err != nil {
+	if err := h.prepareAGYHost(ctx); err != nil {
 		return err
 	}
-	if err = h.command(ctx, "id", "-u", "portal-agy"); err != nil {
-		return errors.New("AGY 专用用户缺失，请先运行 backup install-host 更新恢复后台")
-	}
-	for _, dir := range []string{agyHome, agyHome + "/agy", agyHome + "/workspace", "/opt/cliproxy-agy/bin", "/etc/cliproxy-agy"} {
-		if err = h.directory(dir, 0700); err != nil {
-			return err
-		}
-	}
-	// The bridge comes from the trusted running portal build, never the archive.
-	if h.root == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return err
-		}
-		data, err := os.ReadFile(exe)
-		if err != nil {
-			return errors.New("无法安装 AGY 桥接程序")
-		}
-		if err = h.write("/opt/cliproxy-agy/bin/portal-agy", data, 0755, false); err != nil {
-			return err
-		}
-	} else if err = h.write("/opt/cliproxy-agy/bin/portal-agy", []byte("test-built-portal"), 0755, false); err != nil {
-		return err
-	}
+	var err error
 	if h.agyDownload != nil {
 		err = h.agyDownload(ctx)
 	} else {
@@ -100,14 +49,13 @@ func (h hostInstaller) installAGY(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !config.LoggedIn {
+	if !c.LoggedIn {
 		if err = os.Remove(h.path(agyTokenPath)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return errors.New("无法清理旧 AGY 登录态")
+			return err
 		}
 	} else if _, err = privateAGYFile(h.path(agyTokenPath), true); err != nil {
 		return err
 	}
-	// No session restore: make previous response chains unusable on the target.
 	cache := h.path(agyHome + "/portal-sessions.db")
 	if info, e := os.Lstat(cache); e == nil {
 		if !info.Mode().IsRegular() {
@@ -115,23 +63,18 @@ func (h hostInstaller) installAGY(ctx context.Context) error {
 		}
 		db, e := sql.Open("sqlite", cache)
 		if e != nil {
-			return errors.New("AGY 旧会话索引无法打开")
+			return e
 		}
 		_, e = db.ExecContext(ctx, `BEGIN IMMEDIATE; UPDATE sessions SET ready=0; DELETE FROM responses; COMMIT;`)
 		_ = db.Close()
 		if e != nil {
-			return errors.New("AGY 旧会话索引无法失效")
+			return e
 		}
 	} else if !errors.Is(e, os.ErrNotExist) {
-		return errors.New("AGY 会话索引无法检查")
+		return e
 	}
-	for _, file := range []string{agyHome, agyHome + "/agy", agyHome + "/workspace", agyTokenPath, agyHome + "/agy/installation_id"} {
-		if _, e := os.Lstat(h.path(file)); errors.Is(e, os.ErrNotExist) {
-			continue
-		}
-		if err = h.command(ctx, "chown", "portal-agy:portal-agy", file); err != nil {
-			return err
-		}
+	if err = h.command(ctx, "chown", "-R", "--no-dereference", "10001:10001", agyHome); err != nil {
+		return err
 	}
 	if err = h.command(ctx, "chown", "10001:10001", defaultPortalRoot+"/secrets/portal_agy_secret"); err != nil {
 		return err
@@ -141,48 +84,36 @@ func (h hostInstaller) installAGY(ctx context.Context) error {
 			return err
 		}
 	}
-	runtimeEnv := fmt.Sprintf("PORTAL_AGY_LISTEN_ADDR=%s:18320\nAGY_COMMAND=/opt/cliproxy-agy/bin/agy\nAGY_HOME=%s\nAGY_MAX_SESSIONS=%d\n", gateway, agyHome, config.MaxSessions)
-	if err = h.write("/etc/cliproxy-agy/runtime.env", []byte(runtimeEnv), 0600, false); err != nil {
+	data := fmt.Sprintf("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=%d\nAGY_CONTAINER_MEMORY_MIB=%d\n", c.MaxSessions, c.MemoryMiB)
+	if err = h.write("/etc/cliproxy-agy/runtime.env", []byte(data), 0600, false); err != nil {
 		return err
 	}
-	unit, err := portalops.AGYAssets.ReadFile("agy/cliproxy-agy.service")
-	if err != nil {
-		return err
+	dockerfile, e := portalops.AGYAssets.ReadFile("agy/Dockerfile.runtime")
+	if e != nil {
+		return e
 	}
-	unitText := strings.Replace(string(unit), "ExecStart=/opt/cliproxy-agy/bin/portal-agy", "ExecStart=/opt/cliproxy-agy/bin/portal-agy agy-service", 1)
-	unitText = strings.Replace(unitText, "MemoryMax=768M", fmt.Sprintf("MemoryMax=%dM", config.MemoryMiB), 1)
-	if err = h.write("/etc/systemd/system/cliproxy-agy.service", []byte(unitText), 0644, false); err != nil {
-		return err
-	}
-	if err = h.command(ctx, "systemctl", "daemon-reload"); err != nil {
-		return err
-	}
-	if err = h.command(ctx, "systemctl", "enable", "cliproxy-agy.service"); err != nil {
-		return err
-	}
-	if err = h.command(ctx, "systemctl", "restart", "cliproxy-agy.service"); err != nil {
-		return err
-	}
-	return h.command(ctx, "systemctl", "is-active", "--quiet", "cliproxy-agy.service")
+	return h.write(defaultPortalRoot+"/ops/agy/Dockerfile.runtime", dockerfile, 0644, false)
 }
-
 func (h hostInstaller) prepareAGYHost(ctx context.Context) error {
 	for _, dir := range []string{"/etc/cliproxy-agy", "/opt/cliproxy-agy/bin", agyHome, agyHome + "/agy", agyHome + "/workspace"} {
 		if err := h.directory(dir, 0700); err != nil {
 			return err
 		}
 	}
-	if err := h.command(ctx, "id", "-u", "portal-agy"); err != nil {
-		if err = h.command(ctx, "useradd", "--system", "--user-group", "--home-dir", agyHome, "--shell", "/usr/sbin/nologin", "portal-agy"); err != nil {
-			return err
-		}
-	}
-	for _, dir := range []string{agyHome, agyHome + "/agy", agyHome + "/workspace"} {
-		if err := h.command(ctx, "chown", "portal-agy:portal-agy", dir); err != nil {
-			return err
-		}
-	}
 	return nil
+}
+func (h hostInstaller) agyContainerLimits() (int, int, error) {
+	var c struct {
+		MaxSessions int `json:"max_sessions"`
+		MemoryMiB   int `json:"memory_mib"`
+	}
+	if _, err := os.Lstat(h.path(agyConfigPath)); errors.Is(err, os.ErrNotExist) {
+		return 3, 1024, nil
+	}
+	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMiB < 128 || c.MemoryMiB > 4096 {
+		return 0, 0, errors.New("AGY 容器资源配置无效")
+	}
+	return c.MaxSessions, c.MemoryMiB, nil
 }
 
 func (h hostInstaller) installOfficialAGY(ctx context.Context) error {

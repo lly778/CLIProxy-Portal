@@ -36,10 +36,6 @@ func run() error {
 	if len(os.Args) == 2 && os.Args[1] == "--official-tool-policy" {
 		return agy.RunOfficialToolPolicy(os.Stdin, os.Stdout)
 	}
-	if len(os.Args) == 2 && os.Args[1] == "agy-service" {
-		return agy.RunService()
-	}
-
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		return backupCommand(os.Args[2:])
 	}
@@ -209,10 +205,19 @@ func serve(cfg config.Config, st *store.Store) error {
 	}
 	accounts := service.NewAccounts(st, secret)
 	keys := service.NewKeys(st, client)
+	var embeddedErrors <-chan error
 	if cfg.AGYBaseURL != "" {
 		shared, readErr := config.ReadTextSecret(cfg.AGYSecretFile)
 		if readErr != nil {
 			return fmt.Errorf("read AGY service secret: %w", readErr)
+		}
+		if cfg.AGYEmbedded {
+			closeBridge, bridgeErrors, startErr := agy.StartEmbedded(shared)
+			if startErr != nil {
+				return fmt.Errorf("start embedded AGY bridge: %w", startErr)
+			}
+			defer closeBridge()
+			embeddedErrors = bridgeErrors
 		}
 		keys.AGY, err = agy.NewClient(cfg.AGYBaseURL, shared)
 		if err != nil {
@@ -275,6 +280,12 @@ func serve(cfg config.Config, st *store.Store) error {
 		}()
 	}
 	select {
+	case err := <-embeddedErrors:
+		_ = server.Close()
+		if gatewayServer != nil {
+			_ = gatewayServer.Close()
+		}
+		return fmt.Errorf("embedded AGY bridge stopped: %w", err)
 	case err := <-errCh:
 		if gatewayServer != nil {
 			_ = gatewayServer.Close()

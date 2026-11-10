@@ -1,0 +1,6 @@
+.git
+dist
+data
+secrets
+**/__pycache__
+**/*.cbackup

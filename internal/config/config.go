@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	AGYEmbedded         bool
 	AGYBaseURL          string
 	AGYSecretFile       string
 	ListenAddr          string
@@ -43,6 +44,7 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load time zone: %w", err)
 	}
 	cfg := Config{
+		AGYEmbedded:         boolEnv("PORTAL_AGY_EMBEDDED", false),
 		AGYBaseURL:          strings.TrimRight(strings.TrimSpace(os.Getenv("PORTAL_AGY_BASE_URL")), "/"),
 		AGYSecretFile:       env("PORTAL_AGY_SECRET_FILE", "/run/secrets/portal_agy_secret"),
 		ListenAddr:          env("PORTAL_LISTEN_ADDR", ":18080"),
@@ -66,6 +68,9 @@ func Load() (Config, error) {
 		UsageCacheTTL:       durationEnv("PORTAL_USAGE_CACHE_TTL", 2*time.Minute),
 		TrustProxyHeaders:   boolEnv("PORTAL_TRUST_PROXY_HEADERS", false),
 		RegistrationDefault: boolEnv("PORTAL_REGISTRATION_OPEN", true),
+	}
+	if cfg.AGYEmbedded {
+		cfg.AGYBaseURL = "http://127.0.0.1:18320"
 	}
 	cfg.BackupStateDir = env("PORTAL_BACKUP_STATE_DIR", filepath.Join(filepath.Dir(cfg.DatabasePath), "backup"))
 	if cfg.CPAMPBaseURL == "" || cfg.CPAAPIBaseURL == "" {

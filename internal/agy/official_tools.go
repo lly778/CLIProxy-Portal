@@ -73,20 +73,9 @@ func RunOfficialToolPolicy(input io.Reader, output io.Writer) error {
 	if err != nil {
 		return json.NewEncoder(output).Encode(deny)
 	}
-	addr := os.Getenv("PORTAL_AGY_LISTEN_ADDR")
-	if addr == "" {
-		addr = ":18320"
-	}
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return json.NewEncoder(output).Encode(deny)
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
 	ctx, done := context.WithTimeout(context.Background(), 3*time.Second)
 	defer done()
-	r, err := http.NewRequestWithContext(ctx, "POST", "http://"+net.JoinHostPort(host, port)+"/internal/official-tool-policy", bytes.NewReader(body))
+	r, err := http.NewRequestWithContext(ctx, "POST", "http://"+embeddedAddress+"/internal/official-tool-policy", bytes.NewReader(body))
 	if err != nil {
 		return json.NewEncoder(output).Encode(deny)
 	}

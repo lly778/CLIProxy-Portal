@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -44,15 +45,25 @@ func (d *dockerPortal) recreatePortal(ctx context.Context) error {
 	environment := map[string]string{"PORTAL_HOST_METRICS_PATH": metrics, "CPAMP_BASE_URL": "http://host.docker.internal:18317", "CPA_UPSTREAM_URL": strings.Replace(strings.TrimSuffix(d.policy.UpstreamHealthURL, "/"), "127.0.0.1", "host.docker.internal", 1)}
 	service := map[string]any{"environment": environment}
 	if d.portalAGY || d.hostAGY && !d.agyRollback {
-		h.output = d.output
-		gateway, err := h.agyGateway(ctx)
+		sessions, memory, err := h.agyContainerLimits()
 		if err != nil {
 			return err
 		}
-		environment["PORTAL_AGY_BASE_URL"] = "http://" + gateway + ":18320"
+		environment["PORTAL_AGY_EMBEDDED"] = "true"
+		environment["PORTAL_AGY_BASE_URL"] = "http://127.0.0.1:18320"
 		environment["PORTAL_AGY_SECRET_FILE"] = "/run/secrets/portal_agy_secret"
-		service["extra_hosts"] = []string{"host.docker.internal:host-gateway"}
-		service["volumes"] = []map[string]any{{"type": "bind", "source": defaultPortalRoot + "/secrets/portal_agy_secret", "target": "/run/secrets/portal_agy_secret", "read_only": true}}
+		environment["AGY_HOME"] = agyHome
+		environment["AGY_COMMAND"] = "/opt/cliproxy-agy/bin/agy"
+		environment["AGY_MAX_SESSIONS"] = strconv.Itoa(sessions)
+		service["image"] = "cliproxy-portal-runtime:bookworm"
+		service["build"] = map[string]any{"context": defaultPortalRoot + "/ops/agy", "dockerfile": "Dockerfile.runtime"}
+		service["init"] = true
+		service["mem_limit"] = int64(memory) << 20
+		service["volumes"] = []map[string]any{
+			{"type": "bind", "source": defaultPortalRoot + "/secrets/portal_agy_secret", "target": "/run/secrets/portal_agy_secret", "read_only": true},
+			{"type": "bind", "source": "/opt/cliproxy-agy/bin/agy", "target": "/opt/cliproxy-agy/bin/agy", "read_only": true},
+			{"type": "bind", "source": agyHome, "target": agyHome},
+		}
 	}
 	data, err := json.Marshal(map[string]any{"services": map[string]any{"cliproxy-portal": service}})
 	if err != nil {
