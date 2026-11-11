@@ -276,20 +276,11 @@ func (l *Lease) Finish() {
 }
 
 func (c *Controller) Acquire(user string) (*Lease, string) {
-	return c.AcquireRequest(user, -1)
-}
-
-func (c *Controller) AcquireRequest(user string, contentLength int64) (*Lease, string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	reason := ""
 	p := c.policy
-	if p.BodyMB > 0 && contentLength > p.BodyLimitBytes() {
-		c.event(user, "request_too_large", p.Mode != "enforce")
-		if p.Mode == "enforce" {
-			return nil, "request_too_large"
-		}
-	}
+
 	if p.Global > 0 && c.active >= p.Global {
 		reason = "global_concurrency"
 	} else if p.PerUser > 0 && c.users[user] >= p.PerUser {

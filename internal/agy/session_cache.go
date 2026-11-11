@@ -106,6 +106,9 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		}
 	}
 	if err == nil {
+		err = d.upgradeHistoryIndex()
+	}
+	if err == nil {
 		var count int64
 		err = db.QueryRow(`SELECT COUNT(*) FROM sessions`).Scan(&count)
 		d.count.Store(count)
@@ -145,6 +148,93 @@ func (d *sessionDiskCache) historyKeys(history []string) []string {
 	}
 	return keys
 }
+
+func (d *sessionDiskCache) routingKey(v savedSession) string {
+	history := v.History
+	if len(v.Items) > 0 {
+		history = routingFingerprints(v.Items)
+	}
+	keys := d.historyKeys(history)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[len(keys)-1]
+}
+
+// Reindex existing encrypted records once, before serving requests. Only a page
+// of IDs and one decrypted payload are retained; normal requests stay indexed.
+func (d *sessionDiskCache) upgradeHistoryIndex() error {
+	const version = "canonical-tool-ids-v2"
+	var marker []byte
+	err := d.db.QueryRow(`SELECT value FROM cache_meta WHERE id=2`).Scan(&marker)
+	if err == nil && string(marker) == version {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	lastID := ""
+	for {
+		rows, err := d.db.Query(`SELECT id FROM sessions WHERE id>? ORDER BY id LIMIT 64`, lastID)
+		if err != nil {
+			return err
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				break
+			}
+			ids = append(ids, id)
+		}
+		if err == nil {
+			err = rows.Err()
+		}
+		_ = rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			break
+		}
+		tx, err := d.db.Begin()
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			var payload []byte
+			if err = tx.QueryRow(`SELECT payload FROM sessions WHERE id=?`, id).Scan(&payload); err != nil {
+				break
+			}
+			var plain []byte
+			plain, err = d.open(id, payload)
+			if err != nil {
+				break
+			}
+			var v savedSession
+			if err = json.Unmarshal(plain, &v); err != nil {
+				break
+			}
+			if v.ID != id {
+				err = errors.New("invalid AGY session routing state")
+				break
+			}
+			if _, err = tx.Exec(`UPDATE sessions SET history_key=? WHERE id=?`, d.routingKey(v), id); err != nil {
+				break
+			}
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		lastID = ids[len(ids)-1]
+	}
+	_, err = d.db.Exec(`INSERT INTO cache_meta(id,value) VALUES(2,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value`, []byte(version))
+	return err
+}
 func snapshotSession(s *session) savedSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -166,11 +256,7 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if err != nil {
 		return err
 	}
-	keys := d.historyKeys(v.History)
-	lastKey := ""
-	if len(keys) > 0 {
-		lastKey = keys[len(keys)-1]
-	}
+	lastKey := d.routingKey(v)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	tx, err := d.db.Begin()
@@ -207,11 +293,24 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	return err
 }
 
-// Candidate lookup is indexed and bounded in batches. No archive-wide metadata
-// scan or in-memory map grows with the number of disk sessions.
+// Candidate lookup is indexed and paged. Canonical keys tolerate renamed tool
+// IDs, while the shared memory/disk matcher checks actual content and call links.
 func (d *sessionDiskCache) find(owner string, r request, live map[string]bool) (*session, error) {
-	var ids []string
+	r.Items = canonicalHistoryItems(r.Items)
 	cutoff := time.Now().Add(-sessionRetention).UnixMilli()
+	load := func(id string) (*session, error) {
+		if live[id] {
+			return nil, nil
+		}
+		s, err := d.loadSession(id, owner, cutoff)
+		if err != nil || s == nil {
+			return nil, err
+		}
+		if !sessionMatchesRequest(s, r) {
+			return nil, nil
+		}
+		return s, nil
+	}
 	if r.Previous != "" {
 		var id string
 		err := d.db.QueryRow(`SELECT s.id FROM responses r JOIN sessions s ON s.id=r.session_id WHERE r.owner=? AND r.response=? AND s.ready=1 AND s.last_ms>=?`, d.hash(owner), d.hash(r.Previous), cutoff).Scan(&id)
@@ -221,79 +320,104 @@ func (d *sessionDiskCache) find(owner string, r request, live map[string]bool) (
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
-	} else {
-		keys := d.historyKeys(requestFingerprints(r.Items))
-		for len(keys) > 0 {
-			n := min(128, len(keys))
-			args := []any{d.hash(owner), d.hash(r.Model), cutoff}
+		return load(id)
+	}
+	keys := d.historyKeys(routingFingerprints(r.Items))
+	// Legacy metadata without wire items can only support strict fingerprints,
+	// exactly as an in-memory session without those items does.
+	seenKeys := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		seenKeys[key] = true
+	}
+	for _, key := range d.historyKeys(requestFingerprints(r.Items)) {
+		if !seenKeys[key] {
+			keys = append(keys, key)
+			seenKeys[key] = true
+		}
+	}
+	var found *session
+	for len(keys) > 0 {
+		n := min(256, len(keys))
+		cursor := ""
+		for {
+			args := []any{d.hash(owner), d.hash(r.Model), cutoff, cursor}
 			for _, key := range keys[:n] {
 				args = append(args, key)
 			}
-			q := `SELECT id FROM sessions WHERE owner=? AND model=? AND ready=1 AND last_ms>=? AND history_key IN (` + strings.TrimSuffix(strings.Repeat("?,", n), ",") + `)`
+			q := `SELECT id FROM sessions WHERE owner=? AND model=? AND ready=1 AND last_ms>=? AND id>? AND history_key IN (` + strings.TrimSuffix(strings.Repeat("?,", n), ",") + `) ORDER BY id LIMIT 128`
 			rows, err := d.db.Query(q, args...)
 			if err != nil {
 				return nil, err
 			}
+			var ids []string
 			for rows.Next() {
 				var id string
 				if err = rows.Scan(&id); err != nil {
-					_ = rows.Close()
-					return nil, err
-				}
-				if !live[id] {
-					ids = append(ids, id)
-				}
-				if len(ids) > 1 {
 					break
 				}
+				ids = append(ids, id)
 			}
-			err = rows.Err()
+			if err == nil {
+				err = rows.Err()
+			}
 			_ = rows.Close()
 			if err != nil {
 				return nil, err
 			}
-			if len(ids) > 1 {
-				return nil, fail(409, "ambiguous_session", "无法确认 AGY 会话，请新建对话")
+			for _, id := range ids {
+				s, err := load(id)
+				if err != nil {
+					return nil, err
+				}
+				if s == nil {
+					continue
+				}
+				if found != nil && found.ID != s.ID {
+					return nil, fail(409, "ambiguous_session", "无法确认 AGY 会话，请新建对话")
+				}
+				found = s
 			}
-			keys = keys[n:]
-		}
-	}
-	var found *session
-	for _, id := range ids {
-		if live[id] {
-			continue
-		}
-		var payload []byte
-		if err := d.db.QueryRow(`SELECT payload FROM sessions WHERE id=? AND ready=1 AND last_ms>=?`, id, cutoff).Scan(&payload); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
+			if len(ids) < 128 {
+				break
 			}
-			return nil, err
+			cursor = ids[len(ids)-1]
 		}
-		plain, err := d.open(id, payload)
-		if err != nil {
-			return nil, err
-		}
-		var v savedSession
-		if json.Unmarshal(plain, &v) != nil || v.ID != id || v.Owner != owner {
-			return nil, errors.New("invalid AGY session routing state")
-		}
-		if found != nil {
-			return nil, fail(409, "ambiguous_session", "无法确认 AGY 会话，请新建对话")
-		}
-		found = &session{ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
-		canonicalSessionHistory(found)
-		found.advertisedTools, found.loadedTools = v.AdvertisedTools, v.LoadedTools
-		found.officialVersion = v.OfficialToolsVersion
-		found.tools = filterClientTools(found.tools)
-		found.advertisedTools = filterClientTools(found.advertisedTools)
-		found.loadedTools = filterClientTools(found.loadedTools)
-		if found.advertisedTools == nil {
-			found.advertisedTools = append([]tool{}, v.Tools...)
-		}
+		keys = keys[n:]
 	}
 	return found, nil
+}
+
+func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session, error) {
+	var payload []byte
+	if err := d.db.QueryRow(`SELECT payload FROM sessions WHERE id=? AND ready=1 AND last_ms>=?`, id, cutoff).Scan(&payload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	plain, err := d.open(id, payload)
+	if err != nil {
+		return nil, err
+	}
+	var v savedSession
+	if json.Unmarshal(plain, &v) != nil || v.ID != id || v.Owner != owner {
+		return nil, errors.New("invalid AGY session routing state")
+	}
+	if len(v.Items) > 0 {
+		v.Items = canonicalHistoryItems(v.Items)
+		v.History = requestFingerprints(v.Items)
+	}
+	s := &session{ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+	canonicalSessionHistory(s)
+	s.advertisedTools, s.loadedTools = v.AdvertisedTools, v.LoadedTools
+	s.officialVersion = v.OfficialToolsVersion
+	s.tools = filterClientTools(s.tools)
+	s.advertisedTools = filterClientTools(s.advertisedTools)
+	s.loadedTools = filterClientTools(s.loadedTools)
+	if s.advertisedTools == nil {
+		s.advertisedTools = append([]tool{}, v.Tools...)
+	}
+	return s, nil
 }
 
 func (m *Manager) saveSession(s *session, ready bool) error {

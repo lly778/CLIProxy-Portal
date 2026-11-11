@@ -230,6 +230,15 @@ func serve(cfg config.Config, st *store.Store) error {
 	if err != nil {
 		return err
 	}
+	if keys.AGY != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		policy := app.Resources.Policy()
+		err := keys.AGY.SetResidentLimit(ctx, policy.AGYResidentLimit, policy.Revision)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("apply AGY resident limit: %w", err)
+		}
+	}
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

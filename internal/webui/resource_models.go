@@ -9,5 +9,5 @@ type ResourceView struct {
 	ESXi                                                                                                                 bool
 	AGYConfigured                                                                                                        bool
 	AGYTasks, AGYResident                                                                                                string
-	BodyMB, MemoryMB                                                                                                     float64
+	MemoryMB                                                                                                             float64
 }

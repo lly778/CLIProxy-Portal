@@ -47,7 +47,6 @@ func TestZeroIndependentlyDisablesEachLimit(t *testing.T) {
 	p.Mode = "enforce"
 	p.Global = 0
 	p.PerUser = 0
-	p.BodyMB = 0
 	p.CPUPercent = 0
 	p.MemoryMB = 0
 	if e := p.Validate(); e != nil {
@@ -56,7 +55,7 @@ func TestZeroIndependentlyDisablesEachLimit(t *testing.T) {
 	c := NewController(p)
 	var leases []*Lease
 	for i := 0; i < 140; i++ {
-		l, r := c.AcquireRequest("same", 1<<40)
+		l, r := c.Acquire("same")
 		if l == nil {
 			t.Fatal("zero still imposed a limit", r)
 		}
@@ -175,11 +174,6 @@ func TestAdmissionIsAtomicAndExistingRequestKeepsItsPolicy(t *testing.T) {
 		t.Fatal("active request relabeled after policy change")
 	}
 	leases[0].Finish()
-	p.Mode = "enforce"
-	c.SetPolicy(p)
-	if l, r := c.AcquireRequest("a", 11*MiB); l != nil || r != "request_too_large" {
-		t.Fatal("known body bypassed admission size check", r)
-	}
 }
 
 func goodMetrics(now time.Time) Metrics {
@@ -325,7 +319,7 @@ func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 	if p.Validate() != nil {
 		t.Fatal("defaults invalid")
 	}
-	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMB = math.NaN() }, func(p *Policy) { p.BodyMB = math.Inf(1) }, func(p *Policy) { p.MemoryMB = -1 }, func(p *Policy) { p.BodyMB = -1 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
+	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMB = math.NaN() }, func(p *Policy) { p.AGYResidentLimit = 0 }, func(p *Policy) { p.MemoryMB = -1 }, func(p *Policy) { p.AGYResidentLimit = 17 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
 		p = DefaultPolicy()
 		change(&p)
 		if p.Validate() == nil {
@@ -334,25 +328,8 @@ func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 	}
 }
 
-func TestDecimalMBLimitsUseExactBytes(t *testing.T) {
-	p := DefaultPolicy()
-	p.Mode = "enforce"
-	p.CPUPercent, p.MemoryMB = 0, 0
-	p.BodyMB = 10
-	if p.BodyLimitBytes() != 10_000_000 {
-		t.Fatal("decimal request size rounded to a whole MiB")
-	}
-	c := NewController(p)
-	lease, reason := c.AcquireRequest("test", 10_000_000)
-	if lease == nil {
-		t.Fatal("exact 10 MB request rejected", reason)
-	}
-	lease.Finish()
-	if lease, reason := c.AcquireRequest("test", 10_000_001); lease != nil || reason != "request_too_large" {
-		t.Fatal("request above decimal MB limit admitted", reason)
-	}
-	limit := 500.0
-	if got := memoryRecoveryThreshold(limit); math.Abs(got-468) > 0.001 {
+func TestMemoryRecoveryBufferUsesDecimalMB(t *testing.T) {
+	if got := memoryRecoveryThreshold(500); math.Abs(got-468) > 0.001 {
 		t.Fatal("fixed recovery buffer is not 32 decimal MB", got)
 	}
 }

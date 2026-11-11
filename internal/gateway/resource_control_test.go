@@ -6,10 +6,7 @@ import (
 	"cliproxy-portal/internal/resourcecontrol"
 	"cliproxy-portal/internal/service"
 	"cliproxy-portal/internal/store"
-	"compress/gzip"
 	"context"
-	"encoding/binary"
-	"github.com/klauspost/compress/zstd"
 	"io"
 	"net"
 	"net/http"
@@ -21,11 +18,11 @@ import (
 	"time"
 )
 
-func TestResourceWebsocketUpgradeHoldsCapacityAndRejectsOversizedMessage(t *testing.T) {
+func TestResourceWebsocketUpgradeHoldsCapacityAndPreservesNegotiation(t *testing.T) {
 	upClosed := make(chan struct{})
 	g, _ := resourceGateway(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Sec-WebSocket-Extensions") != "" {
-			t.Error("compression negotiated under protection")
+		if r.Header.Get("Sec-WebSocket-Extensions") != "permessage-deflate" {
+			t.Error("resource admission changed WebSocket negotiation")
 		}
 		c, b, e := w.(http.Hijacker).Hijack()
 		if e != nil {
@@ -63,23 +60,18 @@ func TestResourceWebsocketUpgradeHoldsCapacityAndRejectsOversizedMessage(t *test
 	if w.Code != 429 {
 		t.Fatal("WebSocket did not hold user quota", w.Code)
 	}
-	header := []byte{0x81, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4}
-	binary.BigEndian.PutUint64(header[2:10], uint64(resourcecontrol.MiB+1))
-	if _, e = c.Write(header); e != nil {
-		t.Fatal(e)
-	}
-	_, _ = io.Copy(io.Discard, reader)
+	_ = c.Close()
 	select {
 	case <-upClosed:
 	case <-time.After(3 * time.Second):
-		t.Fatal("oversized connection stayed open")
+		t.Fatal("closed upgraded connection stayed open")
 	}
 	deadline := time.Now().Add(time.Second)
 	for g.Resources.Snapshot().Active != 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
 	q := g.Resources.Snapshot()
-	if q.Active != 0 || q.Processing != 0 || q.Rejected != 2 {
+	if q.Active != 0 || q.Processing != 0 || q.Rejected != 1 {
 		t.Fatal("upgraded connection leaked capacity or rejection event", q)
 	}
 }
@@ -104,69 +96,9 @@ func resourceGateway(t *testing.T, up http.HandlerFunc) (*Gateway, *atomic.Int32
 	}
 	p := resourcecontrol.DefaultPolicy()
 	p.Mode = "enforce"
-	p.BodyMB = 1
 	g.Resources = resourcecontrol.NewController(p)
 	g.Resources.UpdateMetrics(resourcecontrol.Metrics{At: time.Now(), HostID: "test", CPUCount: 1, TotalMiB: 926, AvailableMiB: 400}, time.Now())
 	return g, calls
-}
-func TestResourceLimitsRejectLargePlainCompressedAndChunkedBeforeCPA(t *testing.T) {
-	g, calls := resourceGateway(t, func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(io.Discard, r.Body); w.WriteHeader(200) })
-	large := bytes.Repeat([]byte("x"), (1<<20)+1)
-	var gzipBody bytes.Buffer
-	gz := gzip.NewWriter(&gzipBody)
-	_, _ = gz.Write(large)
-	_ = gz.Close()
-	z, _ := zstd.NewWriter(nil)
-	zbody := z.EncodeAll(large, nil)
-	z.Close()
-	for _, tt := range []struct {
-		body     []byte
-		encoding string
-		chunked  bool
-	}{{large, "", false}, {large, "", true}, {gzipBody.Bytes(), "gzip", false}, {zbody, "zstd", false}} {
-		r := httptest.NewRequest("POST", "/v1/responses", bytes.NewReader(tt.body))
-		if tt.chunked {
-			r.ContentLength = -1
-		}
-		r.Header.Set("Content-Encoding", tt.encoding)
-		w := httptest.NewRecorder()
-		g.Handler().ServeHTTP(w, r)
-		if w.Code != 413 {
-			t.Fatalf("%s chunked=%v: %d %s", tt.encoding, tt.chunked, w.Code, w.Body.String())
-		}
-	}
-	if calls.Load() != 0 {
-		t.Fatal("oversized request reached CPA")
-	}
-	q := g.Resources.Snapshot()
-	if q.Active != 0 || q.Processing != 0 {
-		t.Fatal("body rejection leaked capacity", q)
-	}
-}
-
-func TestResourceBodyRejectionsRetainActualHTTPStatus(t *testing.T) {
-	g, calls := resourceGateway(t, func(http.ResponseWriter, *http.Request) { t.Error("rejected body reached CPA") })
-	var events []resourcecontrol.Event
-	g.Resources.SetEventSink(func(_ context.Context, batch []resourcecontrol.Event) error {
-		events = append(events, batch...)
-		return nil
-	})
-	for _, tc := range []struct {
-		encoding string
-		status   int
-	}{{"gzip", 400}, {"unsupported", 415}} {
-		r := httptest.NewRequest("POST", "/v1/responses", strings.NewReader("invalid"))
-		r.Header.Set("Content-Encoding", tc.encoding)
-		w := httptest.NewRecorder()
-		g.Handler().ServeHTTP(w, r)
-		g.Resources.FlushEvents(t.Context())
-		if w.Code != tc.status || len(events) == 0 || events[len(events)-1].StatusCode != w.Code {
-			t.Fatalf("lost HTTP status: %d %+v", w.Code, events)
-		}
-	}
-	if calls.Load() != 0 {
-		t.Fatal("rejected requests reached CPA")
-	}
 }
 func TestResourceConcurrencyHoldsStreamsAndReleasesAfterCancellation(t *testing.T) {
 	entered := make(chan struct{}, 1)
@@ -223,53 +155,7 @@ func TestResourceObservePreservesRequestBytesAndProtectedWireBytes(t *testing.T)
 	}
 }
 
-type frameConnection struct {
-	bytes.Buffer
-	closed bool
-}
-
-func (c *frameConnection) Close() error { c.closed = true; return nil }
-func maskedFrame(op byte, fin bool, size int) []byte {
-	first := op
-	if fin {
-		first |= 128
-	}
-	b := []byte{first, 128 | 126, 0, 0}
-	binary.BigEndian.PutUint16(b[2:4], uint16(size))
-	b = append(b, 1, 2, 3, 4)
-	return append(b, make([]byte, size)...)
-}
-func TestResourceWebsocketCountsFragmentsAndControlFrames(t *testing.T) {
-	c := &frameConnection{}
-	rejects := 0
-	w := &resourceWebsocket{ReadWriteCloser: c, limit: 10, onReject: func() { rejects++ }}
-	first := maskedFrame(1, false, 6)
-	ping := []byte{137, 128, 1, 2, 3, 4}
-	last := maskedFrame(0, true, 5)
-	for _, b := range first {
-		if _, e := w.Write([]byte{b}); e != nil {
-			t.Fatal(e)
-		}
-	}
-	if _, e := w.Write(ping); e != nil {
-		t.Fatal(e)
-	}
-	before := c.Len()
-	if _, e := w.Write(last); e == nil {
-		t.Fatal("fragment limit bypassed")
-	}
-	if rejects != 1 || !c.closed || c.Len() != before {
-		t.Fatal("oversized fragment forwarded")
-	}
-	c = &frameConnection{}
-	w = &resourceWebsocket{ReadWriteCloser: c, limit: 10, onReject: func() { t.Error("valid frame rejected") }}
-	valid := maskedFrame(1, true, 5)
-	if _, e := w.Write(append(valid, valid...)); e != nil {
-		t.Fatal(e)
-	}
-}
-
-func TestResourceZeroBodyLimitForwardsLargeBodyUnchanged(t *testing.T) {
+func TestResourceAdmissionForwardsLargeBodyUnchanged(t *testing.T) {
 	body := bytes.Repeat([]byte("x"), 2<<20)
 	g, calls := resourceGateway(t, func(w http.ResponseWriter, r *http.Request) {
 		b, e := io.ReadAll(r.Body)
@@ -278,12 +164,9 @@ func TestResourceZeroBodyLimitForwardsLargeBodyUnchanged(t *testing.T) {
 		}
 		w.WriteHeader(200)
 	})
-	p := g.Resources.Policy()
-	p.BodyMB = 0
-	g.Resources.SetPolicy(p)
 	w := httptest.NewRecorder()
 	g.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/unlimited", bytes.NewReader(body)))
 	if w.Code != 200 || calls.Load() != 1 || g.Resources.Snapshot().Rejected != 0 {
-		t.Fatal("zero body cap rejected", w.Code)
+		t.Fatal("resource admission imposed a body cap", w.Code)
 	}
 }

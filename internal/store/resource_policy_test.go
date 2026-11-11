@@ -24,11 +24,11 @@ func TestResourcePolicyMigratesMiBToMBOnceWithoutChangingLimits(t *testing.T) {
 			t.Fatal(err)
 		}
 		p, err := s.ResourcePolicy(t.Context())
-		if err != nil || p.Revision != 11 || p.Mode != "enforce" || p.Global != 10 || p.PerUser != 5 || p.MemoryMB != 1342.17728 || p.BodyLimitBytes() != 10*1048576 {
+		if err != nil || p.Revision != 11 || p.Mode != "enforce" || p.Global != 10 || p.PerUser != 5 || p.MemoryMB != 1342.17728 || p.AGYResidentLimit != 3 {
 			t.Fatalf("migration changed byte limits or policy on open %d: %+v, %v", i, p, err)
 		}
 		var raw string
-		if err = s.db.QueryRow("SELECT value FROM settings WHERE key=?", resourcePolicyKey).Scan(&raw); err != nil || strings.Contains(raw, "_mib") || !strings.Contains(raw, "\"memory_mb\":1342.17728") {
+		if err = s.db.QueryRow("SELECT value FROM settings WHERE key=?", resourcePolicyKey).Scan(&raw); err != nil || strings.Contains(raw, "_mib") || strings.Contains(raw, "body_") || !strings.Contains(raw, "\"memory_mb\":1342.17728") {
 			t.Fatal("stored policy is not in MB", raw, err)
 		}
 		s.Close()
@@ -47,6 +47,7 @@ func TestResourcePolicyPersistenceAndStaleRevision(t *testing.T) {
 	}
 	old := p
 	p.Global = 3
+	p.AGYResidentLimit = 7
 	if e = s.SaveResourcePolicy(t.Context(), p); e != nil {
 		t.Fatal(e)
 	}
@@ -60,7 +61,7 @@ func TestResourcePolicyPersistenceAndStaleRevision(t *testing.T) {
 	}
 	defer s.Close()
 	p, e = s.ResourcePolicy(t.Context())
-	if e != nil || p.Revision != 2 || p.Global != 3 || p.MemoryMB != 768 {
+	if e != nil || p.Revision != 2 || p.Global != 3 || p.AGYResidentLimit != 7 || p.MemoryMB != 768 {
 		t.Fatal("policy not durable", p, e)
 	}
 }

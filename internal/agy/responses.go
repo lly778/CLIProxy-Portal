@@ -16,6 +16,7 @@ func (m *Manager) Handler() http.Handler {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /internal/status", func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(m.Status()) })
+	mux.HandleFunc("POST /internal/resident-limit", m.residentLimitHTTP)
 	mux.HandleFunc("GET /internal/catalog", func(w http.ResponseWriter, r *http.Request) {
 		models, e := m.Discover(r.Context())
 		if e != nil {
@@ -549,6 +550,7 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (m *Manager) find(owner string, r request) (*session, error) {
+	r.Items = canonicalHistoryItems(r.Items)
 	m.mu.Lock()
 	var found *session
 	live := map[string]bool{}
@@ -558,22 +560,7 @@ func (m *Manager) find(owner string, r request) (*session, error) {
 			continue
 		}
 		s.mu.Lock()
-		canonicalSessionHistory(s)
-		match := s.responses[r.Previous] && r.Previous != ""
-		for _, v := range r.Items {
-			if r.Previous != "" {
-				break
-			}
-			if id := resultCallID(v); id != "" && s.pending[id] != nil {
-				match = true
-			}
-		}
-		if !match && r.Previous == "" && s.model == r.Model && len(s.history) > 0 {
-			_, match = alignToolIDs(s, r.Items)
-			if !match && !s.running {
-				match = prefix(s.history, requestFingerprints(r.Items))
-			}
-		}
+		match := sessionMatchesRequest(s, r)
 		s.mu.Unlock()
 		if match {
 			if found != nil && found != s {

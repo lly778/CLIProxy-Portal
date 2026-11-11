@@ -172,11 +172,6 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 			if idleWatch(r).expired() {
 				return errGatewayIdleTimeout
 			}
-			if state, ok := r.Context().Value(resourceRequestKey{}).(*resourceRequest); ok && state.enforce && state.limit > 0 && resp.StatusCode == http.StatusSwitchingProtocols {
-				if rw, ok := resp.Body.(io.ReadWriteCloser); ok {
-					resp.Body = &resourceWebsocket{ReadWriteCloser: rw, limit: uint64(state.limit), onReject: func() { state.lease.Record("websocket_message_too_large") }}
-				}
-			}
 			if measurement != nil {
 				measurement.upstreamResponse(resp)
 			}

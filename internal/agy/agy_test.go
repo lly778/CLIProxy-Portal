@@ -9,7 +9,7 @@ import (
 )
 
 func TestAGYCompletedSessionCacheCanYieldToNewChat(t *testing.T) {
-	old := &session{tenant: "old", last: time.Now().Add(-time.Minute)}
+	old := &session{ID: "old-native", tenant: "old", last: time.Now().Add(-time.Minute)}
 	m := &Manager{cfg: RuntimeConfig{MaxSessions: 1}, sessions: map[string]*session{"old": old}}
 	next := &session{tenant: "new"}
 	victim, ok := m.reserveSession(next)
@@ -19,7 +19,7 @@ func TestAGYCompletedSessionCacheCanYieldToNewChat(t *testing.T) {
 	victim.requestMu.Unlock()
 	for _, kind := range []string{"generating", "tools", "delivering"} {
 		t.Run(kind, func(t *testing.T) {
-			busy := &session{tenant: "busy"}
+			busy := &session{ID: "busy-native", tenant: "busy"}
 			switch kind {
 			case "generating":
 				busy.running = true

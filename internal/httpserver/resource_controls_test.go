@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"cliproxy-portal/internal/agy"
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/domain"
 	"cliproxy-portal/internal/resourcecontrol"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -42,7 +44,35 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if e = st.CreateUser(t.Context(), user); e != nil {
 		t.Fatal(e)
 	}
-	s, e := New(config.Config{DatabasePath: db, BackupStateDir: filepath.Join(dir, "backup"), CookieName: "portal_session", TimeZone: time.UTC}, st, accounts, service.NewKeys(st, &backupTestAPI{}), secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var workerLimit atomic.Int64
+	workerLimit.Store(3)
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+string(secret) {
+			t.Error("worker settings request missing service authentication")
+		}
+		switch r.URL.Path {
+		case "/internal/status":
+			_ = json.NewEncoder(w).Encode(agy.Status{Ready: true, MaxSessions: int(workerLimit.Load())})
+		case "/internal/resident-limit":
+			var v struct {
+				Limit int `json:"max_sessions"`
+			}
+			if json.NewDecoder(r.Body).Decode(&v) != nil || v.Limit < 1 || v.Limit > 16 {
+				t.Error("invalid worker limit update")
+			}
+			workerLimit.Store(int64(v.Limit))
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer worker.Close()
+	keys := service.NewKeys(st, &backupTestAPI{})
+	keys.AGY, e = agy.NewClient(worker.URL, string(secret))
+	if e != nil {
+		t.Fatal(e)
+	}
+	s, e := New(config.Config{DatabasePath: db, BackupStateDir: filepath.Join(dir, "backup"), CookieName: "portal_session", TimeZone: time.UTC}, st, accounts, keys, secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -66,7 +96,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	client, _ := login(admin.Phone)
 	page := getBody(t, client, server.URL+"/admin/system", 200)
 	csrf := extract(t, page, `name="csrf_token" value="([^"]+)"`)
-	if !strings.Contains(page, "观察模式") || !strings.Contains(page, "资源保护") {
+	if !strings.Contains(page, "观察模式") || !strings.Contains(page, "资源保护") || !strings.Contains(page, "AGY 常驻对话上限（个）") || strings.Contains(page, "resource-body") || strings.Contains(page, "name=\"body_mb\"") {
 		t.Fatal("default panel missing")
 	}
 	if _, e = os.Stat(state); !os.IsNotExist(e) {
@@ -75,14 +105,14 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	for _, action := range []string{"save"} {
 		postForm(t, client, server.URL+"/admin/system/resources/"+action, url.Values{"csrf_token": {"wrong"}, "admin_password": {password}}, 403)
 	}
-	form := url.Values{"csrf_token": {csrf}, "revision": {"1"}, "mode": {"enforce"}, "global": {"2"}, "per_user": {"1"}, "body_mb": {"10.48576"}, "cpu_percent": {"90"}, "memory_mb": {"805.306368"}}
+	form := url.Values{"csrf_token": {csrf}, "revision": {"1"}, "mode": {"enforce"}, "global": {"2"}, "per_user": {"1"}, "agy_resident_limit": {"3"}, "cpu_percent": {"90"}, "memory_mb": {"805.306368"}}
 	form["global"] = []string{"2", "3"}
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 400)
 	form.Set("global", "2")
 	s.limit = newLimiter()
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	p, e := st.ResourcePolicy(t.Context())
-	if e != nil || p.Revision != 2 || p.Mode != "enforce" || p.BodyMB != 10.48576 || p.MemoryMB != 805.306368 || s.Resources.Policy().Mode != "enforce" {
+	if e != nil || p.Revision != 2 || p.Mode != "enforce" || p.AGYResidentLimit != 3 || p.MemoryMB != 805.306368 || s.Resources.Policy().Mode != "enforce" {
 		t.Fatal("save not active", p, e)
 	}
 	if _, e = os.Stat(state); !os.IsNotExist(e) {
@@ -110,11 +140,11 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	}
 	// Decimal MB settings persist exact byte limits and round-trip unchanged.
 	form.Set("memory_mb", "800")
-	form.Set("body_mb", "10")
+	form.Set("agy_resident_limit", "5")
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	p, _ = st.ResourcePolicy(t.Context())
 	v := s.resourceView(t.Context())
-	if p.Revision != 3 || p.BodyLimitBytes() != 10_000_000 || p.MemoryMB != 800 || v.BodyMB != 10 || v.MemoryMB != 800 {
+	if p.Revision != 3 || p.AGYResidentLimit != 5 || workerLimit.Load() != 5 || p.MemoryMB != 800 || v.MemoryMB != 800 {
 		t.Fatalf("decimal MB settings changed their byte limits: %+v / %+v", p, v)
 	}
 	form.Set("revision", "3")
@@ -133,23 +163,33 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 			t.Fatalf("invalid MB limit saved: %s", invalid)
 		}
 	}
+	form.Set("memory_mb", "906.981376")
+	for _, invalid := range []string{"0", "17", "1.5"} {
+		form.Set("agy_resident_limit", invalid)
+		postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
+		p, _ = st.ResourcePolicy(t.Context())
+		if p.Revision != 4 || workerLimit.Load() != 5 {
+			t.Fatal("invalid resident limit applied", invalid)
+		}
+	}
+	form.Set("agy_resident_limit", "5")
 	// Values shown in the table are escaped, including user-controlled names.
-	s.Resources.Record("<script>bad</script>", "request_too_large")
+	s.Resources.Record("<script>bad</script>", "global_concurrency")
 	s.Resources.FlushEvents(t.Context())
 	page = getBody(t, client, server.URL+"/admin/system", 200)
 	if strings.Contains(page, "<script>bad</script>") || strings.Contains(page, "资源保护拦截") || strings.Contains(page, "audit-result-cell") {
 		t.Fatal("protection events or result column remain in system logs")
 	}
 	requests := getBody(t, client, server.URL+"/admin/requests", 200)
-	if strings.Contains(requests, "<script>bad</script>") || !strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(requests, "已拦截") || !strings.Contains(requests, "HTTP 413") {
-		t.Fatal("protection request log missing or unsafe")
+	if strings.Contains(requests, "<script>bad</script>") || !strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(requests, "已拦截") || !strings.Contains(requests, "HTTP 429") {
+		t.Fatalf("protection request log missing or unsafe: escaped=%v blocked=%v code=%v", strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;"), strings.Contains(requests, "已拦截"), strings.Contains(requests, "HTTP 429"))
 	}
-	for _, field := range []string{"global", "per_user", "body_mb", "cpu_percent", "memory_mb"} {
+	for _, field := range []string{"global", "per_user", "cpu_percent", "memory_mb"} {
 		form.Set(field, "0")
 	}
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	saved, e := st.ResourcePolicy(t.Context())
-	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.BodyMB != 0 || saved.CPUPercent != 0 || saved.MemoryMB != 0 {
+	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.CPUPercent != 0 || saved.MemoryMB != 0 {
 		t.Fatal("zero limits did not persist", saved, e)
 	}
 	if s.resourceView(t.Context()).Active != "0 / 不限" {

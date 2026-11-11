@@ -86,7 +86,7 @@ func (s *Server) resourceAudit(ctx context.Context, events []resourcecontrol.Eve
 func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	q := s.Resources.Snapshot()
 	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: "—", Observed: "—", Fresh: q.Fresh, Updated: "等待监测"}
-	v.BodyMB, v.MemoryMB = q.Policy.BodyMB, q.Policy.MemoryMB
+	v.MemoryMB = q.Policy.MemoryMB
 	v.ESXi = s.Cfg.HostMetricsPath != ""
 	v.AGYConfigured = s.Keys != nil && s.Keys.AGY != nil
 	if v.AGYConfigured {
@@ -212,7 +212,11 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 		}
 		return math.Round(mb*1_000_000) / 1_000_000
 	}
-	p := resourcecontrol.Policy{Revision: integer("revision"), Mode: r.PostForm.Get("mode"), Global: int(integer("global")), PerUser: int(integer("per_user")), BodyMB: sizeMB("body", 134.217728), CPUPercent: decimal("cpu_percent"), MemoryMB: sizeMB("memory", 1099511.627776)}
+	residentLimit := s.Resources.Policy().AGYResidentLimit
+	if _, ok := r.PostForm["agy_resident_limit"]; ok {
+		residentLimit = int(integer("agy_resident_limit"))
+	}
+	p := resourcecontrol.Policy{Revision: integer("revision"), Mode: r.PostForm.Get("mode"), Global: int(integer("global")), PerUser: int(integer("per_user")), AGYResidentLimit: residentLimit, CPUPercent: decimal("cpu_percent"), MemoryMB: sizeMB("memory", 1099511.627776)}
 	if bad {
 		s.resourceRedirect(w, r, "error", "设置格式无效")
 		return
@@ -244,6 +248,15 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 	if saved.Mode == "enforce" {
 		mode = "启用保护"
 	}
-	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%g MB；整机 CPU 上限=%.1f%%；整机内存上限=%g MB", mode, saved.Global, saved.PerUser, saved.BodyMB, saved.CPUPercent, saved.MemoryMB))
+	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；整机 CPU 上限=%.1f%%；整机内存上限=%g MB；AGY 常驻对话上限=%d", mode, saved.Global, saved.PerUser, saved.CPUPercent, saved.MemoryMB, saved.AGYResidentLimit))
+	if s.Keys != nil && s.Keys.AGY != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		err := s.Keys.AGY.SetResidentLimit(ctx, saved.AGYResidentLimit, saved.Revision)
+		cancel()
+		if err != nil {
+			s.resourceRedirect(w, r, "error", "设置已保存，但 AGY 常驻对话上限暂未完全应用，请重试")
+			return
+		}
+	}
 	s.resourceRedirect(w, r, "msg", "资源保护设置已保存，对后续请求生效")
 }

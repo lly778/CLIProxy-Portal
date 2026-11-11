@@ -73,31 +73,33 @@ type session struct {
 	officialVersion                                    int
 }
 type Manager struct {
-	cfg             RuntimeConfig
-	mu              sync.Mutex
-	startMu         sync.Mutex
-	proc            *process
-	sessions        map[string]*session
-	disk            *sessionDiskCache
-	cacheError      bool
-	quotaMu         sync.Mutex
-	quota           QuotaSnapshot
-	quotaAt         time.Time
-	quotaFlight     chan struct{}
-	quotaGeneration uint64
-	quotaReadTest   func(context.Context) (QuotaSnapshot, error)
-	authMu          sync.Mutex
-	authJob         *loginJob
-	authCommandTest func(context.Context, string) *exec.Cmd
-	mcpURL          string
-	mcpServer       *http.Server
-	slot            chan struct{}
-	life            context.Context
-	cancel          context.CancelFunc
-	summarizeTest   func(context.Context, string, []any, func()) (string, error)
-	checkpointCache map[string]checkpointCacheEntry
-	attemptMu       sync.Mutex
-	attempts        map[string]promptAttempt
+	cfg              RuntimeConfig
+	mu               sync.Mutex
+	startMu          sync.Mutex
+	proc             *process
+	sessions         map[string]*session
+	disk             *sessionDiskCache
+	cacheError       bool
+	residentLimit    int
+	residentRevision int64
+	quotaMu          sync.Mutex
+	quota            QuotaSnapshot
+	quotaAt          time.Time
+	quotaFlight      chan struct{}
+	quotaGeneration  uint64
+	quotaReadTest    func(context.Context) (QuotaSnapshot, error)
+	authMu           sync.Mutex
+	authJob          *loginJob
+	authCommandTest  func(context.Context, string) *exec.Cmd
+	mcpURL           string
+	mcpServer        *http.Server
+	slot             chan struct{}
+	life             context.Context
+	cancel           context.CancelFunc
+	summarizeTest    func(context.Context, string, []any, func()) (string, error)
+	checkpointCache  map[string]checkpointCacheEntry
+	attemptMu        sync.Mutex
+	attempts         map[string]promptAttempt
 }
 
 func NewManager(cfg RuntimeConfig) (*Manager, error) {
@@ -212,7 +214,7 @@ func (m *Manager) ensure(ctx context.Context) (*process, error) {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := Status{State: "not_connected", Sessions: len(m.sessions), MaxSessions: m.cfg.MaxSessions, CacheError: m.cacheError}
+	s := Status{State: "not_connected", Sessions: len(m.sessions), MaxSessions: m.residentLimitLocked(), CacheError: m.cacheError}
 	if m.disk != nil {
 		s.DiskSessions = m.disk.count.Load()
 	}
@@ -389,11 +391,15 @@ func (m *Manager) reserveSession(s *session) (*session, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var victim *session
-	if len(m.sessions) >= m.cfg.MaxSessions {
+	limit := m.residentLimitLocked()
+	if len(m.sessions) > limit {
+		return nil, false
+	}
+	if len(m.sessions) >= limit {
 		var oldest time.Time
 		for _, candidate := range m.sessions {
 			candidate.mu.Lock()
-			idle := !candidate.running && candidate.waitAt.IsZero()
+			idle := candidate.ID != "" && !candidate.running && candidate.waitAt.IsZero() && !candidate.loading
 			last := candidate.last
 			candidate.mu.Unlock()
 			if idle && (victim == nil || last.Before(oldest)) {
@@ -404,7 +410,7 @@ func (m *Manager) reserveSession(s *session) (*session, bool) {
 			return nil, false
 		}
 		victim.mu.Lock()
-		idle := !victim.running && victim.waitAt.IsZero()
+		idle := victim.ID != "" && !victim.running && victim.waitAt.IsZero() && !victim.loading
 		victim.mu.Unlock()
 		if !idle {
 			victim.requestMu.Unlock()
@@ -515,6 +521,7 @@ func (m *Manager) sweep() {
 					s.requestMu.Unlock()
 				}
 			}
+			_ = m.trimResidentSessions(m.life)
 			_ = m.pruneSessionCache(time.Now())
 		}
 	}

@@ -25,12 +25,12 @@
     <h2 id="resource-settings-title">资源保护设置</h2>
     <form method="post" action="/admin/system/resources/save" data-resource-settings>
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="revision" value="{{.Resources.Policy.Revision}}">
-      <p class="field-help">观察模式记录并继续放行。启用保护后，达到并发或资源阈值时暂停新请求，已有请求继续处理，因此短时用量仍可能超过阈值。新设置用于后续请求与新连接。填 0 表示不限。</p>
+      <p class="field-help">观察模式记录并继续放行。启用保护后，达到并发或资源阈值时暂停新请求，已有请求继续处理，因此短时用量仍可能超过阈值。并发、CPU 和内存填 0 表示不限；AGY 常驻对话上限保存后直接生效。</p>
       <div class="resource-fields">
         <div><label for="resource-mode">运行模式</label><select id="resource-mode" name="mode"><option value="observe" {{if eq .Resources.Policy.Mode "observe"}}selected{{end}}>观察模式 · 记录并放行</option><option value="enforce" {{if eq .Resources.Policy.Mode "enforce"}}selected{{end}}>启用保护 · 超限拒绝</option></select></div>
         <div><label for="resource-global">全局最大并发</label><input id="resource-global" type="number" name="global" value="{{.Resources.Policy.Global}}" min="0" max="128" required></div>
         <div><label for="resource-user">每用户最大并发</label><input id="resource-user" type="number" name="per_user" value="{{.Resources.Policy.PerUser}}" min="0" max="128" required></div>
-        <div><label for="resource-body">单个请求上限（MB）</label><input id="resource-body" type="number" name="body_mb" value="{{.Resources.BodyMB}}" min="0" max="134.217728" step="0.000001" required></div>
+        {{if .Resources.AGYConfigured}}<div><label for="resource-agy-resident">AGY 常驻对话上限（个）</label><input id="resource-agy-resident" type="number" name="agy_resident_limit" value="{{.Resources.Policy.AGYResidentLimit}}" min="1" max="16" step="1" required><p class="field-help">降低上限仅转存空闲对话，正在处理的任务完成后再调整。</p></div>{{end}}
         <div><label for="resource-cpu">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
         <div><label for="resource-memory">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存使用量上限（MB）</label><input id="resource-memory" type="number" name="memory_mb" value="{{.Resources.MemoryMB}}" min="0" max="1099511.627776" step="0.000001" required></div>
       </div>

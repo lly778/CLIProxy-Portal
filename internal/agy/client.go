@@ -18,14 +18,15 @@ import (
 // Client speaks only to the configured private worker. Caller credentials are
 // replaced by service authentication and an independently authenticated owner.
 type Client struct {
-	ImageBaseURL string
-	base, secret string
-	http         *http.Client
-	statusMu     sync.Mutex
-	status       Status
-	statusErr    error
-	statusUntil  time.Time
-	statusFlight chan struct{}
+	ImageBaseURL  string
+	base, secret  string
+	http          *http.Client
+	statusMu      sync.Mutex
+	status        Status
+	statusErr     error
+	statusUntil   time.Time
+	statusFlight  chan struct{}
+	statusVersion uint64
 }
 
 type progressContextKey struct{}
@@ -63,6 +64,7 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 		}
 		flight := make(chan struct{})
 		c.statusFlight = flight
+		generation := c.statusVersion
 		c.statusMu.Unlock()
 		readCtx, done := context.WithTimeout(ctx, time.Second)
 		var v Status
@@ -73,9 +75,13 @@ func (c *Client) Status(ctx context.Context) (Status, error) {
 			ttl = 2 * time.Second
 		}
 		c.statusMu.Lock()
-		c.status, c.statusErr, c.statusUntil = v, err, time.Now().Add(ttl)
 		c.statusFlight = nil
 		close(flight)
+		if generation != c.statusVersion {
+			c.statusMu.Unlock()
+			continue
+		}
+		c.status, c.statusErr, c.statusUntil = v, err, time.Now().Add(ttl)
 		c.statusMu.Unlock()
 		return v, err
 	}

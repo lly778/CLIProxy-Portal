@@ -1,5 +1,55 @@
 package agy
 
+import (
+	"maps"
+	"strconv"
+)
+
+// Call IDs may be renamed when a client replays a transcript. Use their
+// first-occurrence order only for candidate lookup; sessionMatchesRequest must
+// still verify the complete transcript before accepting any candidate.
+func routingFingerprints(items []map[string]any) []string {
+	items = canonicalHistoryItems(items)
+	aliases := map[string]string{}
+	alias := func(id string) string {
+		if aliases[id] == "" {
+			aliases[id] = "history_call_" + strconv.Itoa(len(aliases))
+		}
+		return aliases[id]
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		v := item
+		if id := stringField(item, "call_id"); id != "" {
+			v = maps.Clone(item)
+			v["call_id"] = alias(id)
+		}
+		out = append(out, itemFingerprint(v))
+	}
+	return out
+}
+
+// The caller owns s.mu (or an unshared disk candidate). Memory and disk use the
+// same acceptance rules; an index key alone is never sufficient for recovery.
+func sessionMatchesRequest(s *session, r request) bool {
+	canonicalSessionHistory(s)
+	if r.Previous != "" {
+		return s.responses[r.Previous]
+	}
+	for _, item := range r.Items {
+		if id := resultCallID(item); id != "" && s.pending[id] != nil {
+			return true
+		}
+	}
+	if s.model != r.Model || len(s.history) == 0 {
+		return false
+	}
+	if _, match := alignToolIDs(s, r.Items); match {
+		return true
+	}
+	return !s.running && prefix(s.history, requestFingerprints(r.Items))
+}
+
 // Codex may put a reasoning item after the tool calls from the same assistant
 // response when replaying history. Only canonicalize contiguous reasoning/call
 // runs: never cross a user message, tool result, or visible assistant message.
