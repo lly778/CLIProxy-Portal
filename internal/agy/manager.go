@@ -53,7 +53,6 @@ type session struct {
 	history                                            []string
 	items                                              []map[string]any
 	policy                                             toolPolicy
-	attempts                                           map[string]bool
 	mcpWaits                                           map[string]chan struct{}
 	responses                                          map[string]bool
 	pending                                            map[string]*pendingTool
@@ -98,8 +97,6 @@ type Manager struct {
 	cancel           context.CancelFunc
 	summarizeTest    func(context.Context, string, []any, func()) (string, error)
 	checkpointCache  map[string]checkpointCacheEntry
-	attemptMu        sync.Mutex
-	attempts         map[string]promptAttempt
 }
 
 func NewManager(cfg RuntimeConfig) (*Manager, error) {
@@ -469,7 +466,6 @@ func (m *Manager) selectOptions(ctx context.Context, s *session, r request) erro
 	return nil
 }
 func (m *Manager) drop(s *session) {
-	m.settleAttempts(s, false)
 	if s.cancel != nil {
 		s.cancel()
 	}

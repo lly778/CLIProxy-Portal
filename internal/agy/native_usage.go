@@ -14,10 +14,8 @@ import (
 )
 
 // The official CLI stores completed model generations as step_type=15,
-// status=3, with ModelUsageStats in metadata field 9. Agent errors are
-// step_type=17; the official agent may recover and generate usable output later.
-// An unrecovered error still overrides ACP end_turn. Read only new usage metadata
-// and bounded error payloads, never prompts or full conversation histories.
+// status=3, with ModelUsageStats in metadata field 9. Read only new usage
+// metadata; request outcomes come from ACP, never native error/history payloads.
 type nativeUsageReader struct{ db *sql.DB }
 
 func openNativeUsage(home, id string) (*nativeUsageReader, error) {
@@ -174,41 +172,25 @@ func decodeNativeUsage(b []byte) (Usage, error) {
 }
 
 func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int64, int, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT idx,step_type,metadata,CASE WHEN step_type=17 THEN substr(step_payload,1,16384) ELSE NULL END FROM steps WHERE idx>? AND step_type IN (15,17) AND status=3 ORDER BY idx LIMIT 2049`, after)
+	rows, err := r.db.QueryContext(ctx, `SELECT idx,metadata FROM steps WHERE idx>? AND step_type=15 AND status=3 ORDER BY idx LIMIT 2049`, after)
 	if err != nil {
 		return Usage{}, after, 0, err
 	}
 	defer rows.Close()
 	var total Usage
-	var usageError error
-	var outcomeError error
 	cursor, calls := after, 0
 	for rows.Next() {
 		var idx int64
-		var kind int
-		var metadata, payload []byte
-		if err = rows.Scan(&idx, &kind, &metadata, &payload); err != nil {
+		var metadata []byte
+		if err = rows.Scan(&idx, &metadata); err != nil {
 			return Usage{}, after, 0, err
-		}
-		if kind == 17 {
-			outcomeError = nativeAgentFailure(payload)
-			continue
 		}
 		if len(metadata) > 1<<20 || calls >= 2048 {
 			return Usage{}, after, 0, errors.New("usage batch exceeds bound")
 		}
 		v, e := decodeNativeUsage(metadata)
 		if e != nil {
-			// Still inspect subsequent steps for a terminal error when usage is
-			// absent or malformed. Usage availability must not hide failure.
-			usageError = e
-			continue
-		}
-		// Thinking alone is not recovery: it is exactly how an empty-output
-		// generation can still report output tokens. Only later completed,
-		// non-reasoning output can supersede an earlier agent error.
-		if v.Output > v.Reasoning {
-			outcomeError = nil
+			return Usage{}, after, 0, e
 		}
 		if total.Total > math.MaxInt64-v.Total {
 			return Usage{}, after, 0, errors.New("usage batch overflow")
@@ -225,31 +207,7 @@ func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int6
 	if err := rows.Err(); err != nil {
 		return Usage{}, after, 0, err
 	}
-	if outcomeError != nil {
-		return Usage{}, after, 0, outcomeError
-	}
-	if usageError != nil {
-		return Usage{}, after, 0, usageError
-	}
 	return total, cursor, calls, nil
-}
-
-// Native payloads can contain headers and request details. Only return a fixed
-// diagnostic selected from known status markers, never raw upstream content.
-func nativeAgentFailure(payload []byte) error {
-	text := string(payload)
-	switch {
-	case strings.Contains(text, "INVALID_ARGUMENT"):
-		return fail(502, "upstream_invalid_argument", "AGY 上游拒绝了工具或请求参数")
-	case strings.Contains(text, "RESOURCE_EXHAUSTED"):
-		return fail(429, "upstream_resource_exhausted", "AGY 上游额度或请求频率受限")
-	case strings.Contains(text, "PERMISSION_DENIED"), strings.Contains(text, "UNAUTHENTICATED"):
-		return fail(403, "upstream_access_denied", "AGY 上游拒绝访问，请检查账号授权")
-	case strings.Contains(text, "DEADLINE_EXCEEDED"):
-		return fail(504, "upstream_deadline_exceeded", "AGY 上游生成超时")
-	default:
-		return fail(502, "agent_execution_failed", "AGY 上游执行失败")
-	}
 }
 
 func (m *Manager) startUsage(s *session) {
@@ -262,20 +220,15 @@ func (m *Manager) startUsage(s *session) {
 	s.mu.Unlock()
 }
 func (m *Manager) consumeUsage(s *session) Usage {
-	u, _ := m.consumeOutcome(s)
-	return u
-}
-
-func (m *Manager) consumeOutcome(s *session) (Usage, error) {
 	s.mu.Lock()
 	cursor := s.usageCursor
 	s.mu.Unlock()
 	if cursor < -1 {
-		return Usage{}, nil
+		return Usage{}
 	}
 	r, err := openNativeUsage(m.cfg.Home, s.ID)
 	if err != nil {
-		return Usage{}, nil
+		return Usage{}
 	}
 	defer r.db.Close()
 	ctx, done := context.WithTimeout(s.life, 350*time.Millisecond)
@@ -283,25 +236,21 @@ func (m *Manager) consumeOutcome(s *session) (Usage, error) {
 	for attempt := 0; attempt < 4; attempt++ {
 		u, next, calls, err := r.after(ctx, cursor)
 		if err != nil {
-			var terminal *Error
-			if errors.As(err, &terminal) {
-				return Usage{}, terminal
-			}
-			return Usage{}, nil
+			return Usage{}
 		}
 		if calls > 0 {
 			s.mu.Lock()
 			s.usageCursor = next
 			s.mu.Unlock()
-			return u, nil
+			return u
 		}
 		if attempt < 3 {
 			select {
 			case <-time.After(40 * time.Millisecond):
 			case <-ctx.Done():
-				return Usage{}, nil
+				return Usage{}
 			}
 		}
 	}
-	return Usage{}, nil
+	return Usage{}
 }

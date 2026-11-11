@@ -301,7 +301,6 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 		return "", err
 	}
 	defer m.drop(s)
-	m.startUsage(s)
 	s.mu.Lock()
 	s.running = true
 	s.mu.Unlock()
@@ -346,9 +345,6 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 			if event.Result != nil {
 				if event.Result.Stop != "end_turn" && event.Result.Stop != "stop" {
 					return "", fail(502, "compaction_failed", "摘要未正常完成")
-				}
-				if _, err := m.consumeOutcome(s); err != nil {
-					return "", err
 				}
 				return strings.TrimSpace(result.String()), nil
 			}

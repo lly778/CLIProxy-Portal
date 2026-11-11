@@ -18,6 +18,38 @@ func diskTestRecord(id, owner string, last time.Time) savedSession {
 	return savedSession{ID: id, Owner: owner, Model: "agy/test", System: digest(""), ToolHash: digest([]tool(nil)), History: []string{digest("request-" + id), digest("response-" + id)}, Responses: map[string]bool{"resp-" + id: true}, Last: last}
 }
 
+func TestAGYDiskUpgradeRemovesRetiredRequestLedger(t *testing.T) {
+	home := t.TempDir()
+	secret := strings.Repeat("s", 64)
+	d, err := openSessionDiskCache(home, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := diskTestRecord("native-kept", "owner:key", time.Now())
+	if err := d.put(v, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.db.Exec(`CREATE TABLE prompt_attempts(key TEXT PRIMARY KEY,state TEXT,at_ms INTEGER); INSERT INTO prompt_attempts VALUES('old-request','unknown',1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	d, err = openSessionDiskCache(home, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.db.Close()
+	var count int
+	if err := d.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='prompt_attempts'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("retired request ledger survived: count=%d err=%v", count, err)
+	}
+	s, err := d.find(v.Owner, request{Previous: "resp-native-kept"}, nil)
+	if err != nil || s == nil || s.ID != v.ID {
+		t.Fatalf("ledger removal damaged saved sessions: %+v %v", s, err)
+	}
+}
+
 func TestAGYDiskSessionRoutingSurvivesRestartAndIsOwnerScoped(t *testing.T) {
 	home := t.TempDir()
 	secret := strings.Repeat("s", 64)

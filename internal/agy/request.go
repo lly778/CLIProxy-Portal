@@ -87,7 +87,6 @@ type request struct {
 	Items            []map[string]any `json:"-"`
 	UnavailableTools []string         `json:"-"`
 	ToolsProvided    bool             `json:"-"`
-	beforeCommit     func() error
 }
 
 func parseRequest(b []byte) (request, error) {

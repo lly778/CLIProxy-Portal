@@ -90,20 +90,6 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
-	attemptKey, e := m.claimAttempt(owner, req)
-	if e != nil {
-		WriteError(w, e)
-		return
-	}
-	var attemptSession *session
-	attemptArmed, attemptDone := false, false
-	defer func() {
-		if !attemptArmed {
-			_ = m.attemptState(attemptKey, "")
-		} else if !attemptDone {
-			m.settleAttempts(attemptSession, false)
-		}
-	}()
 	queue := time.NewTimer(10 * time.Second)
 	defer queue.Stop()
 	select {
@@ -262,26 +248,6 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 		out.fail(policyErr)
 		return
 	}
-	arm := func() error {
-		if err := m.armAttempt(s, attemptKey); err != nil {
-			return err
-		}
-		attemptSession = s
-		attemptArmed = true
-		return nil
-	}
-	req.beforeCommit = func() error {
-		if err := m.attemptState(attemptKey, "unknown"); err != nil {
-			return err
-		}
-		if s.attempts == nil {
-			s.attempts = map[string]bool{}
-		}
-		s.attempts[attemptKey] = true
-		attemptSession = s
-		attemptArmed = true
-		return nil
-	}
 	if running || awaiting {
 		if e = deliverToolsForRequest(s, req.Items, &req); e != nil {
 			out.fail(e)
@@ -337,10 +303,6 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			blocks = append([]any{map[string]string{"type": "text", "text": delta}}, blocks...)
-		}
-		if err := arm(); err != nil {
-			out.fail(err)
-			return
 		}
 		s.mu.Lock()
 		s.running = true
@@ -448,11 +410,7 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 					out.fail(fail(502, "agent_incomplete", "AGY 未正常完成本轮生成"))
 					return
 				}
-				usage, outcomeErr := m.consumeOutcome(s)
-				if outcomeErr != nil {
-					out.fail(outcomeErr)
-					return
-				}
+				usage := m.consumeUsage(s)
 				accrued = addStepUsage(accrued, usage)
 				blocks, waiting, lateErr := lateResultPrompt(s)
 				if lateErr != nil {
@@ -487,8 +445,6 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 					m.remember(s, out)
 					completed = true
-					attemptDone = true
-					_ = m.attemptState(attemptKey, "parked")
 					return
 				}
 				if event.Result.Stop == "max_tokens" {
@@ -516,16 +472,10 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 				s.mu.Unlock()
 				_ = m.saveSession(s, true)
 				completed = true
-				attemptDone = true
-				m.settleAttempts(s, true)
 				return
 			}
 		case <-batchC:
-			usage, outcomeErr := m.consumeOutcome(s)
-			if outcomeErr != nil {
-				out.fail(outcomeErr)
-				return
-			}
+			usage := m.consumeUsage(s)
 			if e = out.finish(addStepUsage(accrued, usage)); e != nil {
 				return
 			}
@@ -535,8 +485,6 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			m.remember(s, out)
 			completed = true
-			attemptDone = true
-			_ = m.attemptState(attemptKey, "parked")
 			return
 		case <-idle.C:
 			out.fail(fail(504, "model_idle_timeout", "AGY 连续 60 秒没有生成进展"))
@@ -725,12 +673,6 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 		}
 		if text := policy.text(); text != "" {
 			extra = append([]any{map[string]string{"type": "text", "text": text}}, extra...)
-		}
-		if req.beforeCommit != nil {
-			err = req.beforeCommit()
-			if err != nil {
-				return err
-			}
 		}
 	}
 	ids := make([]string, 0, len(results))

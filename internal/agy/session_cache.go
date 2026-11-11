@@ -74,22 +74,11 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(last_ms)`,
 		`CREATE TABLE IF NOT EXISTS responses (owner TEXT NOT NULL, response TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, PRIMARY KEY(owner,response))`,
 		`CREATE INDEX IF NOT EXISTS responses_session ON responses(session_id)`,
-		`CREATE TABLE IF NOT EXISTS prompt_attempts (key TEXT PRIMARY KEY, state TEXT NOT NULL, at_ms INTEGER NOT NULL)`,
 	} {
 		if _, err = db.Exec(statement); err != nil {
 			_ = db.Close()
 			return nil, err
 		}
-	}
-	// A prior process cannot still be executing these requests. Preserve the
-	// conservative unknown outcome; only pre-submit reservations are retryable.
-	if _, err = db.Exec(`DELETE FROM prompt_attempts WHERE state='reserved'`); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	if _, err = db.Exec(`UPDATE prompt_attempts SET state='unknown' WHERE state='parked'`); err != nil {
-		_ = db.Close()
-		return nil, err
 	}
 	var marker []byte
 	err = db.QueryRow(`SELECT value FROM cache_meta WHERE id=1`).Scan(&marker)
@@ -104,6 +93,11 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		if err == nil && string(plain) != "portal-session-cache-v1" {
 			err = errors.New("invalid AGY session cache key")
 		}
+	}
+	if err == nil {
+		// Retire the old duplicate-request ledger, including interrupted requests
+		// left by earlier versions. Session history and tool results remain intact.
+		_, err = db.Exec(`DROP TABLE IF EXISTS prompt_attempts`)
 	}
 	if err == nil {
 		err = d.upgradeHistoryIndex()

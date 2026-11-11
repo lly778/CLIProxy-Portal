@@ -166,7 +166,6 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	}
 	tools, loaded := requestedTools(s, r)
 	responses := s.responses
-	keys := s.attempts
 	s.mu.Unlock()
 	r.Tools = mergeTools(tools, loaded)
 	r.ToolsProvided = true
@@ -182,6 +181,5 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 		return nil, err
 	}
 	next.responses = responses
-	next.attempts = keys
 	return next, nil
 }

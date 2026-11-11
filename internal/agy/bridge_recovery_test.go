@@ -170,58 +170,37 @@ func TestAGYHistoryRebuildAndSystemChangeReplayOnlyAuthoritativeContext(t *testi
 	}
 }
 
-func TestAGYPromptAttemptsSurviveRestartAndDoNotPersistSecrets(t *testing.T) {
-	home := t.TempDir()
-	secret := strings.Repeat("s", 64)
-	d, err := openSessionDiskCache(home, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := &Manager{disk: d}
-	r := request{Model: "agy/test", Items: []map[string]any{{"role": "user", "content": "private prompt"}}}
-	key, err := m.claimAttempt("private-owner-key", r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := &session{}
-	if err = m.armAttempt(s, key); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = m.claimAttempt("private-owner-key", r); err == nil {
-		t.Fatal("duplicate native submission accepted")
-	}
-	if err = d.db.Close(); err != nil {
-		t.Fatal(err)
-	}
-	d, err = openSessionDiskCache(home, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.db.Close()
-	m = &Manager{disk: d}
-	if _, err = m.claimAttempt("private-owner-key", r); err == nil || !strings.Contains(err.Error(), "无法确认") {
-		t.Fatalf("lost unknown outcome after restart: %v", err)
-	}
-	if _, err = m.claimAttempt("another-owner", r); err != nil {
-		t.Fatal("owners share deduplication state")
-	}
-	if err = m.attemptState(key, ""); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = m.claimAttempt("private-owner-key", r); err != nil {
-		t.Fatal("known successful request could not be released")
-	}
-	rows, err := d.db.Query(`SELECT key,state FROM prompt_attempts`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var k, state string
-		_ = rows.Scan(&k, &state)
-		if strings.Contains(k, "private") || strings.Contains(state, "private") {
-			t.Fatal("private data stored in request ledger")
+func TestAGYIdenticalRequestCanRetryAfterFailure(t *testing.T) {
+	var calls atomic.Int64
+	m, _ := recoveryFixture(t, func(s *session, f frame) any {
+		if calls.Add(1) == 1 {
+			return map[string]any{"stopReason": "cancelled"}
 		}
+		s.events <- agentEvent{Text: "retry completed"}
+		return map[string]any{"stopReason": "end_turn"}
+	})
+	const body = `{"model":"agy/test","input":"retry the identical request"}`
+	first := recoveryRequest(m, body)
+	if !strings.Contains(first.Body.String(), "agent_incomplete") {
+		t.Fatalf("first request should fail: %d %s", first.Code, first.Body.String())
+	}
+	second := recoveryRequest(m, body)
+	if second.Code != 200 || calls.Load() != 2 || !strings.Contains(second.Body.String(), "retry completed") || !strings.Contains(second.Body.String(), `"status":"completed"`) {
+		t.Fatalf("identical retry blocked: %d %s calls=%d", second.Code, second.Body.String(), calls.Load())
+	}
+}
+
+func TestAGYSameSessionConcurrentRequestRemainsBlocked(t *testing.T) {
+	var calls atomic.Int64
+	m, s := recoveryFixture(t, func(*session, frame) any {
+		calls.Add(1)
+		return map[string]any{"stopReason": "end_turn"}
+	})
+	s.requestMu.Lock()
+	defer s.requestMu.Unlock()
+	w := recoveryRequest(m, `{"model":"agy/test","previous_response_id":"previous","input":"continue"}`)
+	if !strings.Contains(w.Body.String(), "session_busy") || calls.Load() != 0 {
+		t.Fatalf("concurrent request reached active session: %d %s", w.Code, w.Body.String())
 	}
 }
 
