@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestExternalHostMetricsKeepSuiteMemoryAdmissionSeparateFromHostHistory(t *testing.T) {
+func TestExternalHostMetricsDriveWholeMachineAdmissionAndHistory(t *testing.T) {
 	now := time.Now()
 	path := filepath.Join(t.TempDir(), "esxi.json")
 	cpus, hostUsed := 93.0, 14000.0
@@ -22,11 +22,11 @@ func TestExternalHostMetricsKeepSuiteMemoryAdmissionSeparateFromHostHistory(t *t
 	used := 120.0
 	m := Metrics{At: now, HostID: "cpa-suite", CPUCount: 4, CPUPercent: 2, TotalMiB: 11444, AvailableMiB: 9700, SuiteUsedMiB: &used}
 	m, err = applyExternalMetrics(m, path, now)
-	if err != nil || !m.Fresh(now) || m.CPUPercent != cpus || m.UsedMiB() != used || m.TotalMiB != 11444 {
-		t.Fatal("host CPU overwrote suite memory or VM capacity", m, err)
+	if err != nil || !m.Fresh(now) || m.CPUPercent != cpus || m.UsedMiB() != hostUsed || m.TotalMiB != 11444 {
+		t.Fatal("external host metrics were not used consistently", m, err)
 	}
 	p := DefaultPolicy()
-	p.Mode, p.MemoryMiB = "enforce", 4096
+	p.Mode, p.MemoryMB = "enforce", 20000
 	c := NewController(p)
 	c.UpdateMetrics(m, now)
 	lease, reason := c.Acquire("test")
@@ -45,11 +45,12 @@ func TestExternalHostMetricsKeepSuiteMemoryAdmissionSeparateFromHostHistory(t *t
 	if c.paused != "cpu_pressure" {
 		t.Fatal("host CPU not used for protection", c.paused)
 	}
-	*m.SuiteUsedMiB = 4200
+	hostUsed = 22000
+	m.HostUsedMiB = &hostUsed
 	m.At = now.Add(18 * time.Second)
 	c.UpdateMetrics(m, m.At)
 	if c.paused != "memory_pressure" {
-		t.Fatal("suite memory protection lost", c.paused)
+		t.Fatal("external host memory protection lost", c.paused)
 	}
 }
 

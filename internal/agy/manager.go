@@ -495,7 +495,7 @@ func (m *Manager) sweep() {
 			m.mu.Unlock()
 			for _, s := range all {
 				s.mu.Lock()
-				expired := !s.proc.alive() || (!s.waitAt.IsZero() && time.Since(s.waitAt) > m.cfg.ToolTimeout) || (!s.running && s.waitAt.IsZero() && time.Since(s.last) > 30*time.Minute)
+				expired := !s.proc.alive() || (!s.waitAt.IsZero() && time.Since(s.waitAt) > m.cfg.ToolTimeout) || (!s.running && s.waitAt.IsZero() && time.Since(s.last) > 10*time.Minute)
 				s.mu.Unlock()
 				if expired && s.requestMu.TryLock() {
 					s.mu.Lock()

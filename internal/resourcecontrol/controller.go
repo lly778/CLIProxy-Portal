@@ -64,7 +64,7 @@ func (c *Controller) SetPolicy(p Policy) {
 }
 func (c *Controller) Policy() Policy { c.mu.Lock(); defer c.mu.Unlock(); return c.policy }
 
-func memoryRecoveryThreshold(limit int64) float64 {
+func memoryRecoveryThreshold(limit float64) float64 {
 	budget := float64(limit)
 	return math.Max(budget-math.Max(32, budget*0.05), budget/2)
 }
@@ -77,12 +77,12 @@ func (c *Controller) Run(ctx context.Context) {
 	sample := newSuiteSampler(c.cgroupPath)
 	for {
 		m, e := sample()
-		if c.hostMetricsPath != "" && m.SuiteUsedMiB != nil && m.TotalMiB > 0 && m.CPUCount > 0 {
+		if c.hostMetricsPath != "" && m.TotalMiB > 0 && m.CPUCount > 0 {
 			// External CPU does not need the local CPU delta warm-up.
 			m, e = applyExternalMetrics(m, c.hostMetricsPath, time.Now())
 		}
 		if e != nil {
-			m.Error = "CPA 套件资源监测暂不可用"
+			m.Error = "整机资源监测暂不可用"
 		}
 		c.UpdateMetrics(m, time.Now())
 		select {
@@ -109,18 +109,15 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 		c.recoverSince = time.Time{}
 		return
 	}
-	// Trends show whole-machine memory; admission still uses suite memory.
-	historyUsed, historyTotal := m.TotalMiB-m.AvailableMiB, m.TotalMiB
-	if m.HostUsedMiB != nil {
-		historyUsed, historyTotal = *m.HostUsedMiB, m.HostTotalMiB
-	}
+	// Charts and admission use the same whole-machine memory measurement.
+	historyUsed, historyTotal := m.UsedMiB(), m.TotalMemoryMiB()
 	c.history.add(HistoryPoint{
 		At: m.At.UTC().Truncate(HistoryInterval), CPUPercent: math.Round(m.CPUPercent*10) / 10,
 		UsedMiB: math.Round(historyUsed*10) / 10, TotalMiB: math.Round(historyTotal*10) / 10,
 	})
 	high := c.policy.CPUPercent > 0 && m.CPUPercent >= c.policy.CPUPercent
 	low := c.policy.CPUPercent == 0 || m.CPUPercent <= math.Max(c.policy.CPUPercent-15, c.policy.CPUPercent/2)
-	memory := c.policy.MemoryMiB > 0 && m.UsedMiB() >= float64(c.policy.MemoryMiB)
+	memory := c.policy.MemoryMB > 0 && m.UsedMB() >= float64(c.policy.MemoryMB)
 	if memory {
 		c.paused = "memory_pressure"
 		c.recoverSince = time.Time{}
@@ -138,7 +135,7 @@ func (c *Controller) UpdateMetrics(m Metrics, now time.Time) {
 	}
 	c.highSince = time.Time{}
 	if c.paused != "" {
-		if low && (c.policy.MemoryMiB == 0 || m.UsedMiB() <= memoryRecoveryThreshold(c.policy.MemoryMiB)) {
+		if low && (c.policy.MemoryMB == 0 || m.UsedMB() <= memoryRecoveryThreshold(c.policy.MemoryMB)) {
 			if c.recoverSince.IsZero() {
 				c.recoverSince = now
 			}
@@ -287,7 +284,7 @@ func (c *Controller) AcquireRequest(user string, contentLength int64) (*Lease, s
 	defer c.mu.Unlock()
 	reason := ""
 	p := c.policy
-	if p.BodyMiB > 0 && contentLength > p.BodyMiB*MiB {
+	if p.BodyMB > 0 && contentLength > p.BodyLimitBytes() {
 		c.event(user, "request_too_large", p.Mode != "enforce")
 		if p.Mode == "enforce" {
 			return nil, "request_too_large"
@@ -299,9 +296,9 @@ func (c *Controller) AcquireRequest(user string, contentLength int64) (*Lease, s
 		reason = "user_concurrency"
 	} else if p.Global > 0 && c.processing >= p.Global+4 {
 		reason = "capture_backlog"
-	} else if (p.CPUPercent > 0 || p.MemoryMiB > 0) && !c.metrics.Fresh(time.Now()) {
+	} else if (p.CPUPercent > 0 || p.MemoryMB > 0) && !c.metrics.Fresh(time.Now()) {
 		reason = "monitor_unavailable"
-	} else if p.MemoryMiB > 0 && c.metrics.UsedMiB() >= float64(p.MemoryMiB) {
+	} else if p.MemoryMB > 0 && c.metrics.UsedMB() >= float64(p.MemoryMB) {
 		reason = "memory_pressure"
 	} else if c.paused != "" {
 		reason = c.paused
@@ -324,7 +321,7 @@ func (c *Controller) Snapshot() Snapshot {
 	m := c.metrics
 	paused := c.paused
 	fresh := m.Fresh(time.Now())
-	if !fresh && (p.CPUPercent > 0 || p.MemoryMiB > 0) {
+	if !fresh && (p.CPUPercent > 0 || p.MemoryMB > 0) {
 		paused = "monitor_unavailable"
 	}
 	return Snapshot{p, m, c.active, c.processing, c.rejected, c.observed, paused, fresh}

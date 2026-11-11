@@ -52,7 +52,7 @@ func (g *Gateway) serveResourceHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := lease.Policy
-	limit := p.BodyMiB * resourcecontrol.MiB
+	limit := p.BodyLimitBytes()
 	state := &resourceRequest{lease: lease, enforce: p.Mode == "enforce", limit: limit}
 	defer lease.ModelDone()
 	defer func() {

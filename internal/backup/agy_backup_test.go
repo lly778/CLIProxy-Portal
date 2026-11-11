@@ -16,11 +16,11 @@ import (
 func agyFixture(t *testing.T) (hostInstaller, *[]string, *agyCredentials) {
 	t.Helper()
 	h, commands := testHostInstaller(t)
-	a := &agyCredentials{Secret: strings.Repeat("agy-private-key-", 4), OAuth: json.RawMessage(`{"id_token_email":"new@example.test","token":{"refresh_token":"private-refresh-token"}}`), InstallationID: "test-installation", MaxSessions: 3, MemoryMiB: 512}
+	a := &agyCredentials{Secret: strings.Repeat("agy-private-key-", 4), OAuth: json.RawMessage(`{"id_token_email":"new@example.test","token":{"refresh_token":"private-refresh-token"}}`), InstallationID: "test-installation", MaxSessions: 3, MemoryMB: 512}
 	for path, data := range map[string][]byte{
 		agySecretPath: []byte(a.Secret), defaultPortalRoot + "/secrets/portal_agy_secret": []byte(a.Secret),
 		agyTokenPath: a.OAuth, agyHome + "/agy/installation_id": []byte(a.InstallationID),
-		"/etc/cliproxy-agy/runtime.env": []byte("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MIB=512\n"),
+		"/etc/cliproxy-agy/runtime.env": []byte("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MB=512\n"),
 	} {
 		if err := h.write(path, data, 0600, false); err != nil {
 			t.Fatal(err)
@@ -44,7 +44,7 @@ func TestAGYBackupEncryptsOnlyCredentialsAndScalarSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Secret != a.Secret || got.InstallationID != a.InstallationID || got.MaxSessions != 3 || got.MemoryMiB != 512 || !bytes.Equal(got.OAuth, a.OAuth) {
+	if got.Secret != a.Secret || got.InstallationID != a.InstallationID || got.MaxSessions != 3 || got.MemoryMB != 512 || !bytes.Equal(got.OAuth, a.OAuth) {
 		t.Fatal("AGY snapshot incomplete; secret values withheld")
 	}
 	sources, _ := fixture(t)
@@ -103,10 +103,10 @@ func TestAGYSnapshotRejectsPartialCredentialsAndSymlinks(t *testing.T) {
 
 func TestAGYSnapshotRequiresCompleteContainerSettings(t *testing.T) {
 	for _, settings := range []string{
-		"AGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MIB=512\n",
+		"AGY_MAX_SESSIONS=3\nAGY_CONTAINER_MEMORY_MB=512\n",
 		"PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\n",
-		"PORTAL_AGY_EMBEDDED=true\nAGY_CONTAINER_MEMORY_MIB=512\n",
-		"PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_MAX_SESSIONS=4\nAGY_CONTAINER_MEMORY_MIB=512\n",
+		"PORTAL_AGY_EMBEDDED=true\nAGY_CONTAINER_MEMORY_MB=512\n",
+		"PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=3\nAGY_MAX_SESSIONS=4\nAGY_CONTAINER_MEMORY_MB=512\n",
 	} {
 		t.Run(settings, func(t *testing.T) {
 			h, _, _ := agyFixture(t)
@@ -122,7 +122,7 @@ func TestAGYSnapshotRequiresCompleteContainerSettings(t *testing.T) {
 
 func TestAGYRebuildUsesTrustedAssetsAndInvalidatesOldSessions(t *testing.T) {
 	h, commands, a := agyFixture(t)
-	if err := h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mib":512,"logged_in":true}`), 0600, false); err != nil {
+	if err := h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mb":512,"logged_in":true}`), 0600, false); err != nil {
 		t.Fatal(err)
 	}
 	db, err := sql.Open("sqlite", h.path(agyHome+"/portal-sessions.db"))
@@ -139,7 +139,7 @@ func TestAGYRebuildUsesTrustedAssetsAndInvalidatesOldSessions(t *testing.T) {
 	}
 	dockerfile, _ := os.ReadFile(h.path(defaultPortalRoot + "/ops/agy/Dockerfile.runtime"))
 	env, _ := os.ReadFile(h.path("/etc/cliproxy-agy/runtime.env"))
-	if !bytes.Contains(dockerfile, []byte("debian:bookworm-slim")) || !bytes.Contains(env, []byte("PORTAL_AGY_EMBEDDED=true")) || !bytes.Contains(env, []byte("AGY_CONTAINER_MEMORY_MIB=512")) {
+	if !bytes.Contains(dockerfile, []byte("debian:bookworm-slim")) || !bytes.Contains(env, []byte("PORTAL_AGY_EMBEDDED=true")) || !bytes.Contains(env, []byte("AGY_CONTAINER_MEMORY_MB=512")) {
 		t.Fatal("AGY not rebuilt with trusted settings")
 	}
 	if strings.Contains(strings.Join(*commands, "\n"), a.Secret) {
@@ -158,7 +158,7 @@ func TestAGYRebuildUsesTrustedAssetsAndInvalidatesOldSessions(t *testing.T) {
 	if ready != 0 || responses != 0 {
 		t.Fatal("restored credentials reused previous session")
 	}
-	if err = h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mib":512,"logged_in":false}`), 0600, false); err != nil {
+	if err = h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mb":512,"logged_in":false}`), 0600, false); err != nil {
 		t.Fatal(err)
 	}
 	if err = h.installAGY(t.Context()); err != nil {
@@ -208,7 +208,7 @@ func TestAGYHostPreparationIsNotAnInstalledAccount(t *testing.T) {
 
 func TestAGYHostRebuildFailureRemainsPendingAndRetries(t *testing.T) {
 	h, _, a := agyFixture(t)
-	if err := h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mib":512,"logged_in":true}`), 0600, false); err != nil {
+	if err := h.write(agyConfigPath, []byte(`{"max_sessions":3,"memory_mb":512,"logged_in":true}`), 0600, false); err != nil {
 		t.Fatal(err)
 	}
 	state := h.path(defaultPortalRoot + "/data/backup")

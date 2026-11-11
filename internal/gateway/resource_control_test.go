@@ -104,7 +104,7 @@ func resourceGateway(t *testing.T, up http.HandlerFunc) (*Gateway, *atomic.Int32
 	}
 	p := resourcecontrol.DefaultPolicy()
 	p.Mode = "enforce"
-	p.BodyMiB = 1
+	p.BodyMB = 1
 	g.Resources = resourcecontrol.NewController(p)
 	g.Resources.UpdateMetrics(resourcecontrol.Metrics{At: time.Now(), HostID: "test", CPUCount: 1, TotalMiB: 926, AvailableMiB: 400}, time.Now())
 	return g, calls
@@ -279,7 +279,7 @@ func TestResourceZeroBodyLimitForwardsLargeBodyUnchanged(t *testing.T) {
 		w.WriteHeader(200)
 	})
 	p := g.Resources.Policy()
-	p.BodyMiB = 0
+	p.BodyMB = 0
 	g.Resources.SetPolicy(p)
 	w := httptest.NewRecorder()
 	g.Handler().ServeHTTP(w, httptest.NewRequest("POST", "/v1/unlimited", bytes.NewReader(body)))

@@ -9,7 +9,7 @@ services:
       AGY_HOME: "/var/lib/cliproxy-agy"
       AGY_MAX_SESSIONS: "${AGY_MAX_SESSIONS:-3}"
     init: true
-    mem_limit: "${PORTAL_CONTAINER_MEMORY:-1024m}"
+    mem_limit: "${PORTAL_CONTAINER_MEMORY:-1024000000}"
     volumes:
       - ./secrets/portal_agy_secret:/run/secrets/portal_agy_secret:ro
       - /opt/cliproxy-agy/bin/agy:/opt/cliproxy-agy/bin/agy:ro

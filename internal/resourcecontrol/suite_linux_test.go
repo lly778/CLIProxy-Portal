@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestSuiteMetricsUseHostCPUAndOnlyParentCgroupMemory(t *testing.T) {
+func TestMetricsUseWholeMachineCPUAndMemoryWithoutCgroupDependency(t *testing.T) {
 	root, proc := t.TempDir(), t.TempDir()
 	write := func(dir, name, value string) {
 		t.Helper()
@@ -23,7 +23,7 @@ func TestSuiteMetricsUseHostCPUAndOnlyParentCgroupMemory(t *testing.T) {
 		write(proc, "stat", "cpu "+counters+"\ncpu0 0\ncpu1 0\ncpu2 0\ncpu3 0\n")
 	}
 	writeCPU("100 0 0 300 0 0 0 0 50 0")
-	// Unrelated host memory must not count toward the suite memory limit.
+	// Whole-machine memory includes services outside the old parent cgroup.
 	write(proc, "meminfo", "MemTotal: 8388608 kB\nMemAvailable: 1048576 kB\n")
 	write(root, "memory.current", "419430400\n")
 	write(root, "memory.stat", "anon 1\ninactive_file 104857600\n")
@@ -37,19 +37,19 @@ func TestSuiteMetricsUseHostCPUAndOnlyParentCgroupMemory(t *testing.T) {
 	// Guest is included in user; counting it again would inflate utilization.
 	writeCPU("200 0 0 600 0 0 0 0 150 0")
 	m, err := collectSuiteMetrics(root, &total, &idle, &at, now.Add(2*time.Second), proc)
-	if err != nil || !m.Fresh(m.At) || m.CPUPercent != 25 || m.UsedMiB() != 300 || m.AvailableMiB != 1024 {
+	if err != nil || !m.Fresh(m.At) || m.CPUPercent != 25 || m.UsedMiB() != 7168 || m.AvailableMiB != 1024 {
 		t.Fatalf("incorrect suite counters: %+v, %v", m, err)
 	}
 	p := DefaultPolicy()
 	p.Mode = "enforce"
-	p.MemoryMiB = 500
+	p.MemoryMB = 500
 	c := NewController(p)
 	c.UpdateMetrics(m, m.At)
 	lease, reason := c.Acquire("test")
-	if lease == nil {
-		t.Fatal("host memory was incorrectly included in suite limit", reason)
+	if lease != nil || reason != "memory_pressure" {
+		t.Fatal("whole-machine memory did not trigger protection", reason)
 	}
-	lease.Finish()
+	p.MemoryMB = 0
 	p.CPUPercent = 20
 	c = NewController(p)
 	for _, offset := range []time.Duration{-16 * time.Second, -8 * time.Second, 0} {
@@ -66,41 +66,42 @@ func TestSuiteMetricsUseHostCPUAndOnlyParentCgroupMemory(t *testing.T) {
 	writeCPU("201 0 0 201 0 0 0 0")
 	write(root, "memory.stat", "inactive_file 900000000\n")
 	m, err = collectSuiteMetrics(root, &total, &idle, &at, now.Add(6*time.Second), proc)
-	if err != nil || m.CPUPercent != 50 || m.UsedMiB() != 0 {
+	if err != nil || m.CPUPercent != 50 || m.UsedMiB() != 7168 {
 		t.Fatal("counter reset recovery or cache clamp failed", m, err)
 	}
 	if err := os.Remove(filepath.Join(root, "memory.stat")); err != nil {
 		t.Fatal(err)
 	}
 	writeCPU("401 0 0 401 0 0 0 0")
-	if _, err := collectSuiteMetrics(root, &total, &idle, &at, now.Add(8*time.Second), proc); err == nil {
-		t.Fatal("missing suite memory fell back to host memory")
+	if _, err := collectSuiteMetrics(root, &total, &idle, &at, now.Add(8*time.Second), proc); err != nil {
+		t.Fatal("whole-machine monitoring depended on cgroup files", err)
 	}
 }
 
-func TestSuiteMemoryValidationAndAdmission(t *testing.T) {
+func TestWholeMachineMemoryValidationAndAdmission(t *testing.T) {
 	for _, used := range []float64{-1, math.NaN(), math.Inf(1), 2000} {
 		m := goodMetrics(time.Now())
 		m.HostID = "cpa-suite"
-		m.SuiteUsedMiB = &used
+		m.AvailableMiB = used
 		if m.Fresh(time.Now()) {
-			t.Fatal("invalid suite memory accepted", used)
+			t.Fatal("invalid whole-machine memory accepted", used)
 		}
 	}
 	m := goodMetrics(time.Now())
 	m.HostID = "cpa-suite"
-	if m.Fresh(time.Now()) {
-		t.Fatal("suite sample without measured memory accepted")
+	if !m.Fresh(time.Now()) {
+		t.Fatal("host sample required suite memory")
 	}
-	used := 800.0
+	used := 10.0
+	m.AvailableMiB = 100
 	m.SuiteUsedMiB = &used
 	p := DefaultPolicy()
 	p.Mode = "enforce"
-	p.MemoryMiB = 768
+	p.MemoryMB = 768
 	c := NewController(p)
 	c.UpdateMetrics(m, m.At)
 	if lease, reason := c.Acquire("test"); lease != nil || reason != "memory_pressure" {
-		t.Fatal("suite memory limit not enforced", reason)
+		t.Fatal("whole-machine memory limit not enforced", reason)
 	}
 	stale := m
 	stale.At = time.Now().Add(-11 * time.Second)

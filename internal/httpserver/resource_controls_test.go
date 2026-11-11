@@ -75,14 +75,14 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	for _, action := range []string{"save"} {
 		postForm(t, client, server.URL+"/admin/system/resources/"+action, url.Values{"csrf_token": {"wrong"}, "admin_password": {password}}, 403)
 	}
-	form := url.Values{"csrf_token": {csrf}, "revision": {"1"}, "mode": {"enforce"}, "global": {"2"}, "per_user": {"1"}, "body_mib": {"10"}, "cpu_percent": {"90"}, "memory_mib": {"768"}}
+	form := url.Values{"csrf_token": {csrf}, "revision": {"1"}, "mode": {"enforce"}, "global": {"2"}, "per_user": {"1"}, "body_mb": {"10.48576"}, "cpu_percent": {"90"}, "memory_mb": {"805.306368"}}
 	form["global"] = []string{"2", "3"}
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 400)
 	form.Set("global", "2")
 	s.limit = newLimiter()
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	p, e := st.ResourcePolicy(t.Context())
-	if e != nil || p.Revision != 2 || p.Mode != "enforce" || s.Resources.Policy().Mode != "enforce" {
+	if e != nil || p.Revision != 2 || p.Mode != "enforce" || p.BodyMB != 10.48576 || p.MemoryMB != 805.306368 || s.Resources.Policy().Mode != "enforce" {
 		t.Fatal("save not active", p, e)
 	}
 	if _, e = os.Stat(state); !os.IsNotExist(e) {
@@ -98,15 +98,40 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	m := resourcecontrol.Metrics{At: time.Now(), HostID: "cpa-suite", CPUCount: 1, CPUPercent: 12.3, TotalMiB: 926, AvailableMiB: 410, SuiteUsedMiB: &used}
 	s.Resources.UpdateMetrics(m, time.Now())
 	form.Set("revision", "2")
-	form.Set("memory_mib", "926")
+	form.Set("memory_mb", "970.981376")
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	p, _ = st.ResourcePolicy(t.Context())
-	if p.Revision != 2 || p.MemoryMiB != 768 {
+	if p.Revision != 2 || p.MemoryMB != 805.306368 {
 		t.Fatal("impossible total budget saved")
 	}
 	page = getBody(t, client, server.URL+"/admin/system", 200)
-	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || strings.Contains(page, "CPA 套件 CPU") || !strings.Contains(page, "整机 CPU 使用率上限") || !strings.Contains(page, "服务合计内存") || !strings.Contains(page, "120 / 768 MiB") || !strings.Contains(page, "整机可用 410 / 926 MiB") {
-		t.Fatal("panel does not distinguish suite usage from host availability")
+	if strings.Contains(page, "最近保护记录") || strings.Contains(page, "resource-save-password") || strings.Contains(page, "portal_memory") || strings.Contains(page, "cpa_memory") || strings.Contains(page, "CPA 套件 CPU") || !strings.Contains(page, "整机 CPU 使用率上限") || !strings.Contains(page, "整机已用内存") || !strings.Contains(page, "541 / 805 MB") || !strings.Contains(page, "整机可用 430 / 971 MB") {
+		t.Fatal("panel does not display whole-machine usage and availability")
+	}
+	// Decimal MB settings persist exact byte limits and round-trip unchanged.
+	form.Set("memory_mb", "800")
+	form.Set("body_mb", "10")
+	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
+	p, _ = st.ResourcePolicy(t.Context())
+	v := s.resourceView(t.Context())
+	if p.Revision != 3 || p.BodyLimitBytes() != 10_000_000 || p.MemoryMB != 800 || v.BodyMB != 10 || v.MemoryMB != 800 {
+		t.Fatalf("decimal MB settings changed their byte limits: %+v / %+v", p, v)
+	}
+	form.Set("revision", "3")
+	form.Set("memory_mb", "906.981376") // Host total minus exactly 64 decimal MB.
+	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
+	p, _ = st.ResourcePolicy(t.Context())
+	if p.Revision != 4 || p.MemoryMB != 906.981376 {
+		t.Fatalf("64 MB headroom boundary rejected: %+v", p)
+	}
+	form.Set("revision", "4")
+	for _, invalid := range []string{"906.981377", "NaN", "+Inf", "-0.1"} {
+		form.Set("memory_mb", invalid)
+		postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
+		p, _ = st.ResourcePolicy(t.Context())
+		if p.Revision != 4 {
+			t.Fatalf("invalid MB limit saved: %s", invalid)
+		}
 	}
 	// Values shown in the table are escaped, including user-controlled names.
 	s.Resources.Record("<script>bad</script>", "request_too_large")
@@ -119,18 +144,18 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if strings.Contains(requests, "<script>bad</script>") || !strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(requests, "已拦截") || !strings.Contains(requests, "HTTP 413") {
 		t.Fatal("protection request log missing or unsafe")
 	}
-	for _, field := range []string{"global", "per_user", "body_mib", "cpu_percent", "memory_mib"} {
+	for _, field := range []string{"global", "per_user", "body_mb", "cpu_percent", "memory_mb"} {
 		form.Set(field, "0")
 	}
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	saved, e := st.ResourcePolicy(t.Context())
-	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.BodyMiB != 0 || saved.CPUPercent != 0 || saved.MemoryMiB != 0 {
+	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.BodyMB != 0 || saved.CPUPercent != 0 || saved.MemoryMB != 0 {
 		t.Fatal("zero limits did not persist", saved, e)
 	}
 	if s.resourceView(t.Context()).Active != "0 / 不限" {
 		t.Fatal("unlimited concurrency displayed as zero capacity")
 	}
-	if s.resourceView(t.Context()).Memory != "120 MiB / 不限" {
+	if s.resourceView(t.Context()).Memory != "541 MB / 不限" {
 		t.Fatal("unlimited memory displayed as zero capacity")
 	}
 	response, e := client.Get(server.URL + "/admin/system/resources/status")
@@ -156,15 +181,15 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	historyBody, _ := io.ReadAll(historyResponse.Body)
 	historyResponse.Body.Close()
 	var history struct {
-		From          time.Time                      `json:"from"`
-		To            time.Time                      `json:"to"`
-		SampleSeconds int                            `json:"sample_seconds"`
-		Points        []resourcecontrol.HistoryPoint `json:"points"`
+		From          time.Time              `json:"from"`
+		To            time.Time              `json:"to"`
+		SampleSeconds int                    `json:"sample_seconds"`
+		Points        []resourceHistoryPoint `json:"points"`
 	}
-	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMiB != 516 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
+	if e := json.Unmarshal(historyBody, &history); e != nil || historyResponse.StatusCode != 200 || historyResponse.Header.Get("Cache-Control") != "no-store" || len(history.Points) != 1 || history.Points[0].UsedMB != 541.065216 || history.To.Sub(history.From) != time.Hour || time.Since(history.To) > time.Minute || history.SampleSeconds != 10 {
 		t.Fatalf("history did not return the current rolling hour: %s, %v", historyBody, e)
 	}
-	// ESXi changes CPU and host availability/history, but not the suite card.
+	// External host metrics drive CPU, memory protection, availability and history together.
 	s.Cfg.HostMetricsPath = "/data/esxi-metrics.json"
 	host := m
 	host.At, host.CPUPercent, host.HostTotalMiB = time.Now(), 12.2, 24420
@@ -172,18 +197,18 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	host.HostUsedMiB = &hostUsed
 	s.Resources.UpdateMetrics(host, host.At)
 	view := s.resourceView(t.Context())
-	if !view.ESXi || view.CPU != "12.2%" || view.Memory != "120 MiB / 不限" || view.Available != "宿主机可用 10420 / 24420 MiB" {
-		t.Fatal("ESXi display scope mixed with suite memory", view)
+	if !view.ESXi || view.CPU != "12.2%" || view.Memory != "14680 MB / 不限" || view.Available != "宿主机可用 10926 / 25606 MB" {
+		t.Fatal("external whole-machine memory scope is inconsistent", view)
 	}
 	hostPage := getBody(t, client, server.URL+"/admin/system", 200)
-	for _, label := range []string{"宿主机 CPU", "宿主机内存（右轴 MiB）", "服务合计内存"} {
+	for _, label := range []string{"宿主机 CPU", "宿主机内存（右轴 MB）", "宿主机已用内存"} {
 		if !strings.Contains(hostPage, label) {
 			t.Fatal("ESXi labels missing", label)
 		}
 	}
 	s.Cfg.HostMetricsPath = ""
 	limited := saved
-	limited.MemoryMiB = 768
+	limited.MemoryMB = 768
 	s.Resources.SetPolicy(limited)
 	hot := m
 	hot.At, hot.AvailableMiB = time.Now(), 100

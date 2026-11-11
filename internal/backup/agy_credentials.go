@@ -23,11 +23,11 @@ type agyCredentials struct {
 	OAuth          json.RawMessage `json:"oauth,omitempty"`
 	InstallationID string          `json:"installation_id,omitempty"`
 	MaxSessions    int             `json:"max_sessions"`
-	MemoryMiB      int             `json:"memory_mib"`
+	MemoryMB       int             `json:"memory_mb"`
 }
 
 func (a agyCredentials) validate() error {
-	if len(a.Secret) < 32 || len(a.Secret) > 256 || strings.ContainsAny(a.Secret, "\r\n\x00") || a.MaxSessions < 1 || a.MaxSessions > 16 || a.MemoryMiB < 128 || a.MemoryMiB > 4096 || len(a.InstallationID) > 256 || strings.ContainsAny(a.InstallationID, "\r\n\x00") {
+	if len(a.Secret) < 32 || len(a.Secret) > 256 || strings.ContainsAny(a.Secret, "\r\n\x00") || a.MaxSessions < 1 || a.MaxSessions > 16 || a.MemoryMB < 128 || a.MemoryMB > 4096 || len(a.InstallationID) > 256 || strings.ContainsAny(a.InstallationID, "\r\n\x00") {
 		return errors.New("AGY backup data invalid")
 	}
 	if len(a.OAuth) > 0 {
@@ -131,7 +131,7 @@ func snapshotAGY(etc, home, portal string) (*agyCredentials, error) {
 	embedded := false
 	for _, line := range strings.Split(string(data), "\n") {
 		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok || k != "PORTAL_AGY_EMBEDDED" && k != "AGY_MAX_SESSIONS" && k != "AGY_CONTAINER_MEMORY_MIB" {
+		if !ok || k != "PORTAL_AGY_EMBEDDED" && k != "AGY_MAX_SESSIONS" && k != "AGY_CONTAINER_MEMORY_MB" {
 			continue
 		}
 		if seen[k] {
@@ -149,7 +149,7 @@ func snapshotAGY(etc, home, portal string) (*agyCredentials, error) {
 		if k == "AGY_MAX_SESSIONS" {
 			a.MaxSessions = n
 		} else {
-			a.MemoryMiB = n
+			a.MemoryMB = n
 		}
 	}
 	if !embedded || a.validate() != nil {

@@ -38,10 +38,10 @@ func TestHistoryKeepsBriefPeaksAndExpiresWhileIdle(t *testing.T) {
 	}
 }
 
-func TestHostMemoryTrendDoesNotChangeSuiteAdmission(t *testing.T) {
+func TestHostMemoryTrendAndAdmissionUseTheSameMeasurement(t *testing.T) {
 	p := DefaultPolicy()
 	p.Mode = "enforce"
-	p.MemoryMiB = 768
+	p.MemoryMB = 768
 	c := NewController(p)
 	now := time.Now()
 	suite := 120.0
@@ -55,8 +55,8 @@ func TestHostMemoryTrendDoesNotChangeSuiteAdmission(t *testing.T) {
 	if len(points) != 1 || points[0].UsedMiB != 826 {
 		t.Fatalf("history did not use whole-machine memory: %+v", points)
 	}
-	if c.Snapshot().Paused != "" {
-		t.Fatal("whole-machine memory was used for suite admission")
+	if c.Snapshot().Paused != "memory_pressure" {
+		t.Fatal("whole-machine memory did not trigger admission protection")
 	}
 }
 

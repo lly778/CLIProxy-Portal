@@ -24,7 +24,7 @@
     var from = Date.parse(raw.from), to = Date.parse(raw.to);
     if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 3601000 || !Array.isArray(raw.points)) throw new Error("history");
     var points = raw.points.slice(-361).map(function (p) {
-      return {at: Date.parse(p.at), cpu: p.cpu_percent, memory: p.used_mib, total: p.total_mib};
+      return {at: Date.parse(p.at), cpu: p.cpu_percent, memory: p.used_mb, total: p.total_mb};
     }).filter(function (p) {
       return Number.isFinite(p.at) && p.at >= from && p.at <= to && Number.isFinite(p.cpu) && p.cpu >= 0 && p.cpu <= 100 && Number.isFinite(p.memory) && Number.isFinite(p.total) && p.total > 0 && p.memory >= 0 && p.memory <= p.total;
     }).sort(function (a, b) { return a.at - b.at; });
@@ -61,7 +61,7 @@
       var at = document.createElement("time");
       at.dateTime = new Date(p.at).toISOString(); at.textContent = clock(p.at, true) + " · 10 秒峰值";
       var cpu = document.createElement("strong"); cpu.textContent = "CPU " + p.cpu.toFixed(1) + "%";
-      var memory = document.createElement("strong"); memory.textContent = "内存 " + Math.round(p.memory) + " MiB";
+      var memory = document.createElement("strong"); memory.textContent = "内存 " + Math.round(p.memory) + " MB";
       tooltip.replaceChildren(at, cpu, memory); tooltip.hidden = false;
       tooltip.style.left = Math.max(8, Math.min(width - tooltip.offsetWidth - 8, px - tooltip.offsetWidth / 2)) + "px";
     }
@@ -110,7 +110,7 @@
         dots[key] = node("circle", {r: 3.5, "class": "resource-chart-point", visibility: "hidden"});
         group.appendChild(dots[key]); fragment.appendChild(group);
         var peak = points.reduce(function (n, p) { return Math.max(n, p[key]); }, 0);
-        var peakText = points.length ? (key === "cpu" ? peak.toFixed(1) + "%" : Math.round(peak) + " MiB") : "—";
+        var peakText = points.length ? (key === "cpu" ? peak.toFixed(1) + "%" : Math.round(peak) + " MB") : "—";
         card.querySelector('[data-resource-chart-peak="' + key + '"]').textContent = "峰值 " + peakText;
         peakLabels.push((key === "cpu" ? "CPU " : "内存 ") + peakText);
       });

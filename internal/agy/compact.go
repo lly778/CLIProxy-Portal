@@ -407,7 +407,7 @@ func (m *Manager) compactHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))
 	if err != nil || len(b) > MaxBody {
-		WriteError(w, fail(413, "request_too_large", "请求超过 10 MiB 限制"))
+		WriteError(w, fail(413, "request_too_large", "请求超过 10 MB 限制"))
 		return
 	}
 	req, err := parseRequest(b)

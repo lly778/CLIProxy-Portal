@@ -150,7 +150,7 @@ func tick(ctx context.Context, dir, sourcesFile string, now time.Time, newClient
 				s.Message = fmt.Sprintf("正在下载校验远端备份（第 %d/%d 次）：连接附件存储节点", p.Attempt, downloadAttempts)
 			case "transfer":
 				if p.Total > 0 {
-					s.Message = fmt.Sprintf("正在下载校验远端备份：%.1f / %.1f MiB（%.1f%%，第 %d/%d 次）", float64(p.Bytes)/(1<<20), float64(p.Total)/(1<<20), 100*float64(p.Bytes)/float64(p.Total), p.Attempt, downloadAttempts)
+					s.Message = fmt.Sprintf("正在下载校验远端备份：%.1f / %.1f MB（%.1f%%，第 %d/%d 次）", float64(p.Bytes)/(1<<20), float64(p.Total)/(1<<20), 100*float64(p.Bytes)/float64(p.Total), p.Attempt, downloadAttempts)
 				}
 			case "retry":
 				s.Message = fmt.Sprintf("%s；准备第 %d/%d 次下载校验", p.Reason, p.Attempt+1, downloadAttempts)

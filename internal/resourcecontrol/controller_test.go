@@ -47,9 +47,9 @@ func TestZeroIndependentlyDisablesEachLimit(t *testing.T) {
 	p.Mode = "enforce"
 	p.Global = 0
 	p.PerUser = 0
-	p.BodyMiB = 0
+	p.BodyMB = 0
 	p.CPUPercent = 0
-	p.MemoryMiB = 0
+	p.MemoryMB = 0
 	if e := p.Validate(); e != nil {
 		t.Fatal(e)
 	}
@@ -81,7 +81,7 @@ func TestZeroIndependentlyDisablesEachLimit(t *testing.T) {
 	}
 	a.Finish()
 	p.Global = 0
-	p.MemoryMiB = 500
+	p.MemoryMB = 500
 	c.SetPolicy(p)
 	m := goodMetrics(time.Now())
 	m.CPUPercent = 100
@@ -89,7 +89,7 @@ func TestZeroIndependentlyDisablesEachLimit(t *testing.T) {
 	if l, r := c.Acquire("a"); l != nil || r != "memory_pressure" {
 		t.Fatal("memory cap disabled by CPU zero", r)
 	}
-	p.MemoryMiB = 0
+	p.MemoryMB = 0
 	p.CPUPercent = 90
 	c.SetPolicy(p)
 	base := time.Now().Add(time.Second)
@@ -295,12 +295,12 @@ func TestMemoryRecoveryUsesProportionalBufferAndRestartsStableWait(t *testing.T)
 		limit int64
 		want  float64
 	}{{8192, 7782.4}, {768, 729.6}, {500, 468}, {32, 16}} {
-		if got := memoryRecoveryThreshold(tc.limit); math.Abs(got-tc.want) > 0.000001 {
+		if got := memoryRecoveryThreshold(float64(tc.limit)); math.Abs(got-tc.want) > 0.000001 {
 			t.Fatalf("limit %d: recovery threshold %f, want %f", tc.limit, got, tc.want)
 		}
 	}
 	p := DefaultPolicy()
-	p.MemoryMiB = 8192
+	p.MemoryMB = 8192
 	c := NewController(p)
 	base := time.Now().Add(-time.Minute)
 	for _, tc := range []struct {
@@ -311,7 +311,8 @@ func TestMemoryRecoveryUsesProportionalBufferAndRestartsStableWait(t *testing.T)
 		at := base.Add(time.Duration(tc.second) * time.Second)
 		m := goodMetrics(at)
 		m.HostID, m.TotalMiB, m.AvailableMiB = "cpa-suite", 16384, 10000
-		m.SuiteUsedMiB = &tc.used
+		usedMiB := tc.used * 1_000_000 / float64(MiB)
+		m.AvailableMiB = m.TotalMiB - usedMiB
 		c.UpdateMetrics(m, at)
 		if (c.paused != "") != tc.paused {
 			t.Fatalf("second %d, used %f: paused=%q", tc.second, tc.used, c.paused)
@@ -324,7 +325,7 @@ func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 	if p.Validate() != nil {
 		t.Fatal("defaults invalid")
 	}
-	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMiB = -1 }, func(p *Policy) { p.BodyMiB = -1 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
+	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMB = math.NaN() }, func(p *Policy) { p.BodyMB = math.Inf(1) }, func(p *Policy) { p.MemoryMB = -1 }, func(p *Policy) { p.BodyMB = -1 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
 		p = DefaultPolicy()
 		change(&p)
 		if p.Validate() == nil {
@@ -332,12 +333,35 @@ func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestDecimalMBLimitsUseExactBytes(t *testing.T) {
+	p := DefaultPolicy()
+	p.Mode = "enforce"
+	p.CPUPercent, p.MemoryMB = 0, 0
+	p.BodyMB = 10
+	if p.BodyLimitBytes() != 10_000_000 {
+		t.Fatal("decimal request size rounded to a whole MiB")
+	}
+	c := NewController(p)
+	lease, reason := c.AcquireRequest("test", 10_000_000)
+	if lease == nil {
+		t.Fatal("exact 10 MB request rejected", reason)
+	}
+	lease.Finish()
+	if lease, reason := c.AcquireRequest("test", 10_000_001); lease != nil || reason != "request_too_large" {
+		t.Fatal("request above decimal MB limit admitted", reason)
+	}
+	limit := 500.0
+	if got := memoryRecoveryThreshold(limit); math.Abs(got-468) > 0.001 {
+		t.Fatal("fixed recovery buffer is not 32 decimal MB", got)
+	}
+}
 func TestNewMemoryBudgetBlocksAdmissionUsingLatestSample(t *testing.T) {
 	p := DefaultPolicy()
 	c := NewController(p)
 	c.UpdateMetrics(goodMetrics(time.Now()), time.Now())
 	p.Mode = "enforce"
-	p.MemoryMiB = 500
+	p.MemoryMB = 500
 	c.SetPolicy(p)
 	if l, r := c.Acquire("a"); l != nil || r != "memory_pressure" {
 		t.Fatal("changed budget ignored current load", r)

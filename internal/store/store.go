@@ -67,6 +67,10 @@ func Open(path string, registrationOpen bool) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := s.migrateResourcePolicyUnits(context.Background()); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("migrate resource policy units: %w", err)
+	}
 	return s, nil
 }
 

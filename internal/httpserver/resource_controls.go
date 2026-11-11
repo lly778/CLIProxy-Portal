@@ -7,12 +7,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// Convert at the HTTP boundary; persisted metrics and policy retain their unit.
+func resourceMB(mib float64) float64 {
+	return math.Round(mib*float64(resourcecontrol.MiB)) / 1_000_000
+}
+
+type resourceHistoryPoint struct {
+	At         time.Time `json:"at"`
+	CPUPercent float64   `json:"cpu_percent"`
+	UsedMB     float64   `json:"used_mb"`
+	TotalMB    float64   `json:"total_mb"`
+}
 
 func resourceReason(reason string) string {
 	switch reason {
@@ -23,7 +36,7 @@ func resourceReason(reason string) string {
 	case "capture_backlog":
 		return "交互记录待处理过多"
 	case "memory_pressure":
-		return "CPA 套件内存达到上限"
+		return "整机内存达到总上限"
 	case "cpu_pressure":
 		return "CPU 持续繁忙"
 	case "monitor_unavailable":
@@ -73,6 +86,7 @@ func (s *Server) resourceAudit(ctx context.Context, events []resourcecontrol.Eve
 func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	q := s.Resources.Snapshot()
 	v := webui.ResourceView{Policy: q.Policy, Mode: "观察模式", State: "正常", StateClass: "success", CPU: "—", Memory: "—", Available: "等待监测", Active: fmt.Sprintf("%d / %d", q.Active, q.Policy.Global), Processing: strconv.Itoa(q.Processing), Rejected: "—", Observed: "—", Fresh: q.Fresh, Updated: "等待监测"}
+	v.BodyMB, v.MemoryMB = q.Policy.BodyMB, q.Policy.MemoryMB
 	v.ESXi = s.Cfg.HostMetricsPath != ""
 	v.AGYConfigured = s.Keys != nil && s.Keys.AGY != nil
 	if v.AGYConfigured {
@@ -106,17 +120,17 @@ func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 	}
 	if q.Fresh {
 		v.CPU = fmt.Sprintf("%.1f%%", q.Metrics.CPUPercent)
-		v.Memory = fmt.Sprintf("%.0f MiB / 不限", q.Metrics.UsedMiB())
-		if q.Policy.MemoryMiB > 0 {
-			v.Memory = fmt.Sprintf("%.0f / %d MiB", q.Metrics.UsedMiB(), q.Policy.MemoryMiB)
+		v.Memory = fmt.Sprintf("%.0f MB / 不限", q.Metrics.UsedMB())
+		if q.Policy.MemoryMB > 0 {
+			v.Memory = fmt.Sprintf("%.0f / %.0f MB", q.Metrics.UsedMB(), v.MemoryMB)
 		}
-		v.Available = fmt.Sprintf("整机可用 %.0f / %.0f MiB", q.Metrics.AvailableMiB, q.Metrics.TotalMiB)
+		v.Available = fmt.Sprintf("整机可用 %.0f / %.0f MB", q.Metrics.AvailableMB(), q.Metrics.TotalMB())
 		if v.ESXi && q.Metrics.HostUsedMiB != nil {
-			v.Available = fmt.Sprintf("宿主机可用 %.0f / %.0f MiB", q.Metrics.HostTotalMiB-*q.Metrics.HostUsedMiB, q.Metrics.HostTotalMiB)
+			v.Available = fmt.Sprintf("宿主机可用 %.0f / %.0f MB", resourceMB(q.Metrics.HostTotalMiB-*q.Metrics.HostUsedMiB), resourceMB(q.Metrics.HostTotalMiB))
 		}
 		v.Updated = s.formatTime(q.Metrics.At)
-		if q.Policy.MemoryMiB > 0 && float64(q.Policy.MemoryMiB) > q.Metrics.TotalMiB-64 {
-			v.Warning = "内存总上限过高，请至少保留 64 MiB 余量"
+		if q.Policy.MemoryMB > 0 && v.MemoryMB > q.Metrics.TotalMB()-64 {
+			v.Warning = "内存总上限过高，请至少保留 64 MB 余量"
 		}
 	}
 	return v
@@ -136,13 +150,18 @@ func (s *Server) resourceHistory(w http.ResponseWriter, r *http.Request) {
 	if s.Cfg.TimeZone != nil {
 		zone = s.Cfg.TimeZone.String()
 	}
+	history := s.Resources.History(now)
+	points := make([]resourceHistoryPoint, 0, len(history))
+	for _, p := range history {
+		points = append(points, resourceHistoryPoint{At: p.At, CPUPercent: p.CPUPercent, UsedMB: resourceMB(p.UsedMiB), TotalMB: resourceMB(p.TotalMiB)})
+	}
 	_ = json.NewEncoder(w).Encode(struct {
-		From          time.Time                      `json:"from"`
-		To            time.Time                      `json:"to"`
-		TimeZone      string                         `json:"time_zone"`
-		SampleSeconds int                            `json:"sample_seconds"`
-		Points        []resourcecontrol.HistoryPoint `json:"points"`
-	}{now.Add(-resourcecontrol.HistoryWindow), now, zone, int(resourcecontrol.HistoryInterval / time.Second), s.Resources.History(now)})
+		From          time.Time              `json:"from"`
+		To            time.Time              `json:"to"`
+		TimeZone      string                 `json:"time_zone"`
+		SampleSeconds int                    `json:"sample_seconds"`
+		Points        []resourceHistoryPoint `json:"points"`
+	}{now.Add(-resourcecontrol.HistoryWindow), now, zone, int(resourcecontrol.HistoryInterval / time.Second), points})
 }
 func (s *Server) resourceAuthorize(w http.ResponseWriter, r *http.Request) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -180,7 +199,20 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 		}
 		return n
 	}
-	p := resourcecontrol.Policy{Revision: integer("revision"), Mode: r.PostForm.Get("mode"), Global: int(integer("global")), PerUser: int(integer("per_user")), BodyMiB: integer("body_mib"), CPUPercent: decimal("cpu_percent"), MemoryMiB: integer("memory_mib")}
+	// Old open tabs still submit MiB. New forms submit decimal MB, rounded only
+	// to whole bytes so saving an unchanged setting preserves the exact limit.
+	sizeMB := func(name string, maxMB float64) float64 {
+		if _, ok := r.PostForm[name+"_mb"]; !ok {
+			return resourceMB(float64(integer(name + "_mib")))
+		}
+		mb := decimal(name + "_mb")
+		if math.IsNaN(mb) || math.IsInf(mb, 0) || mb < 0 || mb > maxMB || (mb > 0 && mb < 0.000001) {
+			bad = true
+			return 0
+		}
+		return math.Round(mb*1_000_000) / 1_000_000
+	}
+	p := resourcecontrol.Policy{Revision: integer("revision"), Mode: r.PostForm.Get("mode"), Global: int(integer("global")), PerUser: int(integer("per_user")), BodyMB: sizeMB("body", 134.217728), CPUPercent: decimal("cpu_percent"), MemoryMB: sizeMB("memory", 1099511.627776)}
 	if bad {
 		s.resourceRedirect(w, r, "error", "设置格式无效")
 		return
@@ -190,8 +222,8 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m := s.Resources.Snapshot().Metrics
-	if p.MemoryMiB > 0 && m.Fresh(time.Now()) && float64(p.MemoryMiB) > m.TotalMiB-64 {
-		s.resourceRedirect(w, r, "error", "总内存上限过高，请至少保留 64 MiB 余量")
+	if p.MemoryMB > 0 && m.Fresh(time.Now()) && p.MemoryMB > m.TotalMB()-64 {
+		s.resourceRedirect(w, r, "error", "总内存上限过高，请至少保留 64 MB 余量")
 		return
 	}
 	if err := s.Store.SaveResourcePolicy(r.Context(), p); err != nil {
@@ -212,6 +244,6 @@ func (s *Server) resourceSave(w http.ResponseWriter, r *http.Request) {
 	if saved.Mode == "enforce" {
 		mode = "启用保护"
 	}
-	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%d MiB；整机 CPU 上限=%.1f%%；CPA 套件内存上限=%d MiB", mode, saved.Global, saved.PerUser, saved.BodyMiB, saved.CPUPercent, saved.MemoryMiB))
+	s.audit(r, currentUser(r), "resource.policy.update", "资源保护", fmt.Sprintf("模式=%s；全局并发=%d；每用户并发=%d；请求上限=%g MB；整机 CPU 上限=%.1f%%；整机内存上限=%g MB", mode, saved.Global, saved.PerUser, saved.BodyMB, saved.CPUPercent, saved.MemoryMB))
 	s.resourceRedirect(w, r, "msg", "资源保护设置已保存，对后续请求生效")
 }

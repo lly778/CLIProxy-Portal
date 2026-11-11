@@ -123,9 +123,9 @@ func prepareCredentialTargets(restored, dir, keyFile string, p PortalRestorePoli
 		data["agy-portal-secret"] = []byte(v.AGY.Secret + "\n")
 		data["agy-config.json"], _ = json.Marshal(struct {
 			MaxSessions int  `json:"max_sessions"`
-			MemoryMiB   int  `json:"memory_mib"`
+			MemoryMB    int  `json:"memory_mb"`
 			LoggedIn    bool `json:"logged_in"`
-		}{v.AGY.MaxSessions, v.AGY.MemoryMiB, flags.AGYOAuth})
+		}{v.AGY.MaxSessions, v.AGY.MemoryMB, flags.AGYOAuth})
 		if flags.AGYOAuth {
 			data["agy-oauth"] = v.AGY.OAuth
 		}

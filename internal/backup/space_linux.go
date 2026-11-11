@@ -18,7 +18,7 @@ func requireSpace(path string, required int64) error {
 	}
 	available := stat.Bavail * uint64(stat.Bsize)
 	if available < uint64(required) {
-		return fmt.Errorf("磁盘空间不足：至少需要 %.1f MiB 可用，当前仅 %.1f MiB；本次操作已中止", float64(required)/(1<<20), float64(available)/(1<<20))
+		return fmt.Errorf("磁盘空间不足：至少需要 %.1f MB 可用，当前仅 %.1f MB；本次操作已中止", float64(required)/(1<<20), float64(available)/(1<<20))
 	}
 	return nil
 }

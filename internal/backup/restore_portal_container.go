@@ -58,7 +58,7 @@ func (d *dockerPortal) recreatePortal(ctx context.Context) error {
 		service["image"] = "cliproxy-portal-runtime:bookworm"
 		service["build"] = map[string]any{"context": defaultPortalRoot + "/ops/agy", "dockerfile": "Dockerfile.runtime"}
 		service["init"] = true
-		service["mem_limit"] = int64(memory) << 20
+		service["mem_limit"] = int64(memory) * 1_000_000
 		service["volumes"] = []map[string]any{
 			{"type": "bind", "source": defaultPortalRoot + "/secrets/portal_agy_secret", "target": "/run/secrets/portal_agy_secret", "read_only": true},
 			{"type": "bind", "source": "/opt/cliproxy-agy/bin/agy", "target": "/opt/cliproxy-agy/bin/agy", "read_only": true},

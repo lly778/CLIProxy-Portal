@@ -125,7 +125,7 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 		native.Model = agy.Prefix + rule.ID
 	}
 	if size > agy.MaxBody || n > agy.MaxBody {
-		failure(&agy.Error{Status: 413, Code: "request_too_large", Message: "AGY 请求超过 10 MiB 限制"})
+		failure(&agy.Error{Status: 413, Code: "request_too_large", Message: "AGY 请求超过 10 MB 限制"})
 		return true
 	}
 	var payload map[string]json.RawMessage

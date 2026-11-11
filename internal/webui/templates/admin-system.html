@@ -2,21 +2,21 @@
 <div class="page-head"><div><span class="eyebrow">管理中心</span><h1>系统管理</h1><p class="muted">集中查看资源保护、存储占用、系统健康和系统日志。</p></div></div>
 {{if .Error}}<div class="alert danger" role="alert">{{.Error}}</div>{{end}}{{template "flash-notice" .Flash}}
 <section class="section" id="resources" data-resource-panel>
-  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">监测{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 和门户、CPA、CPAMP{{if .Resources.AGYConfigured}}、AGY{{end}} 的合计内存，决定是否接收新模型请求。</p></div><div class="button-row"><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
+  <div class="section-head system-section-head"><div><h2>资源保护</h2><p class="muted small">监测{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 和已用内存，决定是否接收新模型请求。</p></div><div class="button-row"><button class="button secondary" type="button" data-resource-open>设置</button></div></div>
   <div class="alert {{.Resources.StateClass}} resource-limit-alert" data-resource-limit-alert role="alert"{{if eq .Resources.State "正常"}} hidden{{end}}><strong data-resource-field="State">{{.Resources.State}}</strong><p data-resource-field="StateHelp">{{.Resources.StateHelp}}</p></div>
   <div class="resource-metrics">
     <article class="card"><span class="muted small">正在处理的请求</span><strong data-resource-field="Active">{{.Resources.Active}}</strong><span class="muted small">待完成任务 <span data-resource-field="Processing">{{.Resources.Processing}}</span>{{if .Resources.AGYConfigured}}，<span data-resource-field="AGYTasks">{{.Resources.AGYTasks}}</span>{{end}}</span></article>
     <article class="card"><span class="muted small">{{if .Resources.ESXi}}宿主机 CPU{{else}}整机 CPU{{end}}</span><strong data-resource-field="CPU">{{.Resources.CPU}}</strong><span class="muted small">100% 表示占满{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}全部 CPU</span></article>
-    <article class="card"><span class="muted small">服务合计内存</span><strong data-resource-field="Memory">{{.Resources.Memory}}</strong><span class="muted small" data-resource-field="Available">{{.Resources.Available}}</span></article>
-    {{if .Resources.AGYConfigured}}<article class="card"><span class="muted small">AGY 常驻对话</span><strong data-resource-field="AGYResident" title="当前留在内存中的对话数 / 常驻上限">{{.Resources.AGYResident}}</strong><span class="muted small">空闲 30 分钟后转存硬盘</span></article>{{else}}<article class="card"><span class="muted small">近 7 天内的保护记录</span><strong><span data-resource-field="Rejected">{{.Resources.Rejected}}</span> 次拒绝</strong><span class="muted small"><span data-resource-field="Observed">{{.Resources.Observed}}</span> 次观察放行</span></article>{{end}}
+    <article class="card"><span class="muted small">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}已用内存</span><strong data-resource-field="Memory">{{.Resources.Memory}}</strong><span class="muted small" data-resource-field="Available">{{.Resources.Available}}</span></article>
+    {{if .Resources.AGYConfigured}}<article class="card"><span class="muted small">AGY 常驻对话</span><strong data-resource-field="AGYResident" title="当前留在内存中的对话数 / 常驻上限">{{.Resources.AGYResident}}</strong><span class="muted small">空闲 10 分钟后转存硬盘</span></article>{{else}}<article class="card"><span class="muted small">近 7 天内的保护记录</span><strong><span data-resource-field="Rejected">{{.Resources.Rejected}}</span> 次拒绝</strong><span class="muted small"><span data-resource-field="Observed">{{.Resources.Observed}}</span> 次观察放行</span></article>{{end}}
   </div>
   <p class="muted small resource-monitor-status" aria-live="polite">监测更新：<span data-resource-field="Updated">{{.Resources.Updated}}</span> · <span data-resource-field="Mode">{{.Resources.Mode}}</span><span data-resource-poll-status></span></p>
   <div class="resource-history" data-resource-history>
     <div class="resource-history-head"><h3>最近 60 分钟{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}资源趋势</h3><span class="muted small">10 秒峰值 · 15 秒刷新</span></div>
-    <p class="muted small">{{if .Resources.ESXi}}曲线展示物理宿主机的 CPU 和已用内存。{{else}}曲线展示整机的 CPU 和已用内存，已用内存按总内存减可用内存计算。{{end}}内存保护仍按服务合计用量判断。</p>
+    <p class="muted small">{{if .Resources.ESXi}}曲线展示物理宿主机的 CPU 和已用内存。{{else}}曲线展示整机的 CPU 和已用内存，已用内存按总内存减可用内存计算。{{end}}</p>
     <p class="muted small" data-resource-history-status role="status" hidden></p>
     <article class="card resource-chart" data-resource-chart>
-      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存（右轴 MiB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
+      <div class="resource-chart-head"><span class="resource-chart-legend"><span class="resource-chart-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU（左轴 %）<span class="muted small" data-resource-chart-peak="cpu">峰值 —</span></span><span class="resource-chart-legend"><span class="resource-chart-dot resource-chart-memory-dot"></span>{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存（右轴 MB）<span class="muted small" data-resource-chart-peak="memory">峰值 —</span></span></div>
       <div class="resource-chart-stage" tabindex="0" role="group" aria-label="最近六十分钟 CPU 和内存趋势，可用左右方向键查看采样点"><svg class="resource-chart-svg" role="img" aria-label="等待 CPU 和内存监测数据"></svg><span class="resource-chart-empty" data-resource-chart-empty>正在收集监控数据</span><div class="resource-chart-tooltip" role="tooltip" hidden></div></div>
     </article>
     <noscript><p class="muted small">启用 JavaScript 后可查看资源趋势。</p></noscript>
@@ -30,11 +30,11 @@
         <div><label for="resource-mode">运行模式</label><select id="resource-mode" name="mode"><option value="observe" {{if eq .Resources.Policy.Mode "observe"}}selected{{end}}>观察模式 · 记录并放行</option><option value="enforce" {{if eq .Resources.Policy.Mode "enforce"}}selected{{end}}>启用保护 · 超限拒绝</option></select></div>
         <div><label for="resource-global">全局最大并发</label><input id="resource-global" type="number" name="global" value="{{.Resources.Policy.Global}}" min="0" max="128" required></div>
         <div><label for="resource-user">每用户最大并发</label><input id="resource-user" type="number" name="per_user" value="{{.Resources.Policy.PerUser}}" min="0" max="128" required></div>
-        <div><label for="resource-body">单个请求上限（MiB）</label><input id="resource-body" type="number" name="body_mib" value="{{.Resources.Policy.BodyMiB}}" min="0" max="128" required></div>
+        <div><label for="resource-body">单个请求上限（MB）</label><input id="resource-body" type="number" name="body_mb" value="{{.Resources.BodyMB}}" min="0" max="134.217728" step="0.000001" required></div>
         <div><label for="resource-cpu">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
-        <div><label for="resource-memory">服务合计内存使用量上限（MiB）</label><input id="resource-memory" type="number" name="memory_mib" value="{{.Resources.Policy.MemoryMiB}}" min="0" max="1048576" required></div>
+        <div><label for="resource-memory">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存使用量上限（MB）</label><input id="resource-memory" type="number" name="memory_mb" value="{{.Resources.MemoryMB}}" min="0" max="1099511.627776" step="0.000001" required></div>
       </div>
-      <p class="field-help">CPU 按{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}使用率判断，100% 表示全部核心满载。内存统计同一服务资源组中的门户、CPA、CPAMP{{if .Resources.AGYConfigured}} 和 AGY 桥接及常驻 CLI 会话{{end}}，包括该组的缓存及内核开销，并扣除非活跃文件缓存。卡片主数字为已用内存与保护上限，下方为整机可用与总内存。CPU 连续达到上限 15 秒或服务合计内存达到上限时暂停新请求。</p>
+      <p class="field-help">CPU 按{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}使用率判断，100% 表示全部核心满载。内存按整机总内存减可用内存计算，包含所有服务与系统开销；可用内存包含系统估算的可回收缓存。卡片主数字为已用内存与保护上限，下方为整机可用与总内存。CPU 连续达到上限 15 秒或整机已用内存达到上限时暂停新请求。</p>
       <p class="field-help" data-resource-warning>{{.Resources.Warning}}</p>
       <div class="button-row resource-save-actions"><button class="button secondary" type="button" data-resource-close>取消</button><button class="button primary" type="submit">保存设置</button></div>
     </form>

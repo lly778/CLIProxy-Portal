@@ -28,10 +28,10 @@ var agyReleases = map[string]struct{ URL, SHA512 string }{
 func (h hostInstaller) installAGY(ctx context.Context) error {
 	var c struct {
 		MaxSessions int  `json:"max_sessions"`
-		MemoryMiB   int  `json:"memory_mib"`
+		MemoryMB    int  `json:"memory_mb"`
 		LoggedIn    bool `json:"logged_in"`
 	}
-	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMiB < 128 || c.MemoryMiB > 4096 {
+	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMB < 128 || c.MemoryMB > 4096 {
 		return errors.New("AGY 恢复配置无效")
 	}
 	if _, err := privateAGYFile(h.path(agySecretPath), true); err != nil {
@@ -84,7 +84,7 @@ func (h hostInstaller) installAGY(ctx context.Context) error {
 			return err
 		}
 	}
-	data := fmt.Sprintf("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=%d\nAGY_CONTAINER_MEMORY_MIB=%d\n", c.MaxSessions, c.MemoryMiB)
+	data := fmt.Sprintf("PORTAL_AGY_EMBEDDED=true\nAGY_MAX_SESSIONS=%d\nAGY_CONTAINER_MEMORY_MB=%d\n", c.MaxSessions, c.MemoryMB)
 	if err = h.write("/etc/cliproxy-agy/runtime.env", []byte(data), 0600, false); err != nil {
 		return err
 	}
@@ -105,15 +105,15 @@ func (h hostInstaller) prepareAGYHost(ctx context.Context) error {
 func (h hostInstaller) agyContainerLimits() (int, int, error) {
 	var c struct {
 		MaxSessions int `json:"max_sessions"`
-		MemoryMiB   int `json:"memory_mib"`
+		MemoryMB    int `json:"memory_mb"`
 	}
 	if _, err := os.Lstat(h.path(agyConfigPath)); errors.Is(err, os.ErrNotExist) {
 		return 3, 1024, nil
 	}
-	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMiB < 128 || c.MemoryMiB > 4096 {
+	if readDeploymentSnapshot(h.path(agyConfigPath), &c) != nil || c.MaxSessions < 1 || c.MaxSessions > 16 || c.MemoryMB < 128 || c.MemoryMB > 4096 {
 		return 0, 0, errors.New("AGY 容器资源配置无效")
 	}
-	return c.MaxSessions, c.MemoryMiB, nil
+	return c.MaxSessions, c.MemoryMB, nil
 }
 
 func (h hostInstaller) installOfficialAGY(ctx context.Context) error {
