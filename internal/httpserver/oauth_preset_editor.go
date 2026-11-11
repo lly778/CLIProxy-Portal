@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -167,6 +168,9 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		}
 		channels = append(channels, channel)
 	}
+	sort.SliceStable(channels, func(i, j int) bool {
+		return service.UpstreamChannelLess(channels[i].Channel, channels[j].Channel)
+	})
 	notice := ""
 	if catalogChanged {
 		notice = "模型目录已更新：新增模型默认关闭，已移除模型不再保存。请核对后保存。"

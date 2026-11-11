@@ -50,13 +50,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		v.Notice = "用量数据暂时不可用"
 	}
-	if models, e := s.Keys.Models(upstreamCtx); e == nil {
-		for i, m := range models {
-			if i >= 6 {
-				break
-			}
-			v.Models = append(v.Models, webui.ModelView{Name: m.ID, Provider: m.OwnedBy, Available: true})
-		}
+	models, _ := s.Keys.Models(upstreamCtx)
+	models, _ = s.Keys.WithAGYVisibleModels(upstreamCtx, u.ID, models)
+	for _, m := range models {
+		v.Models = append(v.Models, webui.ModelView{Name: m.ID, Provider: m.OwnedBy, Available: true})
 	}
 	_ = s.UI.Render(w, webui.PageDashboard, v)
 }
@@ -377,12 +374,7 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 		items, err = s.Keys.VisibleModels(cpamp.WithUpstreamReadCache(r.Context()), items)
 	}
 	if err == nil {
-		additional, agyErr := s.Keys.AGYVisibleModels(r.Context(), u.ID)
-		if agyErr != nil {
-			err = agyErr
-		} else {
-			items = append(items, additional...)
-		}
+		items, err = s.Keys.WithAGYVisibleModels(r.Context(), u.ID, items)
 	}
 	s.renderModels(w, r, items, err)
 }
@@ -478,7 +470,7 @@ func (s *Server) renderModels(w http.ResponseWriter, r *http.Request, items []cp
 		if left == right {
 			return strings.ToLower(items[i].OwnedBy) < strings.ToLower(items[j].OwnedBy)
 		}
-		return left < right
+		return service.ModelIDLess(left, right)
 	})
 	for _, m := range items {
 		view := webui.ModelView{Name: m.ID, Provider: m.OwnedBy, Available: true, UpdatedAt: v.CheckedAt}

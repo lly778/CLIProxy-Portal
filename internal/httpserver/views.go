@@ -571,6 +571,10 @@ func (s *Server) quotaPoolView(pool service.UpstreamQuotaPool, csrfToken, return
 }
 
 func (s *Server) quotaPoolsView(pools []service.UpstreamQuotaPool, csrfToken, returnTo string) webui.QuotaPoolView {
+	pools = append([]service.UpstreamQuotaPool(nil), pools...)
+	sort.SliceStable(pools, func(i, j int) bool {
+		return service.UpstreamChannelLess(pools[i].Provider, pools[j].Provider)
+	})
 	v := webui.QuotaPoolView{}
 	for _, pool := range pools {
 		provider := s.quotaPoolView(pool, csrfToken, returnTo)

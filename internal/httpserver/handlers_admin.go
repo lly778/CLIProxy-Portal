@@ -729,6 +729,7 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 	if !selectedFound {
 		channels = append(channels, channel)
 	}
+	sort.SliceStable(channels, func(i, j int) bool { return service.UpstreamChannelLess(channels[i], channels[j]) })
 	for _, value := range channels {
 		if value == channel {
 			panel := v

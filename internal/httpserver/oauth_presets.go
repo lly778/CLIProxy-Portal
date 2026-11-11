@@ -73,6 +73,9 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 		row := webui.OAuthPresetView{ID: preset.ID, Name: preset.Name, UpdatedAt: s.formatTime(preset.UpdatedAt), Summary: "预设内容无法解析"}
 		if json.Unmarshal([]byte(preset.Payload), &snapshot) == nil && service.ValidateOAuthPresetFormat(snapshot) == nil {
 			row.Applied = currentErr == nil && service.OAuthPresetSnapshotsEqual(current, snapshot)
+			sort.SliceStable(snapshot.Channels, func(i, j int) bool {
+				return service.UpstreamChannelLess(snapshot.Channels[i].Channel, snapshot.Channels[j].Channel)
+			})
 			enabled, total, aliases, caps, visibleChannels := 0, 0, 0, 0, 0
 			for _, entry := range snapshot.Channels {
 				if present != nil && !present[entry.Channel] {

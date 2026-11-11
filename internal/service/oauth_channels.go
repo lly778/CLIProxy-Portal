@@ -176,7 +176,7 @@ func (k *Keys) readOAuthChannels(ctx context.Context, strict bool) ([]string, er
 			others = append(others, channel)
 		}
 	}
-	sort.Strings(others)
+	sort.Slice(others, func(i, j int) bool { return UpstreamChannelLess(others[i], others[j]) })
 	return append(channels, others...), nil
 }
 

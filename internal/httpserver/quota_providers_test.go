@@ -43,6 +43,28 @@ func TestSharedQuotaProvidersRenderTogether(t *testing.T) {
 	}
 }
 
+func TestQuotaProviderOrderMatchesUpstreamGroups(t *testing.T) {
+	s := &Server{Keys: service.NewKeys(nil, nil), Cfg: config.Config{TimeZone: time.UTC}}
+	pools := []service.UpstreamQuotaPool{
+		{Provider: "Antigravity CLI（ACP）", TotalAccounts: 1},
+		{Provider: "Antigravity", TotalAccounts: 1},
+		{Provider: "Codex", TotalAccounts: 1},
+	}
+	v := s.quotaPoolsView(pools, "csrf", "/dashboard")
+	want := []string{"Codex", "Antigravity", "Antigravity CLI（ACP）"}
+	if len(v.Providers) != len(want) {
+		t.Fatalf("providers: %+v", v.Providers)
+	}
+	for i, provider := range v.Providers {
+		if provider.Provider != want[i] {
+			t.Fatalf("provider %d: %q, want %q", i, provider.Provider, want[i])
+		}
+	}
+	if pools[0].Provider != "Antigravity CLI（ACP）" {
+		t.Fatal("view mutated the shared source snapshot")
+	}
+}
+
 func TestSharedQuotaNativeWindowLabelsAreLocalized(t *testing.T) {
 	s := &Server{Keys: service.NewKeys(nil, nil), Cfg: config.Config{TimeZone: time.UTC}}
 	v := s.quotaPoolsView([]service.UpstreamQuotaPool{{Provider: "Antigravity", TotalAccounts: 1,

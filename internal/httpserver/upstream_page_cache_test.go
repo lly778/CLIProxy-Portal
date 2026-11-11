@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"cliproxy-portal/internal/agy"
 	"cliproxy-portal/internal/config"
 	"cliproxy-portal/internal/cpamp"
 	"cliproxy-portal/internal/domain"
@@ -50,7 +51,7 @@ func TestOverviewAndModelPagesShareConfigurationButKeepKeyChecksLive(t *testing.
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-cache","owned_by":"openai"},{"id":"hidden-alias","owned_by":"openai"}]}`)
+			_, _ = io.WriteString(w, `{"data":[{"id":"gpt-cache","owned_by":"openai"},{"id":"gpt-extra-1"},{"id":"gpt-extra-2"},{"id":"gpt-extra-3"},{"id":"gpt-extra-4"},{"id":"gpt-extra-5"},{"id":"gpt-extra-6"},{"id":"hidden-alias","owned_by":"openai"}]}`)
 		case "/v0/management/monitoring/analytics":
 			_, _ = io.WriteString(w, `{"summary":{"total_calls":0,"total_tokens":0},"events":{"items":[],"total_count":0},"api_key_stats":[],"timeline":[]}`)
 		case "/v1/chat/completions":
@@ -89,6 +90,27 @@ func TestOverviewAndModelPagesShareConfigurationButKeepKeyChecksLive(t *testing.
 		t.Fatal(err)
 	}
 	keys := service.NewKeys(st, api)
+	if err := st.SaveAGYSettings(t.Context(), agy.Settings{Models: []agy.Model{{ID: "gemini"}, {ID: "disabled"}}, Rules: []agy.ModelRule{{ID: "gemini", Enabled: true}, {ID: "disabled"}}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reads["worker "+r.URL.Path]++
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/internal/account":
+			_, _ = io.WriteString(w, `{"logged_in":true}`)
+		case "/internal/quota":
+			_, _ = io.WriteString(w, `{"account":{"logged_in":true}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer worker.Close()
+	keys.AGY, err = agy.NewClient(worker.URL, strings.Repeat("s", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
 	s, err := New(config.Config{CookieName: "portal_session", TimeZone: time.UTC, CPAAPIBaseURL: upstream.URL}, st, accounts, keys, secret, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -106,12 +128,23 @@ func TestOverviewAndModelPagesShareConfigurationButKeepKeyChecksLive(t *testing.
 			if !strings.Contains(body, "gpt-cache") || strings.Contains(body, "hidden-alias") {
 				t.Fatalf("page %s lost its catalog or exposed a hidden alias", page)
 			}
+			if page == "/dashboard" || page == "/models" {
+				if !strings.Contains(body, "gpt-extra-6") || !strings.Contains(body, "agy/gemini") || strings.Contains(body, "agy/disabled") {
+					t.Fatalf("page %s truncated available models or included a disabled ACP model", page)
+				}
+				if strings.LastIndex(body, "gpt-extra-6") > strings.LastIndex(body, "agy/gemini") {
+					t.Fatalf("page %s placed ACP before CPA", page)
+				}
+			}
 			if page == "/models" {
 				csrf = extract(t, body, `name="csrf_token" value="([^"]+)"`)
 			}
 		}
 	}
 	mu.Lock()
+	if reads["worker /internal/account"] != 1 {
+		t.Errorf("account presence was not shared across pages: %d reads", reads["worker /internal/account"])
+	}
 	for _, path := range []string{"/v0/management/oauth-model-alias", "/v0/management/oauth-excluded-models", "/v0/management/model-definitions/codex"} {
 		if reads["GET "+path] != 1 {
 			t.Errorf("cross-page configuration was fetched %d times: %s", reads["GET "+path], path)

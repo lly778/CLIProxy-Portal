@@ -116,6 +116,26 @@ func (k *Keys) AGYVisibleModels(ctx context.Context, userID string) ([]cpamp.Mod
 	return out, nil
 }
 
+// WithAGYVisibleModels augments an already-filtered CPA catalog. Both account
+// pages share the same visibility and account cache, without fetching the full
+// administrative catalog or repeating CPA reads.
+func (k *Keys) WithAGYVisibleModels(ctx context.Context, userID string, models []cpamp.Model) ([]cpamp.Model, error) {
+	additional, err := k.AGYVisibleModels(ctx, userID)
+	out := make([]cpamp.Model, 0, len(models)+len(additional))
+	seen := make(map[string]bool, cap(out))
+	for _, list := range [][]cpamp.Model{models, additional} {
+		for _, model := range list {
+			key := strings.ToLower(strings.TrimSpace(model.ID))
+			if key != "" && !seen[key] {
+				seen[key] = true
+				out = append(out, model)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return ModelIDLess(out[i].ID, out[j].ID) })
+	return out, err
+}
+
 func (k *Keys) agyAccount(ctx context.Context) (agy.Account, error) {
 	if k.AGY == nil {
 		return agy.Account{}, nil

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -109,6 +110,7 @@ func (s *Server) adminClientModelCatalog(w http.ResponseWriter, r *http.Request)
 			ids = append(ids, model.ID)
 		}
 	}
+	sort.SliceStable(ids, func(i, j int) bool { return service.ModelIDLess(ids[i], ids[j]) })
 	clientConfigJSON(w, http.StatusOK, map[string]any{"models": ids})
 }
 

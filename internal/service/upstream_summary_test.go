@@ -54,6 +54,9 @@ func TestAGYEnabledUpstreamsSharesAccountAndModelsWithoutCPARegistration(t *test
 		if err != nil || len(rows) != 3 {
 			t.Fatalf("missing CLI source: %+v %v", rows, err)
 		}
+		if rows[0].Channel != "codex" || rows[1].Channel != "antigravity" || rows[2].Channel != "agy" {
+			t.Fatalf("inconsistent provider order: %+v", rows)
+		}
 		found := false
 		for _, v := range rows {
 			if v.Channel == "agy" {

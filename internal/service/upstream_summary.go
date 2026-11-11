@@ -61,7 +61,7 @@ func (k *Keys) EnabledUpstreams(ctx context.Context) ([]EnabledUpstream, error) 
 	for channel := range counts {
 		channels = append(channels, channel)
 	}
-	sort.Strings(channels)
+	sort.Slice(channels, func(i, j int) bool { return UpstreamChannelLess(channels[i], channels[j]) })
 	rows := make([]EnabledUpstream, 0, len(channels))
 	for _, channel := range channels {
 		row := EnabledUpstream{Channel: channel, Accounts: counts[channel]}

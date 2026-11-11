@@ -185,7 +185,7 @@ func (k *Keys) readClientModelCatalog(ctx context.Context) ([]ClientCatalogModel
 		add(m.ID)
 		setLevels(m.ID, m.SupportedReasoningLevels)
 	}
-	sort.Slice(models, func(i, j int) bool { return strings.ToLower(models[i].ID) < strings.ToLower(models[j].ID) })
+	sort.Slice(models, func(i, j int) bool { return ModelIDLess(models[i].ID, models[j].ID) })
 	return models, nil
 }
 
