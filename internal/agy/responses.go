@@ -280,10 +280,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				out.fail(fail(409, "waiting_for_tools", "AGY 正在等待完整工具结果"))
 				return
 			}
-			if err := m.checkpointRequest(s, req, fps); err != nil {
-				out.fail(err)
-				return
-			}
+			rememberRequest(s, req, fps)
 			m.startUsage(s)
 			m.startPrompt(s, blocks)
 		}
@@ -331,15 +328,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s.reported = map[string]reportedTool{}
 		s.last = time.Now()
 		s.mu.Unlock()
-		// Mark the upcoming native turn as interrupted/recoverable before it
-		// starts, retaining the exact input without claiming a completed result.
-		if err := m.checkpointRequest(s, req, fps); err != nil {
-			s.mu.Lock()
-			s.running = false
-			s.mu.Unlock()
-			out.fail(err)
-			return
-		}
+		rememberRequest(s, req, fps)
 		s.mu.Lock()
 		s.tools, s.loadedTools, s.toolHash = nextTools, loaded, toolHash
 		s.policy = policy
@@ -442,10 +431,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if len(blocks) > 0 {
-					if err := m.checkpointRequest(s, req, fps); err != nil {
-						out.fail(err)
-						return
-					}
+					rememberRequest(s, req, fps)
 					m.startPrompt(s, blocks)
 					continue
 				}
@@ -472,7 +458,6 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					m.remember(s, out)
-					_ = m.preserveSession(s, nil)
 					completed = true
 					return
 				}
@@ -499,7 +484,6 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				s.mu.Lock()
 				s.pending = map[string]*pendingTool{}
 				s.mu.Unlock()
-				_ = m.saveSession(s, true)
 				completed = true
 				return
 			}
@@ -513,7 +497,6 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			s.last = time.Now()
 			s.mu.Unlock()
 			m.remember(s, out)
-			_ = m.preserveSession(s, nil)
 			completed = true
 			return
 		case <-idle.C:

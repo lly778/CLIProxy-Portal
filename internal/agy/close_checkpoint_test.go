@@ -43,14 +43,14 @@ func TestAGYInterruptedGenerationPreservesRetryChainAndPartialOutput(t *testing.
 	}
 }
 
-func TestAGYWaitingCheckpointIsDurableBeforeItsTenMinuteEviction(t *testing.T) {
+func TestAGYWaitingCheckpointIsEncryptedWhenRemovedFromMemory(t *testing.T) {
 	m, s, _, _ := waitingCacheFixture(t)
-	if err := m.preserveSession(s, nil); err != nil {
+	if err := m.archiveWaitingSession(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
 	cold, err := m.disk.find("owner", request{Previous: "previous"}, nil)
 	if err != nil || cold == nil || cold.pending["call-once"] == nil || cold.interrupted {
-		t.Fatal("waiting checkpoint cannot survive interruption before eviction", err)
+		t.Fatal("removed tool wait lost its recovery state", err)
 	}
 	var payload []byte
 	if err := m.disk.db.QueryRow(`SELECT payload FROM sessions WHERE id=?`, s.ID).Scan(&payload); err != nil || strings.Contains(string(payload), "write once") {

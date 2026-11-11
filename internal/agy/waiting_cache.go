@@ -122,8 +122,8 @@ func closingCheckpoint(s *session, out *response) savedSession {
 	return v
 }
 
-// Best effort on abnormal exits; on ordinary tool-delivery boundaries this
-// also makes the result waiter durable before any later process interruption.
+// Persist only when leaving memory: eviction, abnormal closure, explicit stop,
+// or graceful shutdown. Ordinary generation and tool handoffs stay in memory.
 func (m *Manager) preserveSession(s *session, out *response) error {
 	if m.disk == nil || s.internal || s.ID == "" {
 		return nil
@@ -139,7 +139,7 @@ func (m *Manager) preserveSession(s *session, out *response) error {
 	return err
 }
 
-func (m *Manager) checkpointRequest(s *session, req request, fingerprints []string) error {
+func rememberRequest(s *session, req request, fingerprints []string) {
 	s.mu.Lock()
 	s.running = true
 	s.history = append([]string(nil), fingerprints...)
@@ -150,10 +150,6 @@ func (m *Manager) checkpointRequest(s *session, req request, fingerprints []stri
 		s.responses[req.Previous] = false
 	}
 	s.mu.Unlock()
-	// Save an explicitly interrupted/recoverable checkpoint instead of simply
-	// invalidating the previous one. Even a crash before the next prompt keeps
-	// the authoritative input; it is never mistaken for native completion.
-	return m.preserveSession(s, nil)
 }
 
 // The caller holds requestMu: no client response/result may race this checkpoint.

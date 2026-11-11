@@ -550,6 +550,15 @@ func (m *Manager) restoreSession(ctx context.Context, s *session, r request) (*s
 		m.drop(s)
 		return nil, err
 	}
+	// A loaded native session can advance beyond the archived wire history.
+	// Invalidate that old recovery point once on load; do not rewrite the full
+	// session after every generation. The next removal saves current state.
+	if m.disk != nil {
+		if _, err = m.disk.db.Exec(`UPDATE sessions SET ready=0 WHERE id=?`, s.ID); err != nil {
+			m.drop(s)
+			return nil, fail(503, "session_cache_unavailable", "AGY 恢复索引暂时无法更新")
+		}
+	}
 	return s, nil
 }
 
