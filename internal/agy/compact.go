@@ -396,6 +396,10 @@ func modelProgress(w http.ResponseWriter) func() {
 }
 
 func (m *Manager) compactHTTP(w http.ResponseWriter, r *http.Request) {
+	m.replayResponse(w, r, m.executeCompactHTTP)
+}
+
+func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
 		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))

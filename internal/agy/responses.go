@@ -35,6 +35,7 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("POST /internal/account/cancel", m.loginCancelHTTP)
 	mux.HandleFunc("POST /internal/account/logout", m.logoutHTTP)
 	mux.HandleFunc("POST /internal/cancel", func(w http.ResponseWriter, r *http.Request) {
+		_ = m.stopResponseReplays(false)
 		m.mu.Lock()
 		all := []*session{}
 		for _, s := range m.sessions {
@@ -60,6 +61,10 @@ func (m *Manager) Handler() http.Handler {
 	})
 }
 func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
+	m.replayResponse(w, r, m.executeResponsesHTTP)
+}
+
+func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
 		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))

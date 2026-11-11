@@ -20,6 +20,7 @@ func (s *Store) migrateAGY(ctx context.Context) error {
  input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL,cached_tokens INTEGER NOT NULL,reasoning_tokens INTEGER NOT NULL,total_tokens INTEGER NOT NULL,usage_known INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS idx_agy_request_time ON agy_requests(started_ms DESC,id DESC);
  CREATE INDEX IF NOT EXISTS idx_agy_request_key ON agy_requests(key_hash,started_ms DESC,id DESC);
+ CREATE INDEX IF NOT EXISTS idx_agy_request_response ON agy_requests(key_hash,response_id) WHERE response_id<>'';
  CREATE TABLE IF NOT EXISTS agy_usage_minutes (
  minute_ms INTEGER NOT NULL,key_hash TEXT NOT NULL,model TEXT NOT NULL,calls INTEGER NOT NULL,success INTEGER NOT NULL,failures INTEGER NOT NULL,
  input_tokens INTEGER NOT NULL,output_tokens INTEGER NOT NULL,cached_tokens INTEGER NOT NULL,reasoning_tokens INTEGER NOT NULL,total_tokens INTEGER NOT NULL,unknown_usage INTEGER NOT NULL,total_duration_ms INTEGER NOT NULL,last_seen_ms INTEGER NOT NULL,
@@ -37,6 +38,18 @@ func saveAGYUsage(ctx context.Context, tx *sql.Tx, row GatewayRequestTiming) err
 	status := row.StatusCode
 	if status == 0 {
 		status = 502
+	}
+	// A replay is still an HTTP attempt, but re-delivering the same response
+	// must not count its model tokens twice. This indexed check is in the same
+	// write transaction as the request and minute aggregate updates.
+	if u.Known && v.ResponseID != "" {
+		var recorded bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agy_requests WHERE key_hash=? AND response_id=? AND response_id<>'' AND usage_known=1)`, row.APIKeyHash, v.ResponseID).Scan(&recorded); err != nil {
+			return err
+		}
+		if recorded {
+			u = agy.Usage{Known: true}
+		}
 	}
 	result, e := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agy_requests(timing_id,user_id,key_hash,started_ms,ended_ms,model,requested_model,effort,response_id,status,failed,reason,duration_ms,input_tokens,output_tokens,cached_tokens,reasoning_tokens,total_tokens,usage_known) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, row.ID, row.UserID, row.APIKeyHash, row.StartedAt.UnixMilli(), row.EndedAt.UnixMilli(), v.Model, v.Requested, v.Effort, v.ResponseID, status, failed, row.FailureReason, row.TotalMS, u.Input, u.Output, u.Cache, u.Reasoning, u.Total, u.Known)
 	if e != nil {

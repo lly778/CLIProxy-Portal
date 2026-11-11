@@ -74,6 +74,7 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(last_ms)`,
 		`CREATE TABLE IF NOT EXISTS responses (owner TEXT NOT NULL, response TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, PRIMARY KEY(owner,response))`,
 		`CREATE INDEX IF NOT EXISTS responses_session ON responses(session_id)`,
+		`CREATE TABLE IF NOT EXISTS response_replays (key TEXT PRIMARY KEY, expires_ms INTEGER NOT NULL, payload BLOB NOT NULL)`,
 	} {
 		if _, err = db.Exec(statement); err != nil {
 			_ = db.Close()
@@ -101,6 +102,9 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 	}
 	if err == nil {
 		err = d.upgradeHistoryIndex()
+	}
+	if err == nil {
+		_, err = db.Exec(`DELETE FROM response_replays WHERE expires_ms<?`, time.Now().UnixMilli())
 	}
 	if err == nil {
 		var count int64

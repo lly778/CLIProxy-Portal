@@ -30,6 +30,18 @@ type Client struct {
 }
 
 type progressContextKey struct{}
+type requestIdentityContextKey struct{}
+
+// Forward only retry identity fields, never caller authentication or arbitrary headers.
+func WithRequestIdentity(ctx context.Context, headers http.Header) context.Context {
+	identity := make(http.Header)
+	for _, name := range []string{"Idempotency-Key", "X-Client-Request-Id", "Session_id", "Conversation_id", "X-Codex-Turn-Metadata"} {
+		if value := headers.Get(name); len(value) <= 4096 {
+			identity.Set(name, value)
+		}
+	}
+	return context.WithValue(ctx, requestIdentityContextKey{}, identity)
+}
 
 func WithModelProgress(ctx context.Context, progress func()) context.Context {
 	return context.WithValue(ctx, progressContextKey{}, progress)
@@ -101,6 +113,11 @@ func (c *Client) Request(ctx context.Context, method, path, owner string, body i
 	}
 	r.Header.Set("Authorization", "Bearer "+c.secret)
 	r.Header.Set("Content-Type", "application/json")
+	if identity, ok := ctx.Value(requestIdentityContextKey{}).(http.Header); ok && (path == "/internal/responses" || path == "/internal/compact") {
+		for name, values := range identity {
+			r.Header[name] = append([]string(nil), values...)
+		}
+	}
 	if path == "/internal/responses" {
 		if base := publicImageBase(c.ImageBaseURL); base != "" {
 			r.Header.Set("X-Portal-Image-Base-URL", base)

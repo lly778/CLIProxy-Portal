@@ -97,6 +97,9 @@ type Manager struct {
 	cancel           context.CancelFunc
 	summarizeTest    func(context.Context, string, []any, func()) (string, error)
 	checkpointCache  map[string]checkpointCacheEntry
+	replayMu         sync.Mutex
+	replays          map[string]*responseReplay
+	replayGeneration uint64
 }
 
 func NewManager(cfg RuntimeConfig) (*Manager, error) {
@@ -160,6 +163,7 @@ func prepareHome(home string) error {
 }
 func (m *Manager) Close() {
 	m.cancel()
+	m.stopResponseReplays(false)
 	_ = m.mcpServer.Close()
 	m.mu.Lock()
 	p := m.proc
@@ -229,6 +233,17 @@ func (m *Manager) Status() Status {
 		s.State = "connected"
 		s.Ready = true
 	}
+	m.replayMu.Lock()
+	active := 0
+	for _, replay := range m.replays {
+		replay.mu.Lock()
+		if !replay.done {
+			active++
+		}
+		replay.mu.Unlock()
+	}
+	m.replayMu.Unlock()
+	s.ActiveSessions = max(s.ActiveSessions, active)
 	return s
 }
 func (m *Manager) Discover(ctx context.Context) ([]Model, error) {

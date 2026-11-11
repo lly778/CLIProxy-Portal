@@ -253,6 +253,9 @@ func (m *Manager) finishLogin(ctx context.Context, owner, id, raw string) (Accou
 	return account, nil
 }
 func (m *Manager) resetAccountSessions() error {
+	if err := m.clearResponseReplays(); err != nil {
+		return err
+	}
 	if m.disk != nil {
 		tx, err := m.disk.db.Begin()
 		if err != nil {

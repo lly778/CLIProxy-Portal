@@ -52,3 +52,33 @@ func TestAGYUsageBoundariesAndKeyIsolation(t *testing.T) {
 		t.Fatal("AGY requests entered CPA failure reconciliation")
 	}
 }
+
+func TestAGYReplayedResponseCountsTokensOncePerKey(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "portal.db"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	base := time.Now().UTC().Truncate(time.Minute)
+	for i, key := range []string{"key-a", "key-a", "key-b"} {
+		at := base.Add(time.Duration(i) * time.Second)
+		row := GatewayRequestTiming{ID: time.Duration(i).String(), UserID: "owner", APIKeyHash: key, StartedAt: at, EndedAt: at.Add(time.Second), TotalMS: 1000, Completed: true, StatusCode: 200,
+			AGY: &AGYUsage{Model: "agy/model", Requested: "agy/model", ResponseID: "resp-original", Usage: agy.Usage{Known: true, Input: 100, Output: 20, Total: 120}}}
+		if err := s.SaveGatewayRequestTiming(t.Context(), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range []string{"key-a", "key-b"} {
+		rows, err := s.AGYAggregates(t.Context(), base.UnixMilli(), base.Add(time.Minute).UnixMilli(), []string{key})
+		if err != nil || len(rows) != 1 || rows[0].Total != 120 {
+			t.Fatalf("replayed response duplicated or crossed key usage: %s %+v %v", key, rows, err)
+		}
+		wantCalls := int64(1)
+		if key == "key-a" {
+			wantCalls = 2
+		}
+		if rows[0].Calls != wantCalls {
+			t.Fatal("HTTP attempt count changed while deduplicating model tokens")
+		}
+	}
+}

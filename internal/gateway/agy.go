@@ -181,7 +181,7 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 	if r.URL.Path == "/v1/responses/compact" {
 		workerPath = "/internal/compact"
 	}
-	ctx := agy.WithModelProgress(r.Context(), func() {
+	ctx := agy.WithModelProgress(agy.WithRequestIdentity(r.Context(), r.Header), func() {
 		if watch := idleWatch(r); watch != nil {
 			watch.progress()
 		}
@@ -192,6 +192,9 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 		return true
 	}
 	defer resp.Body.Close()
+	if mode := resp.Header.Get("X-Portal-AGY-Replay"); g.logger != nil && (mode == "running" || mode == "completed") {
+		g.logger.Info("AGY response reused", "delivery", mode)
+	}
 	if m != nil {
 		m.upstreamResponse(resp)
 		m.mu.Lock()
