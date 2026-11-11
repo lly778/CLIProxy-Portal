@@ -14,8 +14,9 @@ import (
 )
 
 // The official CLI stores completed model generations as step_type=15,
-// status=3, with ModelUsageStats in metadata field 9. Terminal agent errors are
-// step_type=17, even when ACP reports end_turn. Read only new usage metadata
+// status=3, with ModelUsageStats in metadata field 9. Agent errors are
+// step_type=17; the official agent may recover and generate usable output later.
+// An unrecovered error still overrides ACP end_turn. Read only new usage metadata
 // and bounded error payloads, never prompts or full conversation histories.
 type nativeUsageReader struct{ db *sql.DB }
 
@@ -180,6 +181,7 @@ func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int6
 	defer rows.Close()
 	var total Usage
 	var usageError error
+	var outcomeError error
 	cursor, calls := after, 0
 	for rows.Next() {
 		var idx int64
@@ -189,7 +191,8 @@ func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int6
 			return Usage{}, after, 0, err
 		}
 		if kind == 17 {
-			return Usage{}, after, 0, nativeAgentFailure(payload)
+			outcomeError = nativeAgentFailure(payload)
+			continue
 		}
 		if len(metadata) > 1<<20 || calls >= 2048 {
 			return Usage{}, after, 0, errors.New("usage batch exceeds bound")
@@ -200,6 +203,12 @@ func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int6
 			// absent or malformed. Usage availability must not hide failure.
 			usageError = e
 			continue
+		}
+		// Thinking alone is not recovery: it is exactly how an empty-output
+		// generation can still report output tokens. Only later completed,
+		// non-reasoning output can supersede an earlier agent error.
+		if v.Output > v.Reasoning {
+			outcomeError = nil
 		}
 		if total.Total > math.MaxInt64-v.Total {
 			return Usage{}, after, 0, errors.New("usage batch overflow")
@@ -213,10 +222,16 @@ func (r *nativeUsageReader) after(ctx context.Context, after int64) (Usage, int6
 		cursor = idx
 		calls++
 	}
+	if err := rows.Err(); err != nil {
+		return Usage{}, after, 0, err
+	}
+	if outcomeError != nil {
+		return Usage{}, after, 0, outcomeError
+	}
 	if usageError != nil {
 		return Usage{}, after, 0, usageError
 	}
-	return total, cursor, calls, rows.Err()
+	return total, cursor, calls, nil
 }
 
 // Native payloads can contain headers and request details. Only return a fixed

@@ -86,3 +86,62 @@ func TestAGYNativeErrorDiagnosticsAreBoundedAndSanitized(t *testing.T) {
 		}
 	}
 }
+
+func TestAGYNativeRecoveredErrorDoesNotFailCompletedTurn(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "agy", "conversations")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "recovered-empty-output"
+	db, err := sql.Open("sqlite", filepath.ToSlash(filepath.Join(dir, id+".db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec(`CREATE TABLE steps(idx INTEGER PRIMARY KEY,step_type INTEGER,status INTEGER,metadata BLOB,step_payload BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	add := func(idx, kind int, metadata, payload []byte) {
+		t.Helper()
+		if _, err := db.Exec(`INSERT INTO steps VALUES(?,?,3,?,?)`, idx, kind, metadata, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := &Manager{cfg: RuntimeConfig{Home: home}}
+	s := &session{ID: id, life: context.Background()}
+	m.startUsage(s)
+	// Reproduce the actual failure: all 342 output tokens were thinking. The
+	// official agent recorded an empty-output error, then recovered with text.
+	add(1, 15, usageProto(2, 100, 3, 342, 9, 342), nil)
+	add(2, 17, nil, []byte("model output must contain either output text or tool calls"))
+	add(3, 15, usageProto(2, 200, 3, 344, 9, 300), nil)
+	u, err := m.consumeOutcome(s)
+	if err != nil || u != (Usage{Known: true, Input: 300, Output: 686, Reasoning: 642, Total: 986}) || s.usageCursor != 3 {
+		t.Fatalf("recovered turn failed or lost usage: %+v cursor=%d err=%v", u, s.usageCursor, err)
+	}
+	// Completing the recovered turn clears its duplicate-request guard normally.
+	m.attempts = map[string]promptAttempt{"recovered-request": {State: "unknown"}}
+	s.attempts = map[string]bool{"recovered-request": true}
+	m.settleAttempts(s, true)
+	if len(m.attempts) != 0 {
+		t.Fatal("recovered completion left a duplicate-request tombstone")
+	}
+	if u, err = m.consumeOutcome(s); err != nil || u.Known {
+		t.Fatalf("consumed steps repeated: %+v %v", u, err)
+	}
+	// Later thinking or missing telemetry must not hide a new terminal error.
+	add(4, 17, nil, []byte("INVALID_ARGUMENT terminal error"))
+	add(5, 15, usageProto(2, 20, 3, 10, 9, 10), nil)
+	add(6, 15, nil, nil)
+	u, err = m.consumeOutcome(s)
+	var terminal *Error
+	if !errors.As(err, &terminal) || terminal.Code != "upstream_invalid_argument" || u.Known || s.usageCursor != 3 {
+		t.Fatalf("unrecovered error hidden by thinking/missing usage: %+v %v", u, err)
+	}
+	add(7, 15, usageProto(2, 30, 3, 12, 9, 2), nil)
+	add(8, 17, nil, []byte("RESOURCE_EXHAUSTED later failure"))
+	if _, err = m.consumeOutcome(s); !errors.As(err, &terminal) || terminal.Code != "upstream_resource_exhausted" {
+		t.Fatalf("latest terminal error did not override intermediate recovery: %v", err)
+	}
+}
