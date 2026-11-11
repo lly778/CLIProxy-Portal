@@ -66,6 +66,9 @@ type session struct {
 	internal                                           bool
 	loading                                            bool
 	persisted                                          bool
+	interrupted                                        bool
+	interruptedOutput                                  []map[string]any
+	requestPrevious                                    string
 	usageCursor                                        int64
 	proc                                               *process
 	officialActive                                     map[string]bool
@@ -100,6 +103,8 @@ type Manager struct {
 	replayMu         sync.Mutex
 	replays          map[string]*responseReplay
 	replayGeneration uint64
+	closing          bool
+	requests         sync.WaitGroup
 }
 
 func NewManager(cfg RuntimeConfig) (*Manager, error) {
@@ -116,7 +121,7 @@ func NewManager(cfg RuntimeConfig) (*Manager, error) {
 		cfg.IdleTimeout = 60 * time.Second
 	}
 	if cfg.ToolTimeout <= 0 {
-		cfg.ToolTimeout = 30 * time.Minute
+		cfg.ToolTimeout = 10 * time.Minute
 	}
 	if err := prepareHome(cfg.Home); err != nil {
 		return nil, err
@@ -162,14 +167,29 @@ func prepareHome(home string) error {
 	return nil
 }
 func (m *Manager) Close() {
+	m.mu.Lock()
+	m.closing = true
+	m.mu.Unlock()
 	m.cancel()
 	m.stopResponseReplays(false)
 	_ = m.mcpServer.Close()
+	// Cancelled handlers checkpoint their last authoritative state before the
+	// database is closed. No new handler may register after closing was set.
+	m.requests.Wait()
 	m.mu.Lock()
 	p := m.proc
+	all := make([]*session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		s.cancel()
+		all = append(all, s)
 	}
+	m.mu.Unlock()
+	for _, s := range all {
+		m.preserveSession(s, nil)
+		if s.cancel != nil {
+			s.cancel()
+		}
+	}
+	m.mu.Lock()
 	m.sessions = map[string]*session{}
 	m.mu.Unlock()
 	if p != nil {
@@ -511,26 +531,9 @@ func (m *Manager) sweep() {
 			}
 			m.mu.Unlock()
 			for _, s := range all {
-				s.mu.Lock()
-				expired := !s.proc.alive() || (!s.waitAt.IsZero() && time.Since(s.waitAt) > m.cfg.ToolTimeout) || (!s.running && s.waitAt.IsZero() && time.Since(s.last) > 10*time.Minute)
-				s.mu.Unlock()
-				if expired && s.requestMu.TryLock() {
-					s.mu.Lock()
-					idle := !s.running && s.waitAt.IsZero()
-					s.mu.Unlock()
-					if idle && s.proc.alive() {
-						ctx, cancel := shortContext(m.life)
-						if m.archiveSession(ctx, s) == nil {
-							m.mu.Lock()
-							delete(m.sessions, s.tenant)
-							m.mu.Unlock()
-						}
-						cancel()
-					} else {
-						m.drop(s)
-					}
-					s.requestMu.Unlock()
-				}
+				ctx, cancel := shortContext(m.life)
+				m.sweepSession(ctx, s, time.Now())
+				cancel()
 			}
 			_ = m.trimResidentSessions(m.life)
 			_ = m.pruneSessionCache(time.Now())

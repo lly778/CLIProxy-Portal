@@ -87,6 +87,7 @@ type request struct {
 	Items            []map[string]any `json:"-"`
 	UnavailableTools []string         `json:"-"`
 	ToolsProvided    bool             `json:"-"`
+	ResumeNote       string           `json:"-"`
 }
 
 func parseRequest(b []byte) (request, error) {

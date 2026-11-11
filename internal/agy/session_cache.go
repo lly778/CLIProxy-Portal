@@ -23,8 +23,9 @@ import (
 
 const sessionRetention = 7 * 24 * time.Hour
 
-// Only completed, idle sessions are recoverable. Pending tools and partial turns
-// are never replayed after a process restart. This encrypted index also retains
+// Completed sessions and suspended client-tool waits load the native session.
+// Interrupted turns retain authoritative history and rebuild before continuing.
+// This encrypted index retains
 // authoritative wire history so an explicit instruction/history change can be
 // rebuilt without re-executing tools. The official session remains in AGY's DB.
 type savedSession struct {
@@ -36,6 +37,22 @@ type savedSession struct {
 	Items                                      []map[string]any
 	Responses                                  map[string]bool
 	Last                                       time.Time
+	WaitingTools                               []savedWaitingTool `json:",omitempty"`
+	WaitAt                                     time.Time          `json:",omitempty"`
+	Interrupted                                bool               `json:",omitempty"`
+	InterruptedOutput                          []map[string]any   `json:",omitempty"`
+}
+
+// A client action already delivered must be restored as a result waiter, never
+// as a new execution. Synchronization channels belong only to the live process.
+type savedWaitingTool struct {
+	ID        string
+	Tool      tool
+	Arguments map[string]any
+	Ready     bool
+	Output    any
+	Update    string
+	Extra     []any
 }
 
 type sessionDiskCache struct {
@@ -236,11 +253,15 @@ func (d *sessionDiskCache) upgradeHistoryIndex() error {
 func snapshotSession(s *session) savedSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return snapshotSessionLocked(s)
+}
+
+func snapshotSessionLocked(s *session) savedSession {
 	responses := map[string]bool{}
 	for id, usable := range s.responses {
 		responses[id] = usable
 	}
-	return savedSession{OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last}
+	return savedSession{OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
 }
 func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if !safeNativeSessionID(v.ID) || v.Owner == "" {
@@ -406,6 +427,22 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 		v.History = requestFingerprints(v.Items)
 	}
 	s := &session{ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+	s.interrupted, s.interruptedOutput = v.Interrupted, v.InterruptedOutput
+	if len(v.WaitingTools) > 0 {
+		s.waitAt = v.WaitAt
+		s.pending = map[string]*pendingTool{}
+		for _, saved := range v.WaitingTools {
+			if saved.ID == "" || s.pending[saved.ID] != nil {
+				return nil, errors.New("invalid AGY waiting tool state")
+			}
+			c := &pendingTool{ID: saved.ID, Tool: saved.Tool, Arguments: saved.Arguments, Delivered: true, Relayed: true, Ready: make(chan struct{}), Update: saved.Update, Extra: saved.Extra}
+			if saved.Ready {
+				c.Output, c.OutputHash = saved.Output, digest(saved.Output)
+				close(c.Ready)
+			}
+			s.pending[c.ID] = c
+		}
+	}
 	canonicalSessionHistory(s)
 	s.advertisedTools, s.loadedTools = v.AdvertisedTools, v.LoadedTools
 	s.officialVersion = v.OfficialToolsVersion
@@ -474,7 +511,10 @@ func (m *Manager) restoreSession(ctx context.Context, s *session, r request) (*s
 	}
 	s.life, s.cancel = context.WithCancel(m.life)
 	s.tenant, s.secret = newID("s_"), newID("token_")
-	s.pending, s.reported = map[string]*pendingTool{}, map[string]reportedTool{}
+	if s.pending == nil {
+		s.pending = map[string]*pendingTool{}
+	}
+	s.reported = map[string]reportedTool{}
 	s.events = make(chan agentEvent, 256)
 	s.proc = p
 	s.loading = true

@@ -400,6 +400,11 @@ func (m *Manager) compactHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
+	if !m.beginRequest() {
+		WriteError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
+		return
+	}
+	defer m.requests.Done()
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
 		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))

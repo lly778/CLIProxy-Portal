@@ -175,9 +175,14 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	if err := m.saveSession(s, false); err != nil {
 		return nil, err
 	}
+	fallback := closingCheckpoint(s, nil)
+	fallback.Interrupted = true
 	m.drop(s)
 	next, err := m.create(ctx, s.owner, r)
 	if err != nil {
+		if m.disk != nil {
+			_ = m.disk.put(fallback, true)
+		}
 		return nil, err
 	}
 	next.responses = responses

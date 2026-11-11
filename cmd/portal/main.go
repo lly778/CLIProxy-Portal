@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 	_ "time/tzdata"
@@ -206,6 +207,7 @@ func serve(cfg config.Config, st *store.Store) error {
 	accounts := service.NewAccounts(st, secret)
 	keys := service.NewKeys(st, client)
 	var embeddedErrors <-chan error
+	var closeEmbedded func()
 	if cfg.AGYBaseURL != "" {
 		shared, readErr := config.ReadTextSecret(cfg.AGYSecretFile)
 		if readErr != nil {
@@ -216,7 +218,8 @@ func serve(cfg config.Config, st *store.Store) error {
 			if startErr != nil {
 				return fmt.Errorf("start embedded AGY bridge: %w", startErr)
 			}
-			defer closeBridge()
+			closeEmbedded = sync.OnceFunc(closeBridge)
+			defer closeEmbedded()
 			embeddedErrors = bridgeErrors
 		}
 		keys.AGY, err = agy.NewClient(cfg.AGYBaseURL, shared)
@@ -305,6 +308,11 @@ func serve(cfg config.Config, st *store.Store) error {
 		}
 		return nil
 	case <-ctx.Done():
+		// Checkpoint AGY before waiting for HTTP draining, so the container's
+		// stop grace period is not consumed before session preservation starts.
+		if closeEmbedded != nil {
+			closeEmbedded()
+		}
 		shutdownCtx, done := context.WithTimeout(context.Background(), 15*time.Second)
 		defer done()
 		if gatewayServer != nil {

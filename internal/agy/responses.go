@@ -43,7 +43,10 @@ func (m *Manager) Handler() http.Handler {
 		}
 		m.mu.Unlock()
 		for _, s := range all {
+			s.requestMu.Lock()
+			m.preserveSession(s, nil)
 			m.drop(s)
+			s.requestMu.Unlock()
 		}
 		w.WriteHeader(204)
 	})
@@ -65,6 +68,11 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
+	if !m.beginRequest() {
+		WriteError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
+		return
+	}
+	defer m.requests.Done()
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
 		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))
@@ -135,7 +143,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	sendItems = req.Items
 	if s != nil && s.proc == nil {
 		system, _ := systemText(req)
-		if s.system != digest(system) || s.model != req.Model || s.persisted && s.officialVersion < officialToolsVersion {
+		if s.interrupted {
+			req.ResumeNote = interruptedResumeNote(s)
+		}
+		if s.interrupted || s.system != digest(system) || s.model != req.Model || s.persisted && s.officialVersion < officialToolsVersion {
 			s, e = m.rebuildSession(r.Context(), s, req)
 		} else {
 			s, e = m.restoreSession(r.Context(), s, req)
@@ -180,6 +191,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	locked := s
 	defer func() { locked.requestMu.Unlock() }()
 	if !s.proc.alive() || s.life.Err() != nil {
+		m.preserveSession(s, nil)
 		m.drop(s)
 		out.fail(fail(503, "worker_lost", "AGY 会话已失效，请重新发起对话"))
 		return
@@ -268,6 +280,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				out.fail(fail(409, "waiting_for_tools", "AGY 正在等待完整工具结果"))
 				return
 			}
+			if err := m.checkpointRequest(s, req, fps); err != nil {
+				out.fail(err)
+				return
+			}
 			m.startUsage(s)
 			m.startPrompt(s, blocks)
 		}
@@ -285,6 +301,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			out.fail(fail(400, "missing_input", "没有新增消息或待处理工具结果"))
 			return
 		}
+		blocks = appendResumeNote(blocks, req.ResumeNote)
 		if text := policy.text(); text != "" {
 			blocks = append([]any{map[string]string{"type": "text", "text": text}}, blocks...)
 		}
@@ -314,9 +331,9 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s.reported = map[string]reportedTool{}
 		s.last = time.Now()
 		s.mu.Unlock()
-		// Invalidate the previous completed checkpoint before changing native
-		// state. A crash must not restore a partially completed tool turn.
-		if err := m.saveSession(s, false); err != nil {
+		// Mark the upcoming native turn as interrupted/recoverable before it
+		// starts, retaining the exact input without claiming a completed result.
+		if err := m.checkpointRequest(s, req, fps); err != nil {
 			s.mu.Lock()
 			s.running = false
 			s.mu.Unlock()
@@ -333,6 +350,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.history = fps
 	s.items = append([]map[string]any(nil), req.Items...)
+	s.requestPrevious = req.Previous
 	if req.Previous != "" {
 		s.responses[req.Previous] = false
 	}
@@ -351,6 +369,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			batch.Stop()
 		}
 		if !completed {
+			m.preserveSession(s, out)
 			m.drop(s)
 		}
 	}()
@@ -423,6 +442,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if len(blocks) > 0 {
+					if err := m.checkpointRequest(s, req, fps); err != nil {
+						out.fail(err)
+						return
+					}
 					m.startPrompt(s, blocks)
 					continue
 				}
@@ -449,6 +472,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					m.remember(s, out)
+					_ = m.preserveSession(s, nil)
 					completed = true
 					return
 				}
@@ -489,6 +513,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			s.last = time.Now()
 			s.mu.Unlock()
 			m.remember(s, out)
+			_ = m.preserveSession(s, nil)
 			completed = true
 			return
 		case <-idle.C:
@@ -713,9 +738,6 @@ func (m *Manager) remember(s *session, out *response) {
 		s.items = append(s.items, v)
 	}
 	canonicalSessionHistory(s)
-	if len(s.responses) > 256 {
-		s.cancel()
-	}
 }
 
 type response struct {
