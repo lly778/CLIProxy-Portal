@@ -319,7 +319,7 @@ func TestPolicyValidationRejectsInvalidTotalLimits(t *testing.T) {
 	if p.Validate() != nil {
 		t.Fatal("defaults invalid")
 	}
-	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMB = math.NaN() }, func(p *Policy) { p.AGYResidentLimit = 0 }, func(p *Policy) { p.MemoryMB = -1 }, func(p *Policy) { p.AGYResidentLimit = 17 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
+	for _, change := range []func(*Policy){func(p *Policy) { p.CPUPercent = math.NaN() }, func(p *Policy) { p.CPUPercent = math.Inf(1) }, func(p *Policy) { p.MemoryMB = math.NaN() }, func(p *Policy) { p.AGYResidentLimit = -1 }, func(p *Policy) { p.MemoryMB = -1 }, func(p *Policy) { p.AGYResidentLimit = 17 }, func(p *Policy) { p.PerUser = p.Global + 1 }} {
 		p = DefaultPolicy()
 		change(&p)
 		if p.Validate() == nil {

@@ -12,7 +12,7 @@ import (
 // Resident cache size is separate from the fixed in-flight request semaphore.
 // Callers hold m.mu; fixtures and older configurations use the startup default.
 func (m *Manager) residentLimitLocked() int {
-	if m.residentLimit > 0 {
+	if m.residentRevision > 0 {
 		return m.residentLimit
 	}
 	if m.cfg.MaxSessions > 0 {
@@ -22,15 +22,15 @@ func (m *Manager) residentLimitLocked() int {
 }
 
 func (m *Manager) SetResidentLimit(ctx context.Context, limit int, revision int64) error {
-	if limit < 1 || limit > 16 {
-		return fail(400, "invalid_resident_limit", "AGY 常驻对话上限必须为 1 至 16")
+	if limit < 0 || limit > 16 || revision < 1 {
+		return fail(400, "invalid_resident_limit", "AGY 常驻对话上限须为 0 至 16，0 表示不限")
 	}
 	m.mu.Lock()
 	if revision < m.residentRevision {
 		m.mu.Unlock()
 		return nil
 	}
-	if revision == m.residentRevision && m.residentLimit > 0 && m.residentLimit != limit {
+	if revision == m.residentRevision && m.residentRevision > 0 && m.residentLimit != limit {
 		m.mu.Unlock()
 		return fail(409, "resident_revision_conflict", "AGY 常驻对话设置已更新，请刷新后重试")
 	}
@@ -45,7 +45,8 @@ func (m *Manager) SetResidentLimit(ctx context.Context, limit int, revision int6
 func (m *Manager) trimResidentSessions(ctx context.Context) error {
 	for {
 		m.mu.Lock()
-		if len(m.sessions) <= m.residentLimitLocked() {
+		limit := m.residentLimitLocked()
+		if limit == 0 || len(m.sessions) <= limit {
 			m.mu.Unlock()
 			return nil
 		}

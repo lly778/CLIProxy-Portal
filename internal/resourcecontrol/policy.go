@@ -25,7 +25,7 @@ func DefaultPolicy() Policy {
 	return Policy{Revision: 1, Mode: "observe", Global: 2, PerUser: 1, CPUPercent: 90, MemoryMB: 768, AGYResidentLimit: 3}
 }
 func (p Policy) Validate() error {
-	if p.Revision < 1 || (p.Mode != "observe" && p.Mode != "enforce") || p.Global < 0 || p.Global > 128 || p.PerUser < 0 || p.PerUser > 128 || (p.Global > 0 && p.PerUser > p.Global) || math.IsNaN(p.CPUPercent) || math.IsInf(p.CPUPercent, 0) || p.CPUPercent < 0 || p.CPUPercent > 100 || math.IsNaN(p.MemoryMB) || math.IsInf(p.MemoryMB, 0) || p.MemoryMB < 0 || p.MemoryMB > 1099511.627776 || p.AGYResidentLimit < 1 || p.AGYResidentLimit > 16 {
+	if p.Revision < 1 || (p.Mode != "observe" && p.Mode != "enforce") || p.Global < 0 || p.Global > 128 || p.PerUser < 0 || p.PerUser > 128 || (p.Global > 0 && p.PerUser > p.Global) || math.IsNaN(p.CPUPercent) || math.IsInf(p.CPUPercent, 0) || p.CPUPercent < 0 || p.CPUPercent > 100 || math.IsNaN(p.MemoryMB) || math.IsInf(p.MemoryMB, 0) || p.MemoryMB < 0 || p.MemoryMB > 1099511.627776 || p.AGYResidentLimit < 0 || p.AGYResidentLimit > 16 {
 		return errors.New("资源保护参数无效：请检查模式、并发、总 CPU、内存上限及 AGY 常驻对话上限")
 	}
 	return nil

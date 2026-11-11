@@ -25,16 +25,16 @@
     <h2 id="resource-settings-title">资源保护设置</h2>
     <form method="post" action="/admin/system/resources/save" data-resource-settings>
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="revision" value="{{.Resources.Policy.Revision}}">
-      <p class="field-help">观察模式记录并继续放行。启用保护后，达到并发或资源阈值时暂停新请求，已有请求继续处理，因此短时用量仍可能超过阈值。并发、CPU 和内存填 0 表示不限；AGY 常驻对话上限保存后直接生效。</p>
+      <p class="field-help">设置保存后即时生效。并发、CPU、内存和 AGY 常驻对话上限填 0 表示不限。观察模式只记录超限情况并继续放行；保护模式在达到并发或资源阈值时暂停新请求，已有请求继续处理。</p>
       <div class="resource-fields">
         <div><label for="resource-mode">运行模式</label><select id="resource-mode" name="mode"><option value="observe" {{if eq .Resources.Policy.Mode "observe"}}selected{{end}}>观察模式 · 记录并放行</option><option value="enforce" {{if eq .Resources.Policy.Mode "enforce"}}selected{{end}}>启用保护 · 超限拒绝</option></select></div>
         <div><label for="resource-global">全局最大并发</label><input id="resource-global" type="number" name="global" value="{{.Resources.Policy.Global}}" min="0" max="128" required></div>
         <div><label for="resource-user">每用户最大并发</label><input id="resource-user" type="number" name="per_user" value="{{.Resources.Policy.PerUser}}" min="0" max="128" required></div>
-        {{if .Resources.AGYConfigured}}<div><label for="resource-agy-resident">AGY 常驻对话上限（个）</label><input id="resource-agy-resident" type="number" name="agy_resident_limit" value="{{.Resources.Policy.AGYResidentLimit}}" min="1" max="16" step="1" required></div>{{end}}
+        {{if .Resources.AGYConfigured}}<div><label for="resource-agy-resident">AGY 常驻对话上限（个）</label><input id="resource-agy-resident" type="number" name="agy_resident_limit" value="{{.Resources.Policy.AGYResidentLimit}}" min="0" max="16" step="1" required></div>{{end}}
         <div><label for="resource-cpu">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
         <div><label for="resource-memory">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存使用量上限（MB）</label><input id="resource-memory" type="number" name="memory_mb" value="{{.Resources.MemoryMB}}" min="0" max="1099511.627776" step="0.000001" required></div>
       </div>
-      <p class="field-help">CPU 按{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}使用率判断，100% 表示全部核心满载。内存按整机总内存减可用内存计算，包含所有服务与系统开销；可用内存包含系统估算的可回收缓存。卡片主数字为已用内存与保护上限，下方为整机可用与总内存。CPU 连续达到上限 15 秒或整机已用内存达到上限时暂停新请求。</p>
+      <p class="field-help">CPU 以{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}全部核心为基准，100% 表示全部核心满载。已用内存按总内存减可用内存计算，包含全部服务与系统开销{{if not .Resources.ESXi}}；可用内存包含系统估算的可回收缓存{{end}}。卡片主数字显示已用内存／保护上限，下方显示可用内存／总内存。保护模式下，CPU 连续达到上限 15 秒或已用内存达到上限时暂停新请求；已有请求可能使短时用量继续升高。</p>
       <p class="field-help" data-resource-warning>{{.Resources.Warning}}</p>
       {{if .Resources.AGYConfigured}}<p class="field-help">降低上限仅转存空闲对话，正在处理的任务完成后再调整。</p>{{end}}
       <div class="button-row resource-save-actions"><button class="button secondary" type="button" data-resource-close>取消</button><button class="button primary" type="submit">保存设置</button></div>

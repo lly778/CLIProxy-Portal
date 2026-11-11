@@ -3,6 +3,7 @@ package agy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -63,7 +64,7 @@ func TestAGYResidentLimitTrimsOnlyCompletedIdleSessions(t *testing.T) {
 	if err := m.SetResidentLimit(t.Context(), 1, 2); err != nil || m.Status().MaxSessions != 5 {
 		t.Fatal("an older settings request overwrote the latest limit", err)
 	}
-	for _, invalid := range []int{0, -1, 17} {
+	for _, invalid := range []int{-1, 17} {
 		if m.SetResidentLimit(t.Context(), invalid, 4) == nil || m.Status().MaxSessions != 5 {
 			t.Fatal("invalid resident limit changed runtime state", invalid)
 		}
@@ -129,11 +130,12 @@ func TestAGYResidentLimitEndpointRequiresServiceAuthAndValidatesInput(t *testing
 		code int
 	}{
 		{`{"max_sessions":5,"revision":1}`, false, 401},
-		{`{"max_sessions":0,"revision":1}`, true, 400},
+		{`{"max_sessions":-1,"revision":1}`, true, 400},
 		{`{"max_sessions":17,"revision":1}`, true, 400},
 		{`{"max_sessions":5}`, true, 400},
 		{`{"max_sessions":5,"revision":1} {}`, true, 400},
 		{`{"max_sessions":5,"revision":1}`, true, 204},
+		{`{"max_sessions":0,"revision":2}`, true, 204},
 	} {
 		r := httptest.NewRequest(http.MethodPost, "/internal/resident-limit", strings.NewReader(tc.body))
 		if tc.auth {
@@ -145,7 +147,31 @@ func TestAGYResidentLimitEndpointRequiresServiceAuthAndValidatesInput(t *testing
 			t.Fatalf("setting status=%d, expected=%d", w.Code, tc.code)
 		}
 	}
-	if m.Status().MaxSessions != 5 || m.proc != nil {
+	if m.Status().MaxSessions != 0 || m.proc != nil {
 		t.Fatal("settings did not apply without starting the official CLI")
+	}
+}
+
+func TestAGYZeroResidentLimitKeepsUnlimitedEntries(t *testing.T) {
+	p := diskTestProcess(t, func(frame) any { return map[string]any{} })
+	m := &Manager{cfg: RuntimeConfig{MaxSessions: 3}, sessions: map[string]*session{}, slot: make(chan struct{}, 3)}
+	if err := m.SetResidentLimit(t.Context(), 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		name := fmt.Sprintf("resident-%02d", i)
+		s := &session{ID: name, tenant: name, proc: p, cancel: func() {}, last: time.Now().Add(time.Duration(i) * time.Second)}
+		if victim, ok := m.reserveSession(s); !ok || victim != nil {
+			t.Fatal("zero resident limit still evicted or rejected a session", i)
+		}
+	}
+	if err := m.trimResidentSessions(t.Context()); err != nil || m.Status().Sessions != 20 || m.Status().MaxSessions != 0 || cap(m.slot) != 3 {
+		t.Fatal("unlimited resident size changed count or execution slots", err)
+	}
+	if err := m.SetResidentLimit(t.Context(), 3, 1); err == nil || m.Status().MaxSessions != 0 {
+		t.Fatal("the same revision overwrote an unlimited setting")
+	}
+	if err := m.SetResidentLimit(t.Context(), 2, 2); err != nil || m.Status().Sessions != 2 {
+		t.Fatal("a finite limit could not replace unlimited residency", err)
 	}
 }

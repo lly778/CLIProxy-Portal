@@ -57,7 +57,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 			var v struct {
 				Limit int `json:"max_sessions"`
 			}
-			if json.NewDecoder(r.Body).Decode(&v) != nil || v.Limit < 1 || v.Limit > 16 {
+			if json.NewDecoder(r.Body).Decode(&v) != nil || v.Limit < 0 || v.Limit > 16 {
 				t.Error("invalid worker limit update")
 			}
 			workerLimit.Store(int64(v.Limit))
@@ -164,7 +164,7 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 		}
 	}
 	form.Set("memory_mb", "906.981376")
-	for _, invalid := range []string{"0", "17", "1.5"} {
+	for _, invalid := range []string{"-1", "17", "1.5"} {
 		form.Set("agy_resident_limit", invalid)
 		postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 		p, _ = st.ResourcePolicy(t.Context())
@@ -184,13 +184,16 @@ func TestResourceAdminAccessSaveAndTotalBudgets(t *testing.T) {
 	if strings.Contains(requests, "<script>bad</script>") || !strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;") || !strings.Contains(requests, "已拦截") || !strings.Contains(requests, "HTTP 429") {
 		t.Fatalf("protection request log missing or unsafe: escaped=%v blocked=%v code=%v", strings.Contains(requests, "&lt;script&gt;bad&lt;/script&gt;"), strings.Contains(requests, "已拦截"), strings.Contains(requests, "HTTP 429"))
 	}
-	for _, field := range []string{"global", "per_user", "cpu_percent", "memory_mb"} {
+	for _, field := range []string{"global", "per_user", "cpu_percent", "memory_mb", "agy_resident_limit"} {
 		form.Set(field, "0")
 	}
 	postForm(t, client, server.URL+"/admin/system/resources/save", form, 303)
 	saved, e := st.ResourcePolicy(t.Context())
-	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.CPUPercent != 0 || saved.MemoryMB != 0 {
+	if e != nil || saved.Global != 0 || saved.PerUser != 0 || saved.CPUPercent != 0 || saved.MemoryMB != 0 || saved.AGYResidentLimit != 0 {
 		t.Fatal("zero limits did not persist", saved, e)
+	}
+	if s.resourceView(t.Context()).AGYResident != "0 / 不限" {
+		t.Fatal("zero resident setting displayed as zero capacity")
 	}
 	if s.resourceView(t.Context()).Active != "0 / 不限" {
 		t.Fatal("unlimited concurrency displayed as zero capacity")

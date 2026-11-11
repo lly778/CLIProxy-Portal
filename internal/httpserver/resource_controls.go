@@ -95,6 +95,9 @@ func (s *Server) resourceView(ctx context.Context) webui.ResourceView {
 		if status, err := s.Keys.AGY.Status(ctx); err == nil {
 			v.AGYTasks = fmt.Sprintf("其中：AGY 任务 %d", status.ActiveSessions)
 			v.AGYResident = fmt.Sprintf("%d / %d", status.Sessions, status.MaxSessions)
+			if status.MaxSessions == 0 {
+				v.AGYResident = fmt.Sprintf("%d / 不限", status.Sessions)
+			}
 		}
 	}
 	countsCtx, cancel := context.WithTimeout(ctx, 2*time.Second)

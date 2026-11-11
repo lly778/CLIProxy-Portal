@@ -392,10 +392,10 @@ func (m *Manager) reserveSession(s *session) (*session, bool) {
 	defer m.mu.Unlock()
 	var victim *session
 	limit := m.residentLimitLocked()
-	if len(m.sessions) > limit {
+	if limit > 0 && len(m.sessions) > limit {
 		return nil, false
 	}
-	if len(m.sessions) >= limit {
+	if limit > 0 && len(m.sessions) >= limit {
 		var oldest time.Time
 		for _, candidate := range m.sessions {
 			candidate.mu.Lock()

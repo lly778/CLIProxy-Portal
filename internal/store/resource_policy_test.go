@@ -47,7 +47,7 @@ func TestResourcePolicyPersistenceAndStaleRevision(t *testing.T) {
 	}
 	old := p
 	p.Global = 3
-	p.AGYResidentLimit = 7
+	p.AGYResidentLimit = 0
 	if e = s.SaveResourcePolicy(t.Context(), p); e != nil {
 		t.Fatal(e)
 	}
@@ -61,7 +61,7 @@ func TestResourcePolicyPersistenceAndStaleRevision(t *testing.T) {
 	}
 	defer s.Close()
 	p, e = s.ResourcePolicy(t.Context())
-	if e != nil || p.Revision != 2 || p.Global != 3 || p.AGYResidentLimit != 7 || p.MemoryMB != 768 {
+	if e != nil || p.Revision != 2 || p.Global != 3 || p.AGYResidentLimit != 0 || p.MemoryMB != 768 {
 		t.Fatal("policy not durable", p, e)
 	}
 }
