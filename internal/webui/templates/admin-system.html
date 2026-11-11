@@ -34,9 +34,8 @@
         <div><label for="resource-cpu">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}} CPU 使用率上限（%）</label><input id="resource-cpu" type="number" name="cpu_percent" value="{{.Resources.Policy.CPUPercent}}" min="0" max="100" step="1" required></div>
         <div><label for="resource-memory">{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}内存使用量上限（MB）</label><input id="resource-memory" type="number" name="memory_mb" value="{{.Resources.MemoryMB}}" min="0" max="1099511.627776" step="0.000001" required></div>
       </div>
-      <p class="field-help">CPU 以{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}全部核心为基准，100% 表示全部核心满载。已用内存按总内存减可用内存计算，包含全部服务与系统开销{{if not .Resources.ESXi}}；可用内存包含系统估算的可回收缓存{{end}}。卡片主数字显示已用内存／保护上限，下方显示可用内存／总内存。保护模式下，CPU 连续达到上限 15 秒或已用内存达到上限时暂停新请求；已有请求可能使短时用量继续升高。</p>
+      <p class="field-help">CPU 以{{if .Resources.ESXi}}宿主机{{else}}整机{{end}}全部核心为基准，100% 表示全部核心满载。已用内存＝总内存－可用内存，包含全部服务与系统开销{{if not .Resources.ESXi}}；可用内存包含系统估算的可回收缓存{{end}}。卡片主数字显示已用内存／保护上限，下方显示可用内存／总内存。保护模式下，CPU 使用率连续 15 秒达到或超过上限，或已用内存达到或超过上限时，暂停接收新请求；已有请求继续处理，因此短时用量仍可能升高。{{if .Resources.AGYConfigured}}降低 AGY 常驻对话上限时，仅将已完成且空闲的对话转存硬盘；运行中的任务不会中断，完成后再按新上限调整常驻数量。{{end}}</p>
       <p class="field-help" data-resource-warning>{{.Resources.Warning}}</p>
-      {{if .Resources.AGYConfigured}}<p class="field-help">降低上限仅转存空闲对话，正在处理的任务完成后再调整。</p>{{end}}
       <div class="button-row resource-save-actions"><button class="button secondary" type="button" data-resource-close>取消</button><button class="button primary" type="submit">保存设置</button></div>
     </form>
   </dialog>
