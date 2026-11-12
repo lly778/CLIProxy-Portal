@@ -15,6 +15,7 @@ type Tracker struct {
 	ResponseID, Failure string
 	Effort              string
 	Completed           bool
+	ModelStarted        bool
 	Invalid             bool
 }
 
@@ -49,9 +50,19 @@ func (t *Tracker) Feed(p []byte) {
 			var f struct {
 				Type     string          `json:"type"`
 				Response json.RawMessage `json:"response"`
+				Delta    string          `json:"delta"`
+				Item     struct {
+					Type string `json:"type"`
+				} `json:"item"`
 			}
 			if json.Unmarshal(t.line[6:], &f) == nil {
+				// Connection handshakes, progress-only envelopes and SSE comments
+				// do not mark the first actual model output or tool action.
+				if f.Delta != "" || f.Type == "response.output_item.added" && f.Item.Type != "" && f.Item.Type != "message" && f.Item.Type != "reasoning" {
+					t.ModelStarted = true
+				}
 				if f.Type == "response.completed" || f.Type == "response.failed" {
+					t.ModelStarted = true
 					t.read(f.Response)
 				}
 			}

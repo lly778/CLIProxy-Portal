@@ -218,6 +218,9 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 	}
 	w.WriteHeader(resp.StatusCode)
 	tracker := &agy.Tracker{Stream: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")}
+	if tracker.Stream && m != nil {
+		m.modelResponseStarted(false)
+	}
 	defer func() {
 		tracker.Finish()
 		if native != nil {
@@ -236,10 +239,15 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 		}
 	}()
 	buffer := make([]byte, 32<<10)
+	modelStarted := false
 	for {
 		n, err := resp.Body.Read(buffer)
 		if n > 0 {
 			tracker.Feed(buffer[:n])
+			if tracker.Stream && tracker.ModelStarted && !modelStarted && m != nil {
+				m.modelResponseStarted(true)
+				modelStarted = true
+			}
 			if watch := idleWatch(r); watch != nil {
 				watch.progress()
 			}

@@ -185,6 +185,10 @@ func (g *Gateway) serveProtectedHTTP(w http.ResponseWriter, r *http.Request) {
 				capture.cpaRequestID = cpaRequestID(resp.Header.Get("X-CPA-TRACE-ID"))
 				resp.Body = &teeReadCloser{Reader: io.TeeReader(resp.Body, capture.response), Closer: resp.Body}
 			}
+			if measurement != nil && resp.Header.Get("Content-Encoding") == "" && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+				measurement.modelResponseStarted(false)
+				resp.Body = &modelStreamBody{ReadCloser: resp.Body, measurement: measurement}
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

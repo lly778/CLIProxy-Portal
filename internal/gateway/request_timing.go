@@ -12,8 +12,18 @@ import (
 )
 
 type requestMeasurement struct {
-	mu  sync.Mutex
-	row store.GatewayRequestTiming
+	mu                 sync.Mutex
+	row                store.GatewayRequestTiming
+	modelResponseStart bool
+}
+
+func (m *requestMeasurement) modelResponseStarted(started bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.modelResponseStart = true
+	if started && m.row.ResponseStartedMS == nil {
+		m.row.ResponseStartedMS = elapsedMS(m.row.StartedAt, time.Now())
+	}
 }
 
 func (g *Gateway) startMeasurement(r *http.Request, start time.Time, source string) *requestMeasurement {
@@ -76,6 +86,7 @@ func (m *requestMeasurement) failure(reason string, status int) {
 func (g *Gateway) completeMeasurement(m *requestMeasurement, ended, firstWrite time.Time, completed bool) {
 	m.mu.Lock()
 	row := m.row
+	modelResponseStart := m.modelResponseStart
 	m.mu.Unlock()
 	row.EndedAt = ended
 	row.TotalMS = *elapsedMS(row.StartedAt, ended)
@@ -83,7 +94,9 @@ func (g *Gateway) completeMeasurement(m *requestMeasurement, ended, firstWrite t
 	if row.FailureReason != "" {
 		row.Completed = false
 	}
-	if !firstWrite.IsZero() {
+	if modelResponseStart && row.ResponseStartedMS == nil {
+		row.ResponseStartedMS = elapsedMS(row.StartedAt, ended)
+	} else if !modelResponseStart && !firstWrite.IsZero() {
 		row.ResponseStartedMS = elapsedMS(row.StartedAt, firstWrite)
 	}
 	go func() {

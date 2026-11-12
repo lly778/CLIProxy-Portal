@@ -64,7 +64,9 @@ func (m *Manager) Handler() http.Handler {
 	})
 }
 func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
-	m.replayResponse(w, r, m.executeResponsesHTTP)
+	withStreamKeepalive(w, r, streamKeepaliveInterval, func(w http.ResponseWriter, r *http.Request) {
+		m.replayResponse(w, r, m.executeResponsesHTTP)
+	})
 }
 
 func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +126,14 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	out.imageSecret = m.cfg.Secret
 	out.parallel = req.Parallel
 	out.unavailableTools = append([]string(nil), req.UnavailableTools...)
+	// Begin the accepted stream before native session setup, compaction or
+	// first-token waiting. The delivery layer can now keep the HTTP connection
+	// alive without inventing model output or writing comments into the replay.
+	if req.Stream {
+		if e = out.event("response.created", map[string]any{"response": out.envelope("in_progress", Usage{})}); e != nil {
+			return
+		}
+	}
 	sendItems := req.Items
 	completeHistory := req.Previous == ""
 	if s != nil {
@@ -175,7 +185,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else if sizeErr != nil {
-			WriteError(w, sizeErr)
+			out.fail(sizeErr)
 			return
 		}
 		s, e = m.create(r.Context(), owner, req)
