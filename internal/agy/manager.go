@@ -15,9 +15,9 @@ import (
 )
 
 type RuntimeConfig struct {
-	Command, Home, Secret    string
-	MaxSessions              int
-	IdleTimeout, ToolTimeout time.Duration
+	Command, Home, Secret string
+	MaxSessions           int
+	ToolTimeout           time.Duration
 }
 type agentEvent struct {
 	Text      string
@@ -116,9 +116,6 @@ func NewManager(cfg RuntimeConfig) (*Manager, error) {
 	}
 	if cfg.MaxSessions > 16 {
 		return nil, errors.New("AGY session limit exceeds 16")
-	}
-	if cfg.IdleTimeout <= 0 {
-		cfg.IdleTimeout = 60 * time.Second
 	}
 	if cfg.ToolTimeout <= 0 {
 		cfg.ToolTimeout = 10 * time.Minute

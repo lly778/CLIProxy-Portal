@@ -90,7 +90,7 @@ func TestAGYDynamicToolUpdateReachesNextNativePromptWithoutNewSession(t *testing
 	encoded, _ := json.Marshal(options)
 	_ = json.Unmarshal(encoded, &configOptions)
 	s = &session{ID: "same-native-session", tenant: "tenant", owner: "owner", model: "agy/test", system: digest(""), tools: []tool{}, advertisedTools: []tool{}, responses: map[string]bool{"previous": true}, pending: map[string]*pendingTool{}, events: make(chan agentEvent, 8), life: life, cancel: cancel, proc: p, options: configOptions, last: time.Now()}
-	m := &Manager{cfg: RuntimeConfig{Home: t.TempDir(), IdleTimeout: time.Second}, life: life, proc: p, sessions: map[string]*session{"tenant": s}, slot: make(chan struct{}, 1)}
+	m := &Manager{cfg: RuntimeConfig{Home: t.TempDir()}, life: life, proc: p, sessions: map[string]*session{"tenant": s}, slot: make(chan struct{}, 1)}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/internal/responses", strings.NewReader(`{"model":"agy/test","previous_response_id":"previous","input":"use the newly enabled tool","tools":[{"type":"function","name":"new_client_tool","parameters":{"type":"object"}}]}`))
 	r.Header.Set("X-Portal-Owner", "owner")

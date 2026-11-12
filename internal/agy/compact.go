@@ -312,8 +312,6 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 		case <-s.life.Done():
 		}
 	}()
-	idle := time.NewTimer(m.cfg.IdleTimeout)
-	defer idle.Stop()
 	var result strings.Builder
 	for {
 		select {
@@ -322,13 +320,6 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 				return "", event.Err
 			}
 			if event.Text != "" {
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
-				}
-				idle.Reset(m.cfg.IdleTimeout)
 				if progress != nil {
 					progress()
 				}
@@ -348,8 +339,6 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 				}
 				return strings.TrimSpace(result.String()), nil
 			}
-		case <-idle.C:
-			return "", fail(504, "compaction_idle_timeout", "摘要连续 60 秒没有生成进展，原历史未被替换")
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case <-s.life.Done():

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +18,9 @@ var errGatewayIdleTimeout = errors.New("gateway idle timeout")
 
 type requestIdleKey struct{}
 
-// A request has one progress clock across upload, upstream reads and downstream
-// writes. The timer checks the last successful I/O rather than resetting on
-// every chunk. A live stream has no overall duration limit.
+// Bound stalled request transfer and client writes, not model computation.
+// Once the complete request has been written upstream, silence between model
+// chunks is allowed. The watchdog is armed again only during downstream writes.
 type requestIdleWatch struct {
 	mu          sync.Mutex
 	timeout     time.Duration
@@ -28,6 +29,8 @@ type requestIdleWatch struct {
 	stopped     bool
 	timedOut    bool
 	committed   bool
+	submitted   bool
+	writers     int
 	cancel      context.CancelCauseFunc
 	controller  *http.ResponseController
 	connection  *timingConn
@@ -46,6 +49,50 @@ func (w *requestIdleWatch) progress() {
 		w.last = time.Now()
 	}
 	w.mu.Unlock()
+}
+
+func (w *requestIdleWatch) upstreamSubmitted() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.stopped || w.timedOut {
+		return
+	}
+	w.submitted = true
+	if w.writers == 0 {
+		w.timer.Stop()
+	}
+}
+
+func (w *requestIdleWatch) beginWrite() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.submitted && w.writers == 0 && !w.stopped && !w.timedOut {
+		w.last = time.Now()
+		w.timer.Reset(w.timeout)
+	}
+	w.writers++
+}
+
+func (w *requestIdleWatch) endWrite() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writers--
+	if w.submitted && w.writers == 0 {
+		w.timer.Stop()
+	}
+}
+
+func upstreamSubmissionContext(ctx context.Context, watch *requestIdleWatch) context.Context {
+	if watch == nil {
+		return ctx
+	}
+	return httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if info.Err == nil {
+				watch.upstreamSubmitted()
+			}
+		},
+	})
 }
 
 func (w *requestIdleWatch) expired() bool {
@@ -74,7 +121,7 @@ func (w *requestIdleWatch) attachMeasurement(m *requestMeasurement) {
 
 func (w *requestIdleWatch) check() {
 	w.mu.Lock()
-	if w.stopped || w.timedOut {
+	if w.stopped || w.timedOut || w.submitted && w.writers == 0 {
 		w.mu.Unlock()
 		return
 	}
@@ -181,6 +228,8 @@ type idleResponseWriter struct {
 func (w *idleResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *idleResponseWriter) WriteHeader(code int) {
+	w.watch.beginWrite()
+	defer w.watch.endWrite()
 	if code >= 200 {
 		w.watch.mu.Lock()
 		w.watch.committed = true
@@ -190,6 +239,8 @@ func (w *idleResponseWriter) WriteHeader(code int) {
 }
 
 func (w *idleResponseWriter) Write(p []byte) (int, error) {
+	w.watch.beginWrite()
+	defer w.watch.endWrite()
 	w.watch.mu.Lock()
 	w.watch.committed = true
 	w.watch.mu.Unlock()
@@ -201,6 +252,8 @@ func (w *idleResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *idleResponseWriter) FlushError() error {
+	w.watch.beginWrite()
+	defer w.watch.endWrite()
 	w.watch.mu.Lock()
 	w.watch.committed = true
 	w.watch.mu.Unlock()
@@ -213,6 +266,7 @@ type idleProgressTransport struct {
 }
 
 func (t idleProgressTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.WithContext(upstreamSubmissionContext(r.Context(), t.watch))
 	if r.Body != nil && r.Body != http.NoBody {
 		r.Body = &idleProgressBody{ReadCloser: r.Body, watch: t.watch}
 	}

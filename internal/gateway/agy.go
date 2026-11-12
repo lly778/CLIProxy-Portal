@@ -181,7 +181,7 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 	if r.URL.Path == "/v1/responses/compact" {
 		workerPath = "/internal/compact"
 	}
-	ctx := agy.WithModelProgress(agy.WithRequestIdentity(r.Context(), r.Header), func() {
+	ctx := agy.WithModelProgress(agy.WithRequestIdentity(upstreamSubmissionContext(r.Context(), idleWatch(r)), r.Header), func() {
 		if watch := idleWatch(r); watch != nil {
 			watch.progress()
 		}

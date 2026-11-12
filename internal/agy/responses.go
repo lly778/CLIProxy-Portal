@@ -345,9 +345,8 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.waitAt = time.Time{}
 	s.mu.Unlock()
-	// No synthetic heartbeat: only genuine model chunks reset this watchdog.
-	idle := time.NewTimer(m.cfg.IdleTimeout)
-	defer idle.Stop()
+	// A submitted model turn may think or run official tools without emitting
+	// chunks. Only cancellation, worker failure, or native completion ends it.
 	var batch *time.Timer
 	var batchC <-chan time.Time
 	completed := false
@@ -370,26 +369,12 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if event.Official != nil {
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
-				}
-				idle.Reset(m.cfg.IdleTimeout)
 				if e = out.official(m.cfg.Home, s, *event.Official); e != nil {
 					out.fail(e)
 					return
 				}
 			}
 			if event.Text != "" {
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
-				}
-				idle.Reset(m.cfg.IdleTimeout)
 				if e = out.text(event.Text, event.Reasoning); e != nil {
 					return
 				}
@@ -498,9 +483,6 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			s.mu.Unlock()
 			m.remember(s, out)
 			completed = true
-			return
-		case <-idle.C:
-			out.fail(fail(504, "model_idle_timeout", "AGY 连续 60 秒没有生成进展"))
 			return
 		case <-s.life.Done():
 			out.fail(fail(503, "worker_lost", "AGY 会话已终止"))

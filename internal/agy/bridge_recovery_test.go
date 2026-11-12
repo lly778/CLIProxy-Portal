@@ -42,7 +42,7 @@ func recoveryFixture(t *testing.T, onPrompt func(*session, frame) any) (*Manager
 	})
 	sessionLife, sessionCancel := context.WithCancel(life)
 	s = &session{ID: "native", tenant: "tenant", owner: "owner", model: "agy/test", system: digest(""), tools: []tool{}, advertisedTools: []tool{}, responses: map[string]bool{"previous": true}, pending: map[string]*pendingTool{}, reported: map[string]reportedTool{}, events: make(chan agentEvent, 32), life: sessionLife, cancel: sessionCancel, proc: p, options: options, last: time.Now()}
-	m = &Manager{cfg: RuntimeConfig{Home: t.TempDir(), IdleTimeout: time.Second, MaxSessions: 3}, life: life, proc: p, sessions: map[string]*session{s.tenant: s}, slot: make(chan struct{}, 3)}
+	m = &Manager{cfg: RuntimeConfig{Home: t.TempDir(), MaxSessions: 3}, life: life, proc: p, sessions: map[string]*session{s.tenant: s}, slot: make(chan struct{}, 3)}
 	return m, s
 }
 

@@ -59,6 +59,13 @@ func (c *timingConn) Read(p []byte) (int, error) {
 }
 
 func (c *timingConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	watch := c.idleWatch
+	c.mu.Unlock()
+	if watch != nil {
+		watch.beginWrite()
+		defer watch.endWrite()
+	}
 	at := time.Now()
 	n, err := c.Conn.Write(p)
 	c.mu.Lock()
