@@ -257,6 +257,8 @@ func requestFailureText(e cpamp.EventRow) string {
 	}
 
 	code, message, plain := failureSummaryDetails(summary)
+	message = agyFailureDisplay(e, code, message)
+	plain = agyFailureDisplay(e, code, plain)
 	if message != "" {
 		parts = appendUnique(parts, requestLogMessage(message))
 	} else if plain != "" {

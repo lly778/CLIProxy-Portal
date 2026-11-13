@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -90,6 +91,14 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	if raw := r.Header.Get("X-Portal-Followup-Limit"); raw != "" {
+		limit, err := strconv.Atoi(raw)
+		if err != nil || limit < 0 || limit > maxQueuedFollowups {
+			WriteError(w, fail(400, "invalid_request", "内部追加消息队列上限无效"))
+			return
+		}
+		req.followupLimit = &limit
+	}
 	if e = m.expandCheckpoints(owner, &req); e != nil {
 		WriteError(w, e)
 		return
@@ -107,16 +116,45 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	queue := time.NewTimer(10 * time.Second)
 	defer queue.Stop()
+	checkpoint := isCodexCompactionRequest(req)
+	var s *session
+	slotHeld := false
 	select {
 	case m.slot <- struct{}{}:
-		defer func() { <-m.slot }()
-	case <-queue.C:
-		WriteError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
-		return
-	case <-r.Context().Done():
-		return
+		slotHeld = true
+	default:
+		if !checkpoint {
+			candidate, err := m.find(owner, req)
+			if err != nil {
+				WriteError(w, err)
+				return
+			}
+			if candidate != nil && canQueueFollowup(candidate, req) {
+				s = candidate
+			}
+		}
+		if s == nil {
+			select {
+			case m.slot <- struct{}{}:
+				slotHeld = true
+			case <-queue.C:
+				WriteError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
+				return
+			case <-r.Context().Done():
+				return
+			}
+		}
 	}
-	s, e := m.find(owner, req)
+	defer func() {
+		if slotHeld {
+			<-m.slot
+		}
+	}()
+	if checkpoint {
+		s, e = m.prepareCodexCompaction(owner, &req)
+	} else if s == nil {
+		s, e = m.find(owner, req)
+	}
 	if e != nil {
 		WriteError(w, e)
 		return
@@ -156,7 +194,13 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.interrupted {
 			req.ResumeNote = interruptedResumeNote(s)
 		}
-		if s.interrupted || s.system != digest(system) || s.model != req.Model || s.persisted && s.officialVersion < officialToolsVersion {
+		if checkpoint {
+			if s.officialVersion < officialToolsVersion {
+				out.fail(fail(409, "compaction_session_unavailable", "原 AGY 会话需要先正常续接，未改动原工具调用"))
+				return
+			}
+			s, e = m.restoreNativeSession(r.Context(), s, req)
+		} else if s.interrupted || s.system != digest(system) || s.model != req.Model || s.persisted && s.officialVersion < officialToolsVersion {
 			s, e = m.rebuildSession(r.Context(), s, req)
 		} else {
 			s, e = m.restoreSession(r.Context(), s, req)
@@ -194,12 +238,45 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.requestMu.TryLock() {
+	queuedLocked, finishQueued, queueErr := m.waitUserFollowup(r.Context(), s, &req, out, func() {
+		if slotHeld {
+			<-m.slot
+			slotHeld = false
+		}
+	}, func() error {
+		select {
+		case m.slot <- struct{}{}:
+			slotHeld = true
+			return nil
+		case <-r.Context().Done():
+			return r.Context().Err()
+		}
+	})
+	if queueErr != nil {
+		out.fail(queueErr)
+		return
+	}
+	if queuedLocked {
+		sendItems = req.Items
+		completeHistory = true
+	}
+	if !slotHeld {
+		select {
+		case m.slot <- struct{}{}:
+			slotHeld = true
+		case <-r.Context().Done():
+			return
+		}
+	}
+	if !queuedLocked && !s.requestMu.TryLock() {
 		out.fail(fail(409, "session_busy", "该 AGY 会话已有进行中的请求"))
 		return
 	}
 	locked := s
 	defer func() { locked.requestMu.Unlock() }()
+	if finishQueued != nil {
+		defer finishQueued()
+	}
 	if !s.proc.alive() || s.life.Err() != nil {
 		m.preserveSession(s, nil)
 		m.drop(s)
@@ -215,6 +292,41 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	same := s.system == digest(system) && s.model == req.Model
 	running := s.running
 	history := append([]string(nil), s.history...)
+	if checkpoint {
+		// Recheck after acquiring the response lock: another request may have
+		// advanced this session since the read-only routing decision.
+		if s.model != req.Model || !prefix(history, requestFingerprints(req.Items)) {
+			s.mu.Unlock()
+			out.fail(fail(409, "compaction_history_changed", "原 AGY 会话已推进，请使用最新工具结果重新压缩"))
+			return
+		}
+		waiting := false
+		for _, call := range s.pending {
+			if call.Returned || call.Replayed {
+				continue
+			}
+			if !call.Delivered || call.Replying > 0 {
+				s.mu.Unlock()
+				out.fail(fail(409, "compaction_tools_pending", "原工具调用仍在交付，请等待本轮工具交付完成后再压缩"))
+				return
+			}
+			waiting = true
+		}
+		if running && !waiting {
+			s.mu.Unlock()
+			out.fail(fail(409, "compaction_turn_running", "原 AGY 仍在生成，请等待本轮完成后再压缩"))
+			return
+		}
+		same = true
+		priorPolicy := s.policy
+		s.checkpointing = true
+		defer func() {
+			s.mu.Lock()
+			s.checkpointing = false
+			s.policy = priorPolicy
+			s.mu.Unlock()
+		}()
+	}
 	s.mu.Unlock()
 	if !same || len(history) > 0 && !prefix(history, requestFingerprints(req.Items)) && completeHistory {
 		if !req.ToolsProvided {

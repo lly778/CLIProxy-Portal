@@ -3,6 +3,7 @@ package agy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"time"
 )
@@ -54,6 +55,7 @@ func stringField(v map[string]any, key string) string { s, _ := v[key].(string);
 func (m *Manager) startPrompt(s *session, blocks []any) {
 	s.mu.Lock()
 	s.running = true
+	s.promptWarning = nil
 	s.reported = map[string]reportedTool{}
 	s.officialActive = map[string]bool{}
 	s.last = time.Now()
@@ -61,11 +63,31 @@ func (m *Manager) startPrompt(s *session, blocks []any) {
 	go func() {
 		var result promptResult
 		err := s.proc.call(s.life, "session/prompt", map[string]any{"sessionId": s.ID, "prompt": blocks}, &result)
+		err = s.finishPrompt(err)
 		select {
 		case s.events <- agentEvent{Result: &result, Err: err}:
 		case <-s.life.Done():
 		}
 	}()
+}
+
+// Only the final native RPC result ends its retry opportunity. Retain a warning
+// if the CLI ends without recovering, including CLI versions that return
+// end_turn after an API warning. Never replace cancellation or transport errors
+// with an earlier capacity warning, and never carry warnings into another turn.
+func (s *session) finishPrompt(err error) error {
+	s.mu.Lock()
+	warning := s.promptWarning
+	s.promptWarning = nil
+	s.mu.Unlock()
+	if warning == nil {
+		return err
+	}
+	var native *Error
+	if err == nil || errors.As(err, &native) && (native.Code == "agent_error" || native.Code == "agent_api_error") {
+		return warning
+	}
+	return err
 }
 
 // Called after native completion. Results already delivered to the live MCP
@@ -105,7 +127,11 @@ func lateResultPrompt(s *session) ([]any, bool, error) {
 				c.Replayed = true
 			}
 		}
-		blocks = append(blocks, map[string]string{"type": "text", "text": "Continue the task using these actual client tool results. Do not repeat completed actions."})
+		instruction := "Continue the task using these actual client tool results. Do not repeat completed actions."
+		if s.checkpointing {
+			instruction = codexCompactionInstructions
+		}
+		blocks = append(blocks, map[string]string{"type": "text", "text": instruction})
 	}
 	return blocks, false, nil
 }

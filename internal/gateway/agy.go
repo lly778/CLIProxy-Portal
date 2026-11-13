@@ -87,7 +87,7 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 		reason := "agy_error"
 		if errors.As(err, &v) {
 			status = v.Status
-			reason = v.Code
+			reason = agy.FailureSummary(v.Code)
 		}
 		if m != nil {
 			m.failure(reason, status)
@@ -186,6 +186,24 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 			watch.progress()
 		}
 	})
+	if g.Resources != nil {
+		policy := g.Resources.Snapshot().Policy
+		if state, ok := r.Context().Value(resourceRequestKey{}).(*resourceRequest); ok && state.lease != nil {
+			policy = state.lease.Policy
+		}
+		limit := 4
+		if policy.Mode == "enforce" {
+			// Queued HTTP responses still hold portal admission leases. Leave
+			// at least one slot for the original turn's real tool results.
+			if policy.Global > 0 {
+				limit = min(limit, policy.Global-1)
+			}
+			if policy.PerUser > 0 {
+				limit = min(limit, policy.PerUser-1)
+			}
+		}
+		ctx = agy.WithFollowupQueueLimit(ctx, limit)
+	}
 	resp, e := g.AGY.Request(ctx, "POST", workerPath, key.UserID+":"+key.Hash, bytes.NewReader(data))
 	if e != nil {
 		failure(&agy.Error{Status: 503, Code: "worker_unavailable", Message: "AGY 内部服务暂不可用"})
@@ -230,7 +248,18 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 				native.Effort = tracker.Effort
 			}
 		}
-		if resp.StatusCode < 400 && !tracker.Completed && m != nil {
+		if m != nil && tracker.Failure != "" {
+			// Error JSON and SSE failures use the same metadata path. Preserve
+			// transport/upload failures rather than replacing them on cleanup.
+			m.mu.Lock()
+			if m.row.FailureReason == "agy_request_failed" || m.row.FailureReason == "" {
+				m.row.FailureReason = agy.FailureSummary(tracker.Failure)
+				if resp.StatusCode < 400 {
+					m.row.StatusCode = agy.FailureStatus(tracker.Failure)
+				}
+			}
+			m.mu.Unlock()
+		} else if resp.StatusCode < 400 && !tracker.Completed && m != nil {
 			reason := tracker.Failure
 			if reason == "" {
 				reason = "agy_stream_incomplete"

@@ -172,9 +172,12 @@ func (p *process) read(r io.Reader) {
 	}
 }
 func mapRPCError(e *rpcError) error {
-	// Never expose the provider's raw error message to a caller or ordinary logs.
+	if failure := upstreamFailure(e.Message); failure != nil {
+		return failure
+	}
+	// Keep unknown diagnostics private; they may contain credentials or prompts.
 	if e.Code == -32000 {
 		return fail(503, "auth_required", "AGY 需要在服务器重新登录")
 	}
-	return fail(502, "agent_error", "AGY 拒绝了该操作，请检查账户状态与协议能力")
+	return fail(502, "agent_error", publicFailureMessage("agent_error"))
 }

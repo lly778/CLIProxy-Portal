@@ -282,8 +282,8 @@ function Build-Catalog($Config, [string]$HomePath, [string]$OldToml) {
         if ($known.ContainsKey($id)) {
             $entry = Read-Object (ConvertTo-Json -InputObject $known[$id] -Depth 100 -Compress -WarningAction Stop) '模型元数据'
         } else {
-            # Conservative schema-complete descriptor for custom aliases. Do not
-            # borrow another model's instructions, tool capability or token limit.
+            # Schema-complete descriptor for custom aliases with the configured
+            # 500,000-token default; do not borrow another model's capabilities.
             $entry = [pscustomobject]@{
                 slug = $id; display_name = $id; description = $id
                 default_reasoning_level = $null; supported_reasoning_levels = @()
@@ -293,11 +293,17 @@ function Build-Catalog($Config, [string]$HomePath, [string]$OldToml) {
                 supports_reasoning_summaries = $false; default_reasoning_summary = 'none'
                 support_verbosity = $false; default_verbosity = $null
                 apply_patch_tool_type = 'freeform'; truncation_policy = @{ mode = 'tokens'; limit = 10000 }
-                supports_parallel_tool_calls = $false; context_window = 128000
+                supports_parallel_tool_calls = $false; context_window = 500000
                 effective_context_window_percent = 95; experimental_supported_tools = @()
                 input_modalities = @('text'); use_responses_lite = $false
                 portal_sync_fallback = $true
             }
+        }
+        # Migrate our old generated default without changing native metadata or
+        # a window the user has explicitly adjusted in their local catalog.
+        if ((Get-Field $entry 'portal_sync_fallback' $false) -eq $true -and
+            (Get-Field $entry 'context_window' 0) -eq 128000) {
+            Set-Field $entry 'context_window' 500000
         }
         Complete-ModelInstructions $entry
         Set-DeclaredReasoningLevels $entry @(Get-Field $model 'supported_reasoning_levels' @())

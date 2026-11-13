@@ -106,11 +106,10 @@ func (t *Tracker) read(b []byte) {
 	t.ResponseID = r.ID
 	t.Effort = r.Reasoning.Effort
 	t.Completed = r.Status == "completed"
-	if r.Status == "failed" {
+	if r.Status == "failed" || r.Error != nil {
 		t.Failure = "agy_generation_failed"
 		if r.Error != nil {
-			switch r.Error.Code {
-			case "model_idle_timeout", "worker_lost", "upstream_invalid_argument", "upstream_resource_exhausted", "upstream_access_denied", "upstream_deadline_exceeded", "agent_execution_failed":
+			if publicFailureMessage(r.Error.Code) != "" {
 				t.Failure = r.Error.Code
 			}
 		}

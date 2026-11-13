@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,17 +65,23 @@ type session struct {
 	waitAt                                             time.Time
 	running, handshake                                 bool
 	internal                                           bool
+	checkpointing                                      bool
+	followups                                          []*queuedFollowup
+	followupAnchor                                     string
+	followupInputs                                     []string
 	loading                                            bool
 	persisted                                          bool
 	interrupted                                        bool
 	interruptedOutput                                  []map[string]any
 	requestPrevious                                    string
 	usageCursor                                        int64
+	promptWarning                                      error
 	proc                                               *process
 	officialActive                                     map[string]bool
 	officialVersion                                    int
 }
 type Manager struct {
+	queuedFollowups  atomic.Int64
 	cfg              RuntimeConfig
 	mu               sync.Mutex
 	startMu          sync.Mutex
@@ -577,7 +584,15 @@ func (m *Manager) update(raw json.RawMessage) {
 	}
 	u := p.Update
 	if u.Kind == "tool_call" || u.Kind == "tool_call_update" {
-		if s.internal {
+		s.mu.Lock()
+		_, knownCall := s.reported[u.CallID]
+		awaitExisting := u.Name == awaitName || u.ToolName == awaitName || strings.HasSuffix(u.ToolName, "_"+awaitName)
+		if name, ok := u.Meta["mcpToolName"].(string); ok {
+			awaitExisting = awaitExisting || name == awaitName
+		}
+		checkpointTool := s.checkpointing && u.Kind == "tool_call" && !knownCall && !awaitExisting
+		s.mu.Unlock()
+		if s.internal || checkpointTool {
 			select {
 			case s.events <- agentEvent{Err: fail(502, "compaction_tool_denied", "摘要过程不允许执行工具")}:
 			default:
@@ -597,6 +612,12 @@ func (m *Manager) update(raw json.RawMessage) {
 			name = u.ToolName
 		}
 		s.mu.Lock()
+		_, reported := s.reported[u.CallID]
+		if u.Kind == "tool_call" && u.CallID != "" && !reported && u.Status != "failed" {
+			// A new action after a transient warning means the native agent
+			// recovered. Updates to older tools must not erase a later error.
+			s.promptWarning = nil
+		}
 		old := s.reported[u.CallID]
 		if old.Server != "" && server != "" && old.Server != server || old.Name != "" && name != "" && old.Name != name {
 			old.Conflict = true
@@ -631,13 +652,18 @@ func (m *Manager) update(raw json.RawMessage) {
 		}
 		if u.Kind == "agent_message_chunk" {
 			if failure := agentFailure(u.Content.Text); failure != nil {
-				select {
-				case s.events <- agentEvent{Err: failure}:
-				case <-s.life.Done():
-				default:
-					s.cancel()
-				}
+				// The native CLI may still be backing off/retrying. Remember
+				// its diagnostic without cancelling session/prompt or exposing
+				// an intermediate warning as the assistant's final answer.
+				s.mu.Lock()
+				s.promptWarning = failure
+				s.mu.Unlock()
 				return
+			}
+			if strings.TrimSpace(u.Content.Text) != "" {
+				s.mu.Lock()
+				s.promptWarning = nil
+				s.mu.Unlock()
 			}
 		}
 		select {
@@ -649,24 +675,18 @@ func (m *Manager) update(raw json.RawMessage) {
 	}
 }
 
-// The official CLI sometimes reports service errors as a warning message and
-// then returns end_turn. Do not classify that as a successful assistant answer.
+// The official CLI may emit these during a retry or before returning end_turn.
+// Recognize the diagnostic here; finishPrompt decides the final outcome.
 func agentFailure(text string) error {
 	v := strings.ToLower(strings.TrimSpace(text))
 	if !strings.HasPrefix(v, "⚠") {
 		return nil
 	}
-	if strings.Contains(v, "service has been disabled") || strings.Contains(v, "account has been suspended") {
-		return fail(503, "account_disabled", "AGY 官方账号服务已停用，请更换账号或向官方申诉")
-	}
-	if strings.Contains(v, "quota") || strings.Contains(v, "resource exhausted") || strings.Contains(v, "rate limit") {
-		return fail(429, "quota_exhausted", "AGY 当前额度不足或触发上游限流")
-	}
-	if strings.Contains(v, "authentication") || strings.Contains(v, "sign in") || strings.Contains(v, "unauthenticated") {
-		return fail(503, "auth_required", "AGY 需要重新登录")
+	if failure := upstreamFailure(v); failure != nil {
+		return failure
 	}
 	if strings.Contains(v, "api error") {
-		return fail(502, "agent_api_error", "AGY 上游调用失败")
+		return fail(502, "agent_api_error", publicFailureMessage("agent_api_error"))
 	}
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,6 +32,11 @@ type Client struct {
 
 type progressContextKey struct{}
 type requestIdentityContextKey struct{}
+type followupLimitContextKey struct{}
+
+func WithFollowupQueueLimit(ctx context.Context, limit int) context.Context {
+	return context.WithValue(ctx, followupLimitContextKey{}, limit)
+}
 
 // Forward only retry identity fields, never caller authentication or arbitrary headers.
 func WithRequestIdentity(ctx context.Context, headers http.Header) context.Context {
@@ -119,6 +125,9 @@ func (c *Client) Request(ctx context.Context, method, path, owner string, body i
 		}
 	}
 	if path == "/internal/responses" {
+		if limit, ok := ctx.Value(followupLimitContextKey{}).(int); ok {
+			r.Header.Set("X-Portal-Followup-Limit", strconv.Itoa(limit))
+		}
 		if base := publicImageBase(c.ImageBaseURL); base != "" {
 			r.Header.Set("X-Portal-Image-Base-URL", base)
 		}

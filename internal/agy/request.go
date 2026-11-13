@@ -72,14 +72,15 @@ func (t tool) key() string {
 func (t tool) mcpName() string { return "tool_" + digest(t.key())[:24] }
 
 type request struct {
-	owner        string
-	Model        string          `json:"model"`
-	Stream       bool            `json:"stream"`
-	Previous     string          `json:"previous_response_id"`
-	Instructions json.RawMessage `json:"instructions"`
-	Input        json.RawMessage `json:"input"`
-	Tools        []tool          `json:"tools"`
-	Reasoning    struct {
+	followupLimit *int
+	owner         string
+	Model         string          `json:"model"`
+	Stream        bool            `json:"stream"`
+	Previous      string          `json:"previous_response_id"`
+	Instructions  json.RawMessage `json:"instructions"`
+	Input         json.RawMessage `json:"input"`
+	Tools         []tool          `json:"tools"`
+	Reasoning     struct {
 		Effort string `json:"effort"`
 	} `json:"reasoning"`
 	ToolChoice       json.RawMessage  `json:"tool_choice"`

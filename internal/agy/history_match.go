@@ -34,7 +34,17 @@ func routingFingerprints(items []map[string]any) []string {
 func sessionMatchesRequest(s *session, r request) bool {
 	canonicalSessionHistory(s)
 	if r.Previous != "" {
-		return s.responses[r.Previous]
+		if s.responses[r.Previous] {
+			return true
+		}
+		// A user follow-up may arrive before the response to its base has
+		// completed. Route it to that same owner's queue, never to a new run.
+		if s.running && s.requestPrevious == r.Previous && s.model == r.Model && !isCodexCompactionRequest(r) {
+			system, err := systemText(r)
+			_, follows := followupInput(s.history, requestFingerprints(r.Items), r.Items)
+			return err == nil && s.system == digest(system) && (onlyFollowupMessages(r.Items) || follows)
+		}
+		return false
 	}
 	for _, item := range r.Items {
 		if id := resultCallID(item); id != "" && s.pending[id] != nil {
@@ -46,6 +56,10 @@ func sessionMatchesRequest(s *session, r request) bool {
 	}
 	if _, match := alignToolIDs(s, r.Items); match {
 		return true
+	}
+	if isCodexCompactionRequest(r) {
+		_, match := checkpointHistory(s, r.Items)
+		return match
 	}
 	return !s.running && prefix(s.history, requestFingerprints(r.Items))
 }

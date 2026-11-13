@@ -301,17 +301,7 @@ func (m *Manager) summaryTurn(ctx context.Context, model string, prompt []any, p
 		return "", err
 	}
 	defer m.drop(s)
-	s.mu.Lock()
-	s.running = true
-	s.mu.Unlock()
-	go func() {
-		var result promptResult
-		err := s.proc.call(s.life, "session/prompt", map[string]any{"sessionId": s.ID, "prompt": prompt}, &result)
-		select {
-		case s.events <- agentEvent{Result: &result, Err: err}:
-		case <-s.life.Done():
-		}
-	}()
+	m.startPrompt(s, prompt)
 	var result strings.Builder
 	for {
 		select {

@@ -502,6 +502,12 @@ func (m *Manager) restoreSession(ctx context.Context, s *session, r request) (*s
 	if s.model != r.Model || s.system != digest(system) {
 		return nil, fail(409, "session_changed", "AGY 会话的模型或系统指令发生变化，请新建对话")
 	}
+	return m.restoreNativeSession(ctx, s, r)
+}
+
+// The checkpoint path verifies owner, model and exact history separately. It
+// loads the same native ID without substituting the summary's system prompt.
+func (m *Manager) restoreNativeSession(ctx context.Context, s *session, r request) (*session, error) {
 	p, err := m.ensure(ctx)
 	if err != nil {
 		return nil, err
