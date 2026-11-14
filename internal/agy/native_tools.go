@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 )
 
 // These declarations require the requesting client's executor. This package
@@ -120,7 +121,7 @@ func isNativeCallItem(kind string) bool {
 	return kind == "shell_call" || kind == "local_shell_call" || kind == "apply_patch_call" || kind == "computer_call"
 }
 func isToolResultItem(kind string) bool {
-	return kind == "function_call_output" || kind == "custom_tool_call_output" || kind == "tool_search_output" || kind == "shell_call_output" || kind == "local_shell_call_output" || kind == "apply_patch_call_output" || kind == "computer_call_output"
+	return kind == "function_call_output" || kind == "custom_tool_call_output" || kind == "tool_search_output" || kind == "shell_call_output" || kind == "local_shell_call_output" || kind == "apply_patch_call_output" || kind == "computer_call_output" || kind == "mcp_approval_response"
 }
 
 func nativeArgumentsValid(t tool, args map[string]any) bool {
@@ -132,8 +133,8 @@ func nativeArgumentsValid(t tool, args map[string]any) bool {
 		if !exists {
 			return true
 		}
-		n, ok := value.(float64)
-		return ok && n > 0 && n <= math.MaxInt32 && n == math.Trunc(n)
+		n, ok := numberInt(value, 1, math.MaxInt32)
+		return ok && n > 0
 	}
 	stringsValid := func(value any) bool {
 		list, ok := value.([]any)
@@ -191,9 +192,12 @@ func nativeArgumentsValid(t tool, args map[string]any) bool {
 			return false
 		}
 		pointValid := func(point map[string]any) bool {
-			x, xOK := point["x"].(float64)
-			y, yOK := point["y"].(float64)
-			return xOK && yOK && x >= 0 && y >= 0 && x <= math.MaxInt32 && y <= math.MaxInt32 && (t.DisplayWidth == 0 || x < float64(t.DisplayWidth)) && (t.DisplayHeight == 0 || y < float64(t.DisplayHeight))
+			x, xOK := numberRat(point["x"])
+			y, yOK := numberRat(point["y"])
+			if !xOK || !yOK {
+				return false
+			}
+			return x.Sign() >= 0 && y.Sign() >= 0 && x.Cmp(big.NewRat(math.MaxInt32, 1)) <= 0 && y.Cmp(big.NewRat(math.MaxInt32, 1)) <= 0 && (t.DisplayWidth == 0 || x.Cmp(big.NewRat(int64(t.DisplayWidth), 1)) < 0) && (t.DisplayHeight == 0 || y.Cmp(big.NewRat(int64(t.DisplayHeight), 1)) < 0)
 		}
 		for _, raw := range actions {
 			action, ok := raw.(map[string]any)
@@ -247,6 +251,12 @@ func nativeOutputItem(c *pendingTool) map[string]any {
 }
 
 func resultCallID(item map[string]any) string {
+	if item["type"] == "mcp_approval_response" {
+		return stringField(item, "approval_request_id")
+	}
+	if item["type"] == "mcp_approval_request" {
+		return stringField(item, "id")
+	}
 	id, _ := item["call_id"].(string)
 	if id == "" && item["type"] == "local_shell_call_output" {
 		id, _ = item["id"].(string)
@@ -284,13 +294,13 @@ func nativeResultValue(c *pendingTool, item map[string]any) (any, error) {
 			}
 			outcome, _ := entry["outcome"].(map[string]any)
 			if outcome["type"] != "timeout" {
-				n, ok := outcome["exit_code"].(float64)
-				if outcome["type"] != "exit" || !ok || math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) || math.Abs(n) > math.MaxInt32 {
+				_, ok := numberInt(outcome["exit_code"], -math.MaxInt32, math.MaxInt32)
+				if outcome["type"] != "exit" || !ok {
 					return invalid()
 				}
 			}
 		}
-		if expected, ok := action["max_output_length"]; ok && item["max_output_length"] != expected {
+		if expected, ok := action["max_output_length"]; ok && !jsonValueEqual(item["max_output_length"], expected) {
 			return invalid()
 		}
 		return map[string]any{"output": output, "max_output_length": item["max_output_length"]}, nil

@@ -221,7 +221,11 @@ func diskTestProcess(t *testing.T, onCall func(frame) any) *process {
 				continue
 			}
 			result := onCall(f)
-			_ = json.NewEncoder(outWriter).Encode(map[string]any{"jsonrpc": "2.0", "id": f.ID, "result": result})
+			if failure, ok := result.(*rpcError); ok {
+				_ = json.NewEncoder(outWriter).Encode(map[string]any{"jsonrpc": "2.0", "id": f.ID, "error": failure})
+			} else {
+				_ = json.NewEncoder(outWriter).Encode(map[string]any{"jsonrpc": "2.0", "id": f.ID, "result": result})
+			}
 		}
 	}()
 	t.Cleanup(func() { p.close(); _ = outReader.Close() })

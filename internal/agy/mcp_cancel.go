@@ -26,7 +26,7 @@ func (m *Manager) cancelMCP(s *session, raw json.RawMessage) {
 	var params struct {
 		RequestID json.RawMessage `json:"requestId"`
 	}
-	if json.Unmarshal(raw, &params) != nil || len(params.RequestID) == 0 {
+	if unmarshalExact(raw, &params) != nil || len(params.RequestID) == 0 {
 		return
 	}
 	s.mu.Lock()
@@ -39,7 +39,7 @@ func (m *Manager) cancelMCP(s *session, raw json.RawMessage) {
 func toolResultFailed(v any) bool {
 	if text, ok := v.(string); ok {
 		var value map[string]any
-		if json.Unmarshal([]byte(text), &value) != nil {
+		if unmarshalExact([]byte(text), &value) != nil {
 			return false
 		}
 		v = value

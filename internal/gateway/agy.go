@@ -204,6 +204,9 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 		}
 		ctx = agy.WithFollowupQueueLimit(ctx, limit)
 	}
+	if m != nil {
+		ctx = agy.WithObservationRequest(ctx, m.row.ID)
+	}
 	resp, e := g.AGY.Request(ctx, "POST", workerPath, key.UserID+":"+key.Hash, bytes.NewReader(data))
 	if e != nil {
 		failure(&agy.Error{Status: 503, Code: "worker_unavailable", Message: "AGY 内部服务暂不可用"})

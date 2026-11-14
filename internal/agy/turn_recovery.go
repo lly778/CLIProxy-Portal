@@ -11,7 +11,7 @@ import (
 func copyItems(items []map[string]any) []map[string]any {
 	b, _ := json.Marshal(items)
 	var out []map[string]any
-	_ = json.Unmarshal(b, &out)
+	_ = unmarshalExact(b, &out)
 	return out
 }
 
@@ -55,6 +55,8 @@ func stringField(v map[string]any, key string) string { s, _ := v[key].(string);
 func (m *Manager) startPrompt(s *session, blocks []any) {
 	s.mu.Lock()
 	s.running = true
+	s.epoch++
+	epoch := s.epoch
 	s.promptWarning = nil
 	s.reported = map[string]reportedTool{}
 	s.officialActive = map[string]bool{}
@@ -63,9 +65,21 @@ func (m *Manager) startPrompt(s *session, blocks []any) {
 	go func() {
 		var result promptResult
 		err := s.proc.call(s.life, "session/prompt", map[string]any{"sessionId": s.ID, "prompt": blocks}, &result)
-		err = s.finishPrompt(err)
+		s.mu.Lock()
+		current := s.epoch == epoch
+		var warning error
+		if current {
+			s.promptCompletedEpoch = epoch
+			warning = s.promptWarning
+			s.promptWarning = nil
+		}
+		s.mu.Unlock()
+		if !current {
+			return
+		}
+		err = finishPromptWarning(err, warning)
 		select {
-		case s.events <- agentEvent{Result: &result, Err: err}:
+		case s.events <- agentEvent{Epoch: epoch, Result: &result, Err: err}:
 		case <-s.life.Done():
 		}
 	}()
@@ -80,6 +94,10 @@ func (s *session) finishPrompt(err error) error {
 	warning := s.promptWarning
 	s.promptWarning = nil
 	s.mu.Unlock()
+	return finishPromptWarning(err, warning)
+}
+
+func finishPromptWarning(err, warning error) error {
 	if warning == nil {
 		return err
 	}
@@ -108,7 +126,11 @@ func lateResultPrompt(s *session) ([]any, bool, error) {
 			if err != nil {
 				return nil, false, err
 			}
-			blocks = append(blocks, map[string]string{"type": "text", "text": "[Completed client tool result; context only, do not execute again] " + c.ID + " " + c.Tool.key()})
+			label := "Completed client tool result"
+			if c.remote != nil {
+				label = "Completed remote MCP result"
+			}
+			blocks = append(blocks, map[string]string{"type": "text", "text": "[" + label + "; context only, do not execute again] " + c.ID + " " + c.Tool.key()})
 			blocks = append(blocks, content...)
 			if c.Update != "" {
 				blocks = append(blocks, map[string]string{"type": "text", "text": c.Update})
@@ -124,10 +146,11 @@ func lateResultPrompt(s *session) ([]any, bool, error) {
 	if len(blocks) > 0 {
 		for _, c := range s.pending {
 			if c.Delivered && !c.Returned {
+				c.receipt("context_prepared")
 				c.Replayed = true
 			}
 		}
-		instruction := "Continue the task using these actual client tool results. Do not repeat completed actions."
+		instruction := "Continue the task using these actual tool results. Do not repeat completed actions."
 		if s.checkpointing {
 			instruction = codexCompactionInstructions
 		}
@@ -180,6 +203,14 @@ func pendingIDs(s *session) []string {
 }
 
 func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*session, error) {
+	release, err := m.claimSessionRecovery(s)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := validateRebuildResults(s, r); err != nil {
+		return nil, err
+	}
 	// Validate the replay before cancelling an existing task. History is input
 	// only; tool-call entries never enter the client execution queue.
 	if _, err := promptBlocksLimit(r.Items, MaxBody); err != nil {
@@ -192,8 +223,12 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	}
 	tools, loaded := requestedTools(s, r)
 	responses := s.responses
+	deferred := s.deferredTools
 	s.mu.Unlock()
-	r.Tools = mergeTools(tools, loaded)
+	if r.ToolsProvided {
+		deferred = deferredCatalog(r.Tools)
+	}
+	r.Tools = mergeTools(mergeTools(tools, loaded), deferred)
 	r.ToolsProvided = true
 	if _, err := requestToolPolicy(r, r.Tools); err != nil {
 		return nil, err
@@ -211,6 +246,8 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 		}
 		return nil, err
 	}
+	next.mu.Lock()
 	next.responses = responses
+	next.mu.Unlock()
 	return next, nil
 }

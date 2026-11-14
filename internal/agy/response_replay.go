@@ -16,25 +16,27 @@ const responseReplayGrace = 30 * time.Second
 const responseReplayLimit = 32 << 20
 
 type cachedResponse struct {
-	Status  int         `json:"status"`
-	Headers http.Header `json:"headers"`
-	Body    []byte      `json:"body"`
+	RequestID string      `json:"request_id,omitempty"`
+	Status    int         `json:"status"`
+	Headers   http.Header `json:"headers"`
+	Body      []byte      `json:"body"`
 }
 
 type responseReplay struct {
-	mu         sync.Mutex
-	changed    chan struct{}
-	headers    http.Header
-	status     int
-	body       bytes.Buffer
-	progress   int
-	done       bool
-	stored     bool
-	expires    time.Time
-	readers    int
-	orphan     *time.Timer
-	cancel     context.CancelFunc
-	generation uint64
+	originRequest string
+	mu            sync.Mutex
+	changed       chan struct{}
+	headers       http.Header
+	status        int
+	body          bytes.Buffer
+	progress      int
+	done          bool
+	stored        bool
+	expires       time.Time
+	readers       int
+	orphan        *time.Timer
+	cancel        context.CancelFunc
+	generation    uint64
 }
 
 // A tracing ID alone is not a cross-user or cross-body idempotency key. Bind it
@@ -89,7 +91,7 @@ func responseReplayKey(owner string, h http.Header, body []byte) string {
 	if len(identity) == 0 {
 		return ""
 	}
-	return digest([]any{owner, identity, payload})
+	return wireDigest([]any{owner, identity, payload})
 }
 
 func (e *responseReplay) wakeLocked() {
@@ -182,7 +184,12 @@ func (m *Manager) replayResponse(w http.ResponseWriter, r *http.Request, execute
 			life = r.Context()
 		}
 		ctx, cancel := context.WithCancel(life)
-		e = &responseReplay{changed: make(chan struct{}), cancel: cancel, generation: m.replayGeneration}
+		origin := r.Header.Get("X-Portal-Request-ID")
+		if origin == "" || len(origin) > 128 {
+			origin = newID("agy_request_")
+			r.Header.Set("X-Portal-Request-ID", origin)
+		}
+		e = &responseReplay{originRequest: origin, changed: make(chan struct{}), cancel: cancel, generation: m.replayGeneration}
 		m.replays[key] = e
 		r = r.Clone(ctx)
 		r.Body = io.NopCloser(bytes.NewReader(body))
@@ -201,6 +208,16 @@ func (m *Manager) replayResponse(w http.ResponseWriter, r *http.Request, execute
 	}
 	e.mu.Unlock()
 	m.replayMu.Unlock()
+	if !fresh {
+		var payload struct {
+			Model string `json:"model"`
+		}
+		_ = json.Unmarshal(body, &payload)
+		_, trace := m.traceRequest(r, r.Header.Get("X-Portal-Owner"), payload.Model)
+		trace.emit(Observation{Kind: "http_replay", State: mode, Category: "http_replay", OriginRequestID: e.originRequest})
+		trace.phase("replaying_response")
+		defer trace.phase("request_finished")
+	}
 	w.Header().Set("X-Portal-AGY-Replay", mode)
 	if fresh {
 		go func() {
@@ -269,7 +286,7 @@ func serveResponseReplay(w http.ResponseWriter, ctx context.Context, e *response
 
 func (m *Manager) finishResponseReplay(key string, e *responseReplay) {
 	e.mu.Lock()
-	result := cachedResponse{Status: e.status, Headers: e.headers, Body: e.body.Bytes()}
+	result := cachedResponse{RequestID: e.originRequest, Status: e.status, Headers: e.headers, Body: e.body.Bytes()}
 	e.expires = time.Now().Add(responseReplayTTL)
 	tracker := &Tracker{Stream: strings.Contains(e.headers.Get("Content-Type"), "text/event-stream")}
 	tracker.Feed(result.Body)
@@ -335,7 +352,7 @@ func (m *Manager) loadResponseReplay(key string) *responseReplay {
 	if err != nil || json.Unmarshal(plain, &result) != nil || len(result.Body) > responseReplayLimit {
 		return nil
 	}
-	e := &responseReplay{changed: make(chan struct{}), status: result.Status, headers: result.Headers, done: true, stored: true, expires: time.UnixMilli(expires), generation: m.replayGeneration}
+	e := &responseReplay{originRequest: result.RequestID, changed: make(chan struct{}), status: result.Status, headers: result.Headers, done: true, stored: true, expires: time.UnixMilli(expires), generation: m.replayGeneration}
 	e.body.Write(result.Body)
 	return e
 }

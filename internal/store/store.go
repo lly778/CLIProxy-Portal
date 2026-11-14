@@ -282,6 +282,9 @@ func (s *Store) migrate(ctx context.Context, registrationOpen bool) error {
 	if err := s.migrateRequestOutcomes(ctx); err != nil {
 		return fmt.Errorf("migrate request outcomes: %w", err)
 	}
+	if err := s.migrateAGYObservations(ctx); err != nil {
+		return err
+	}
 	if err := s.migrateAGY(ctx); err != nil {
 		return fmt.Errorf("migrate AGY usage: %w", err)
 	}

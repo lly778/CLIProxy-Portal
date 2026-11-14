@@ -130,7 +130,7 @@ func (k *Keys) readAGYUsage(ctx context.Context, req cpamp.AnalyticsRequest) (*c
 			value.Timeline = append(value.Timeline, v)
 		}
 		if unknown > 0 {
-			value.AGYUsageNote = "部分 AGY 请求未提供 Token，用量可能不完整。"
+			value.AGYUsageNote = "部分 AGY 调用未提供 Token，用量可能不完整。"
 		}
 	}
 	if req.Include.EventsPage != nil && req.Include.EventsPage.BeforeMS == nil {

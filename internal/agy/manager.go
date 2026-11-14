@@ -16,11 +16,16 @@ import (
 )
 
 type RuntimeConfig struct {
-	Command, Home, Secret string
-	MaxSessions           int
-	ToolTimeout           time.Duration
+	ExperimentalCatalogRefresh bool
+	Observe                    func(Observation) error
+	Command, Home, Secret      string
+	MaxSessions                int
+	ToolTimeout                time.Duration
 }
 type agentEvent struct {
+	Remote    *remoteMCPEvent
+	Search    *serverSearchEvent
+	Epoch     uint64
 	Text      string
 	Reasoning bool
 	Call      *pendingTool
@@ -44,6 +49,24 @@ type reportedTool struct {
 	Official     bool
 }
 type session struct {
+	remoteRetainedBytes                                int
+	remoteInFlight                                     bool
+	remoteConnections                                  map[string]*remoteMCPClient
+	remoteLease                                        uint64
+	catalogRefreshExperiment                           bool
+	catalogSignal                                      chan struct{}
+	catalogOwner                                       chan struct{}
+	catalogRevision                                    uint64
+	catalogFetchedHash                                 string
+	catalogStreams                                     int
+	deferredTools                                      []tool
+	contractCache                                      map[string]toolContractDescription
+	contractCacheBytes                                 int
+	epoch                                              uint64
+	promptCompletedEpoch                               uint64
+	nativeToolEpochs                                   map[string]uint64
+	nativeToolOrder                                    []string
+	trace                                              *requestTrace
 	mu                                                 sync.Mutex
 	requestMu                                          sync.Mutex
 	ID, tenant, secret, owner, model, system, toolHash string
@@ -81,37 +104,46 @@ type session struct {
 	officialVersion                                    int
 }
 type Manager struct {
-	queuedFollowups  atomic.Int64
-	cfg              RuntimeConfig
-	mu               sync.Mutex
-	startMu          sync.Mutex
-	proc             *process
-	sessions         map[string]*session
-	disk             *sessionDiskCache
-	cacheError       bool
-	residentLimit    int
-	residentRevision int64
-	quotaMu          sync.Mutex
-	quota            QuotaSnapshot
-	quotaAt          time.Time
-	quotaFlight      chan struct{}
-	quotaGeneration  uint64
-	quotaReadTest    func(context.Context) (QuotaSnapshot, error)
-	authMu           sync.Mutex
-	authJob          *loginJob
-	authCommandTest  func(context.Context, string) *exec.Cmd
-	mcpURL           string
-	mcpServer        *http.Server
-	slot             chan struct{}
-	life             context.Context
-	cancel           context.CancelFunc
-	summarizeTest    func(context.Context, string, []any, func()) (string, error)
-	checkpointCache  map[string]checkpointCacheEntry
-	replayMu         sync.Mutex
-	replays          map[string]*responseReplay
-	replayGeneration uint64
-	closing          bool
-	requests         sync.WaitGroup
+	remoteAttemptsMu      sync.Mutex
+	remoteInFlight        int
+	remoteCapacityChanged chan struct{}
+	remoteAttempts        map[string]time.Time
+	remoteTransport       http.RoundTripper
+	queuedFollowups       atomic.Int64
+	cfg                   RuntimeConfig
+	mu                    sync.Mutex
+	startMu               sync.Mutex
+	proc                  *process
+	sessions              map[string]*session
+	restoring             map[string]bool
+	disk                  *sessionDiskCache
+	cacheError            bool
+	residentLimit         int
+	residentRevision      int64
+	quotaMu               sync.Mutex
+	quota                 QuotaSnapshot
+	quotaAt               time.Time
+	quotaFlight           chan struct{}
+	quotaGeneration       uint64
+	quotaReadTest         func(context.Context) (QuotaSnapshot, error)
+	authMu                sync.Mutex
+	authJob               *loginJob
+	authCommandTest       func(context.Context, string) *exec.Cmd
+	mcpURL                string
+	mcpServer             *http.Server
+	slot                  chan struct{}
+	life                  context.Context
+	cancel                context.CancelFunc
+	summarizeTest         func(context.Context, string, []any, func()) (string, error)
+	checkpointCache       map[string]checkpointCacheEntry
+	toolRecords           map[string]toolRecordArchive
+	toolRecordSizes       map[string]int
+	toolRecordBytes       int
+	replayMu              sync.Mutex
+	replays               map[string]*responseReplay
+	replayGeneration      uint64
+	closing               bool
+	requests              sync.WaitGroup
 }
 
 func NewManager(cfg RuntimeConfig) (*Manager, error) {
@@ -212,15 +244,17 @@ func (m *Manager) ensure(ctx context.Context) (*process, error) {
 	if p != nil && p.alive() {
 		return p, nil
 	}
-	p, e := startProcess(m.cfg.Command, m.cfg.Home, filepath.Join(m.cfg.Home, "workspace"), m.update, m.permission)
+	fingerprint := runtimeFingerprint(m.cfg.Command)
+	p, e := startProcess(m.cfg.Command, m.cfg.Home, filepath.Join(m.cfg.Home, "workspace"), m.captureNativeOrigin, m.finishNativeOrigin, m.updateFrom, m.permissionFrom)
 	if e != nil {
 		return nil, e
 	}
 	ctx, cancel := shortContext(ctx)
 	defer cancel()
 	var init struct {
-		Protocol     int            `json:"protocolVersion"`
-		Capabilities map[string]any `json:"agentCapabilities"`
+		Protocol     int                            `json:"protocolVersion"`
+		Capabilities map[string]any                 `json:"agentCapabilities"`
+		AgentInfo    struct{ Name, Version string } `json:"agentInfo"`
 	}
 	e = p.call(ctx, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}, "clientInfo": map[string]string{"name": "cliproxy-portal", "version": "1"}}, &init)
 	if e != nil || init.Protocol != 1 {
@@ -231,6 +265,7 @@ func (m *Manager) ensure(ctx context.Context) (*process, error) {
 		return nil, fail(503, "protocol_unsupported", "该 AGY 版本未提供兼容的 ACP 协议")
 	}
 	p.canLoad, _ = init.Capabilities["loadSession"].(bool)
+	p.evidence = newRuntimeEvidence(fingerprint, init.AgentInfo.Name, init.AgentInfo.Version, init.Protocol, init.Capabilities)
 	m.mu.Lock()
 	m.proc = p
 	m.mu.Unlock()
@@ -256,6 +291,8 @@ func (m *Manager) Status() Status {
 	if m.proc != nil && m.proc.alive() {
 		s.State = "connected"
 		s.Ready = true
+		evidence := m.proc.runtimeEvidence()
+		s.Runtime = &evidence
 	}
 	m.replayMu.Lock()
 	active := 0
@@ -366,6 +403,8 @@ func (m *Manager) createSession(ctx context.Context, owner string, r request, in
 	life, done := context.WithCancel(m.life)
 	s := &session{tenant: newID("s_"), secret: newID("token_"), owner: owner, model: r.Model, system: digest(system), toolHash: digest(r.Tools), tools: r.Tools, pending: map[string]*pendingTool{}, reported: map[string]reportedTool{}, responses: map[string]bool{}, events: make(chan agentEvent, 256), life: life, cancel: done, last: time.Now(), proc: p}
 	s.advertisedTools = eagerTools(r.Tools)
+	s.catalogRefreshExperiment = m.cfg.ExperimentalCatalogRefresh
+	s.deferredTools = deferredCatalog(r.Tools)
 	s.loadedTools = loaded
 	s.tools = mergeTools(s.advertisedTools, loaded)
 	if len(s.tools) > 256 {
@@ -374,6 +413,7 @@ func (m *Manager) createSession(ctx context.Context, owner string, r request, in
 	}
 	s.toolHash = digest(s.tools)
 	s.internal = internal
+	s.loading = r.bindRequest
 	s.officialVersion = officialToolsVersion
 	// Summary workers share the same session bound as ordinary generations.
 	// They may replace completed cache entries, never pending tools.
@@ -545,6 +585,10 @@ func (m *Manager) sweep() {
 	}
 }
 func (m *Manager) update(raw json.RawMessage) {
+	m.updateFrom(nativeEventOrigin{}, raw)
+}
+
+func (m *Manager) updateFrom(origin nativeEventOrigin, raw json.RawMessage) {
 	var p struct {
 		ID     string `json:"sessionId"`
 		Update struct {
@@ -561,7 +605,7 @@ func (m *Manager) update(raw json.RawMessage) {
 			Meta     map[string]any `json:"_meta"`
 		} `json:"update"`
 	}
-	if json.Unmarshal(raw, &p) != nil {
+	if unmarshalExact(raw, &p) != nil {
 		return
 	}
 	m.mu.Lock()
@@ -577,14 +621,30 @@ func (m *Manager) update(raw json.RawMessage) {
 		return
 	}
 	s.mu.Lock()
-	loading := s.loading
+	// Remember restored/idle tool IDs too, but never publish those echoes.
+	// A callback from another process or session object must not poison this set.
+	toolUpdate := p.Update.Kind == "tool_call" || p.Update.Kind == "tool_call_update"
+	identified := origin.Process == nil || origin.Session == s && origin.Process == s.proc && origin.Epoch == s.epoch
+	if identified && toolUpdate && !rememberNativeTool(s, p.Update.CallID) {
+		s.mu.Unlock()
+		return
+	}
+	if !origin.matches(s) {
+		s.mu.Unlock()
+		return
+	}
+	loading, active, epoch := s.loading, s.running, s.epoch
 	s.mu.Unlock()
-	if loading {
+	if loading || !active {
 		return
 	}
 	u := p.Update
 	if u.Kind == "tool_call" || u.Kind == "tool_call_update" {
 		s.mu.Lock()
+		if s.epoch != epoch || s.loading || !s.running || !origin.matches(s) {
+			s.mu.Unlock()
+			return
+		}
 		_, knownCall := s.reported[u.CallID]
 		awaitExisting := u.Name == awaitName || u.ToolName == awaitName || strings.HasSuffix(u.ToolName, "_"+awaitName)
 		if name, ok := u.Meta["mcpToolName"].(string); ok {
@@ -594,7 +654,7 @@ func (m *Manager) update(raw json.RawMessage) {
 		s.mu.Unlock()
 		if s.internal || checkpointTool {
 			select {
-			case s.events <- agentEvent{Err: fail(502, "compaction_tool_denied", "摘要过程不允许执行工具")}:
+			case s.events <- agentEvent{Epoch: epoch, Err: fail(502, "compaction_tool_denied", "摘要过程不允许执行工具")}:
 			default:
 				s.cancel()
 			}
@@ -612,6 +672,10 @@ func (m *Manager) update(raw json.RawMessage) {
 			name = u.ToolName
 		}
 		s.mu.Lock()
+		if s.epoch != epoch || s.loading || !s.running || !origin.matches(s) {
+			s.mu.Unlock()
+			return
+		}
 		_, reported := s.reported[u.CallID]
 		if u.Kind == "tool_call" && u.CallID != "" && !reported && u.Status != "failed" {
 			// A new action after a transient warning means the native agent
@@ -642,7 +706,7 @@ func (m *Manager) update(raw json.RawMessage) {
 		}
 		s.mu.Unlock()
 		if official {
-			m.sendOfficialEvent(s, officialToolEvent{ID: u.CallID, Name: name, Status: u.Status, Args: u.Args})
+			m.sendOfficialEvent(s, officialToolEvent{ID: u.CallID, Name: name, Status: u.Status, Args: u.Args}, epoch)
 		}
 		return
 	}
@@ -656,18 +720,22 @@ func (m *Manager) update(raw json.RawMessage) {
 				// its diagnostic without cancelling session/prompt or exposing
 				// an intermediate warning as the assistant's final answer.
 				s.mu.Lock()
-				s.promptWarning = failure
+				if s.epoch == epoch && s.running && !s.loading && origin.matches(s) {
+					s.promptWarning = failure
+				}
 				s.mu.Unlock()
 				return
 			}
 			if strings.TrimSpace(u.Content.Text) != "" {
 				s.mu.Lock()
-				s.promptWarning = nil
+				if s.epoch == epoch && s.running && !s.loading && origin.matches(s) {
+					s.promptWarning = nil
+				}
 				s.mu.Unlock()
 			}
 		}
 		select {
-		case s.events <- agentEvent{Text: u.Content.Text, Reasoning: u.Kind == "agent_thought_chunk"}:
+		case s.events <- agentEvent{Epoch: epoch, Text: u.Content.Text, Reasoning: u.Kind == "agent_thought_chunk"}:
 		case <-s.life.Done():
 		default:
 			s.cancel()
@@ -691,6 +759,10 @@ func agentFailure(text string) error {
 	return nil
 }
 func (m *Manager) permission(method string, raw json.RawMessage) (any, error) {
+	return m.permissionFrom(nativeEventOrigin{}, method, raw)
+}
+
+func (m *Manager) permissionFrom(origin nativeEventOrigin, method string, raw json.RawMessage) (any, error) {
 	if method != "session/request_permission" {
 		return nil, errors.New("unsupported client capability")
 	}
@@ -718,13 +790,16 @@ func (m *Manager) permission(method string, raw json.RawMessage) (any, error) {
 	if s != nil {
 		s.mu.Lock()
 		v, ok := s.reported[p.Call.ID]
-		if ok && !v.Conflict && v.Server == bridgeName && s.handshake && s.running {
+		if ok && origin.matches(s) && nativeToolCurrent(s, p.Call.ID) && !s.loading && !v.Conflict && v.Server == bridgeName && s.handshake && s.running {
 			allowed = v.Name == awaitName || v.Name == callToolName || v.Name == describeToolName
+			if v.Name == readToolRecordName {
+				allowed = !s.checkpointing && !s.loading && s.policy.Mode != "none"
+			}
 			for _, t := range s.tools {
 				allowed = allowed || t.mcpName() == v.Name
 			}
 		}
-		if ok && !v.Conflict && v.Official && v.Server == "" && !s.internal && s.running {
+		if ok && origin.matches(s) && nativeToolCurrent(s, p.Call.ID) && !s.loading && !v.Conflict && v.Official && v.Server == "" && !s.internal && s.running {
 			allowed = s.policy.permitsOfficial(v.Name)
 		}
 		s.mu.Unlock()

@@ -220,37 +220,44 @@ func (m *Manager) startUsage(s *session) {
 	s.mu.Unlock()
 }
 func (m *Manager) consumeUsage(s *session) Usage {
+	u, _ := m.consumeUsageCalls(s)
+	return u
+}
+func (m *Manager) consumeUsageCalls(s *session) (Usage, int) {
+	return m.consumeUsageCallsContext(s.life, s)
+}
+func (m *Manager) consumeUsageCallsContext(parent context.Context, s *session) (Usage, int) {
 	s.mu.Lock()
 	cursor := s.usageCursor
 	s.mu.Unlock()
 	if cursor < -1 {
-		return Usage{}
+		return Usage{}, 0
 	}
 	r, err := openNativeUsage(m.cfg.Home, s.ID)
 	if err != nil {
-		return Usage{}
+		return Usage{}, 0
 	}
 	defer r.db.Close()
-	ctx, done := context.WithTimeout(s.life, 350*time.Millisecond)
+	ctx, done := context.WithTimeout(parent, 350*time.Millisecond)
 	defer done()
 	for attempt := 0; attempt < 4; attempt++ {
 		u, next, calls, err := r.after(ctx, cursor)
 		if err != nil {
-			return Usage{}
+			return Usage{}, 0
 		}
 		if calls > 0 {
 			s.mu.Lock()
 			s.usageCursor = next
 			s.mu.Unlock()
-			return u
+			return u, calls
 		}
 		if attempt < 3 {
 			select {
 			case <-time.After(40 * time.Millisecond):
 			case <-ctx.Done():
-				return Usage{}
+				return Usage{}, 0
 			}
 		}
 	}
-	return Usage{}
+	return Usage{}, 0
 }

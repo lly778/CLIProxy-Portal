@@ -119,6 +119,9 @@ func (c *Client) Request(ctx context.Context, method, path, owner string, body i
 	}
 	r.Header.Set("Authorization", "Bearer "+c.secret)
 	r.Header.Set("Content-Type", "application/json")
+	if id, ok := ctx.Value(observationRequestKey{}).(string); ok && (path == "/internal/responses" || path == "/internal/compact") {
+		r.Header.Set("X-Portal-Request-ID", id)
+	}
 	if identity, ok := ctx.Value(requestIdentityContextKey{}).(http.Header); ok && (path == "/internal/responses" || path == "/internal/compact") {
 		for name, values := range identity {
 			r.Header[name] = append([]string(nil), values...)

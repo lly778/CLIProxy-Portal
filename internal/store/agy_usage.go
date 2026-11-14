@@ -103,6 +103,9 @@ func (s *Store) AGYAggregates(ctx context.Context, from, to int64, hashes []stri
 	q += filter
 	args = append(args, filterArgs...)
 
+	q += ` UNION ALL SELECT at_ms/60000*60000,key_hash,model,0,0,0,SUM(input_tokens),SUM(output_tokens),SUM(cached_tokens),SUM(reasoning_tokens),SUM(total_tokens),SUM(1-usage_known),0,MAX(at_ms) FROM agy_summary_usage WHERE at_ms>=? AND at_ms<?` + filter + ` GROUP BY 1,key_hash,model`
+	args = append(args, from, to)
+	args = append(args, filterArgs...)
 	rows, e := s.db.QueryContext(ctx, q, args...)
 	if e != nil {
 		return nil, e

@@ -1,9 +1,11 @@
 package agy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -103,7 +105,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	req.bindRequest = true
 	req.owner = owner
+	r, trace := m.traceRequest(r, owner, req.Model)
+	defer trace.phase("request_finished")
 	if _, e = systemText(req); e != nil {
 		WriteError(w, e)
 		return
@@ -114,6 +119,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	trace.phase("waiting_generation_slot")
 	queue := time.NewTimer(10 * time.Second)
 	defer queue.Stop()
 	checkpoint := isCodexCompactionRequest(req)
@@ -159,7 +165,19 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	trace.phase("session_loading")
+	if len(req.remoteSpecs) > 0 {
+		metadataCtx, done := context.WithTimeout(r.Context(), 30*time.Second)
+		e = m.prepareRemoteTools(metadataCtx, owner, &req)
+		done()
+		if e != nil {
+			WriteError(w, e)
+			return
+		}
+	}
 	out := newResponse(w, req.Stream, req.Model)
+	out.trace = trace
+	trace.emit(Observation{Kind: "response", State: "created", ResponseID: out.id})
 	out.imageBase = publicImageBase(r.Header.Get("X-Portal-Image-Base-URL"))
 	out.imageSecret = m.cfg.Secret
 	out.parallel = req.Parallel
@@ -172,12 +190,20 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, item := range req.remoteCatalogItems {
+		if e = out.remoteEvent(remoteMCPEvent{Item: item}); e != nil {
+			return
+		}
+	}
 	sendItems := req.Items
 	completeHistory := req.Previous == ""
 	if s != nil {
 		s.mu.Lock()
 		req.Items, _ = alignToolIDs(s, req.Items)
 		s.mu.Unlock()
+	}
+	if s != nil && mergeResultHistory(s, &req) {
+		completeHistory = true
 	}
 	if s != nil && req.Previous != "" {
 		s.mu.Lock()
@@ -190,6 +216,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	sendItems = req.Items
 	if s != nil && s.proc == nil {
+		original := s
 		system, _ := systemText(req)
 		if s.interrupted {
 			req.ResumeNote = interruptedResumeNote(s)
@@ -199,11 +226,19 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				out.fail(fail(409, "compaction_session_unavailable", "原 AGY 会话需要先正常续接，未改动原工具调用"))
 				return
 			}
+			trace.phase("restoring_native_session")
 			s, e = m.restoreNativeSession(r.Context(), s, req)
 		} else if s.interrupted || s.system != digest(system) || s.model != req.Model || s.persisted && s.officialVersion < officialToolsVersion {
+			trace.phase("rebuilding_session")
+			trace.emit(Observation{Kind: "session", State: "rebuild", SessionID: s.ID, Reason: rebuildObservationReason(s, req)})
 			s, e = m.rebuildSession(r.Context(), s, req)
 		} else {
+			trace.phase("restoring_session")
 			s, e = m.restoreSession(r.Context(), s, req)
+		}
+		if isMissingSession(e) && !checkpoint {
+			trace.phase("rebuilding_missing_session")
+			s, e = m.rebuildMissingSession(r.Context(), original, req)
 		}
 		if e != nil {
 			out.fail(e)
@@ -232,12 +267,24 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			out.fail(sizeErr)
 			return
 		}
+		trace.phase("creating_session")
 		s, e = m.create(r.Context(), owner, req)
 		if e != nil {
 			out.fail(e)
 			return
 		}
 	}
+	binding := s
+	defer func() {
+		if req.remoteLease > 0 {
+			s.mu.Lock()
+			if s.remoteLease == req.remoteLease {
+				s.remoteConnections = nil
+			}
+			s.mu.Unlock()
+		}
+	}()
+	defer func() { binding.mu.Lock(); binding.loading = false; binding.mu.Unlock() }()
 	queuedLocked, finishQueued, queueErr := m.waitUserFollowup(r.Context(), s, &req, out, func() {
 		if slotHeld {
 			<-m.slot
@@ -272,6 +319,31 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		out.fail(fail(409, "session_busy", "该 AGY 会话已有进行中的请求"))
 		return
 	}
+	s.mu.Lock()
+	s.loading = false
+	s.trace = trace
+	trace.bind(s.ID)
+	if s.proc != nil {
+		evidence := s.proc.runtimeEvidence()
+		trace.mu.Lock()
+		trace.runtimeSHA = evidence.SHA256
+		trace.mu.Unlock()
+	}
+	for _, call := range s.pending {
+		if call.trace == nil {
+			call.trace = trace
+			if call.traceSession == "" {
+				call.traceSession = s.ID
+			}
+			if call.traceRequest != "" {
+				call.trace = &requestTrace{m: m, owner: owner, request: call.traceRequest, model: req.Model, session: call.traceSession}
+			} else {
+				call.traceRequest = trace.request
+			}
+		}
+	}
+	s.mu.Unlock()
+	trace.phase("session_ready")
 	locked := s
 	defer func() { locked.requestMu.Unlock() }()
 	if finishQueued != nil {
@@ -331,10 +403,12 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	if !same || len(history) > 0 && !prefix(history, requestFingerprints(req.Items)) && completeHistory {
 		if !req.ToolsProvided {
 			s.mu.Lock()
-			req.Tools = append([]tool{}, s.tools...)
+			req.Tools = mergeTools(s.tools, s.deferredTools)
 			s.mu.Unlock()
 			req.ToolsProvided = true
 		}
+		trace.phase("rebuilding_session")
+		trace.emit(Observation{Kind: "session", State: "rebuild", SessionID: s.ID, Reason: rebuildObservationReason(s, req)})
 		s, e = m.rebuildSession(r.Context(), s, req)
 		if e != nil {
 			out.fail(e)
@@ -343,6 +417,18 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		locked.requestMu.Unlock()
 		locked = s
 		locked.requestMu.Lock()
+		s.mu.Lock()
+		s.loading = false
+		s.trace = trace
+		trace.bind(s.ID)
+		if s.proc != nil {
+			evidence := s.proc.runtimeEvidence()
+			trace.mu.Lock()
+			trace.runtimeSHA = evidence.SHA256
+			trace.mu.Unlock()
+		}
+		s.mu.Unlock()
+		trace.phase("session_ready")
 		running = false
 		history = nil
 		sendItems = req.Items
@@ -388,23 +474,42 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if running || awaiting {
-		if e = deliverToolsForRequest(s, req.Items, &req); e != nil {
+		trace.phase("receiving_tool_results")
+		resumingRemote, resumeErr := m.prepareRemoteContinuation(s, &req)
+		if resumeErr != nil {
+			out.fail(resumeErr)
+			return
+		}
+		if !resumingRemote {
+			e = deliverToolsForRequest(s, req.Items, &req)
+		}
+		if e != nil {
 			out.fail(e)
 			return
 		}
+		m.startRemoteJobs(s)
 		if !running {
 			blocks, waiting, err := lateResultPrompt(s)
 			if err != nil {
 				out.fail(err)
 				return
 			}
-			if waiting || len(blocks) == 0 {
+			if waiting && remoteWorkOnly(s) {
+				rememberRequest(s, req, fps)
+				s.mu.Lock()
+				s.running = false
+				s.mu.Unlock()
+				m.startUsage(s)
+				trace.phase("waiting_remote_service")
+			} else if waiting || len(blocks) == 0 {
 				out.fail(fail(409, "waiting_for_tools", "AGY 正在等待完整工具结果"))
 				return
+			} else {
+				rememberRequest(s, req, fps)
+				m.startUsage(s)
+				trace.phase("model_generating")
+				m.startPrompt(s, blocks)
 			}
-			rememberRequest(s, req, fps)
-			m.startUsage(s)
-			m.startPrompt(s, blocks)
 		}
 	} else {
 		items := sendItems
@@ -452,12 +557,20 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		rememberRequest(s, req, fps)
 		s.mu.Lock()
-		s.tools, s.loadedTools, s.toolHash = nextTools, loaded, toolHash
+		commitToolCatalog(s, nextTools, loaded, toolHash)
+		if !checkpoint {
+			commitRemoteConnections(s, &req)
+		}
+		if req.ToolsProvided {
+			s.deferredTools = deferredCatalog(req.Tools)
+		}
 		s.policy = policy
 		s.mu.Unlock()
 		m.startUsage(s)
+		trace.phase("model_generating")
 		m.startPrompt(s, blocks)
 	}
+	trace.phase("model_generating")
 	s.mu.Lock()
 	s.history = fps
 	s.items = append([]map[string]any(nil), req.Items...)
@@ -486,9 +599,53 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case event := <-s.events:
+			s.mu.Lock()
+			stale := event.Epoch != 0 && event.Epoch != s.epoch
+			if event.Remote != nil && s.pending[event.Remote.Call.ID] == event.Remote.Call {
+				stale = false
+			}
+			s.mu.Unlock()
+			if stale {
+				continue
+			}
 			if event.Err != nil {
 				out.fail(event.Err)
 				return
+			}
+			if event.Search != nil {
+				if e = out.search(*event.Search); e != nil {
+					return
+				}
+			}
+			if event.Remote != nil {
+				select {
+				case <-event.Remote.Call.Ready:
+				case <-r.Context().Done():
+					return
+				case <-s.life.Done():
+					return
+				}
+				s.mu.Lock()
+				known := false
+				for _, item := range s.items {
+					if item["type"] == "mcp_call" && item["id"] == event.Remote.Item["id"] && itemFingerprint(item) == itemFingerprint(event.Remote.Item) {
+						known = true
+						break
+					}
+				}
+				s.mu.Unlock()
+				if !known {
+					e = out.remoteEvent(*event.Remote)
+				}
+				if e != nil {
+					return
+				}
+				s.mu.Lock()
+				active := s.running
+				s.mu.Unlock()
+				if !active {
+					event.Result = &promptResult{Stop: "end_turn"}
+				}
 			}
 			if event.Official != nil {
 				if e = out.official(m.cfg.Home, s, *event.Official); e != nil {
@@ -507,11 +664,15 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					s.mu.Unlock()
 					continue
 				}
+				event.Call.BatchID = out.batchID
 				event.Call.Delivered = true
 				s.mu.Unlock()
 				if e = out.call(event.Call); e != nil {
 					return
 				}
+				s.mu.Lock()
+				event.Call.receipt("dispatched")
+				s.mu.Unlock()
 				if batch == nil {
 					batch = time.NewTimer(150 * time.Millisecond)
 					batchC = batch.C
@@ -530,7 +691,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					out.fail(fail(502, "agent_incomplete", "AGY 未正常完成本轮生成"))
 					return
 				}
-				usage := m.consumeUsage(s)
+				usage := m.consumeObservedUsage(s, trace)
 				accrued = addStepUsage(accrued, usage)
 				blocks, waiting, lateErr := lateResultPrompt(s)
 				if lateErr != nil {
@@ -539,10 +700,15 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				if len(blocks) > 0 {
 					rememberRequest(s, req, fps)
+					trace.phase("model_generating")
 					m.startPrompt(s, blocks)
 					continue
 				}
 				if waiting {
+					if remoteWorkOnly(s) {
+						continue
+					}
+					trace.phase("waiting_client_tools")
 					// Expose calls already queued even if native completion raced
 					// the tool batch timer. Never mark a pending action successful.
 					s.mu.Lock()
@@ -550,6 +716,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					for _, id := range pendingIDs(s) {
 						c := s.pending[id]
 						if !c.Delivered {
+							c.BatchID = out.batchID
 							c.Delivered = true
 							calls = append(calls, c)
 						}
@@ -560,7 +727,11 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 						if out.call(c) != nil {
 							return
 						}
+						s.mu.Lock()
+						c.receipt("dispatched")
+						s.mu.Unlock()
 					}
+					recordToolBatch(s, out)
 					if out.finish(accrued) != nil {
 						return
 					}
@@ -584,6 +755,11 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					out.fail(fail(502, "required_tool_not_called", "AGY 未调用本次请求指定的客户端工具"))
 					return
 				}
+				if err := m.finishCodexCheckpoint(r.Context(), req, out); err != nil {
+					out.fail(err)
+					return
+				}
+				recordToolBatch(s, out)
 				if out.finish(accrued) != nil {
 					return
 				}
@@ -595,7 +771,9 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case <-batchC:
-			usage := m.consumeUsage(s)
+			trace.phase("waiting_client_tools")
+			usage := m.consumeObservedUsage(s, trace)
+			recordToolBatch(s, out)
 			if e = out.finish(addStepUsage(accrued, usage)); e != nil {
 				return
 			}
@@ -626,8 +804,13 @@ func (m *Manager) find(owner string, r request) (*session, error) {
 		}
 		s.mu.Lock()
 		match := sessionMatchesRequest(s, r)
+		loading := s.loading
 		s.mu.Unlock()
 		if match {
+			if loading {
+				m.mu.Unlock()
+				return nil, fail(409, "session_busy", "原 AGY 会话正在恢复，请等待当前续接完成")
+			}
 			if found != nil && found != s {
 				m.mu.Unlock()
 				return nil, fail(409, "ambiguous_session", "无法确认 AGY 会话，请新建对话")
@@ -666,11 +849,28 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	results := map[string]any{}
+	wireResults := map[string]map[string]any{}
+	historical := map[string]string{}
+	for _, old := range s.items {
+		if isToolResultItem(stringField(old, "type")) {
+			historical[resultCallID(old)] = itemFingerprint(old)
+		}
+	}
 	loaded := append([]tool{}, s.loadedTools...)
+	if req != nil && req.ToolsProvided && (hasServerSearch(req.Tools) || hasServerSearch(s.tools)) {
+		loaded = authorizedServerTools(req.Tools, loaded)
+	}
 	for _, v := range items {
 		kind, _ := v["type"].(string)
 		if isToolResultItem(kind) {
 			id := resultCallID(v)
+			if _, duplicate := wireResults[id]; duplicate {
+				return fail(400, "duplicate_result", "同一工具结果重复出现")
+			}
+			wireResults[id] = v
+			if s.pending[id] == nil && (historical[id] == "" || historical[id] != itemFingerprint(v)) {
+				return fail(400, "unknown_tool_result", "工具结果无法匹配原调用，未改动当前批次")
+			}
 			if c := s.pending[id]; c != nil {
 				if !c.Delivered {
 					return fail(409, "tool_not_delivered", "工具调用尚未完整交付")
@@ -678,7 +878,13 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 				if _, ok := results[id]; ok {
 					return fail(400, "duplicate_result", "同一工具结果重复出现")
 				}
-				if isNativeClientTool(c.Tool.Type) {
+				if c.remote != nil {
+					value, err := validateRemoteApproval(c, v, req)
+					if err != nil {
+						return err
+					}
+					results[id] = value
+				} else if isNativeClientTool(c.Tool.Type) {
 					value, err := nativeResultValue(c, v)
 					if err != nil {
 						return err
@@ -698,8 +904,15 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 					loaded = mergeTools(newTools, loaded)
 					results[id] = map[string]any{"tools": newTools}
 				} else {
-					if kind != "function_call_output" && kind != "custom_tool_call_output" {
+					expectedKind := "function_call_output"
+					if c.Tool.Type == "custom" {
+						expectedKind = "custom_tool_call_output"
+					}
+					if kind != expectedKind {
 						return fail(400, "invalid_tool_result", "工具结果类型与本次客户端调用不匹配")
+					}
+					if _, present := v["output"]; !present {
+						return fail(400, "invalid_tool_result", "工具结果缺少 output，原调用保持等待")
 					}
 					if _, err := toolResultBlocks(v["output"]); err != nil {
 						return err
@@ -717,18 +930,8 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 			}
 		}
 	}
-	for id, c := range s.pending {
-		select {
-		case <-c.Ready:
-			continue
-		default:
-		}
-		if !c.Delivered {
-			continue
-		}
-		if _, ok := results[id]; !ok {
-			return fail(400, "missing_tool_result", "请返回本轮全部工具调用结果")
-		}
+	if err := missingToolResults(s, results); err != nil {
+		return err
 	}
 	if len(results) == 0 {
 		return fail(409, "waiting_for_tools", "AGY 正在等待客户端工具结果")
@@ -736,12 +939,15 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 	for id, v := range results {
 		c := s.pending[id]
 		select {
-		case <-c.Ready:
-			if digest(v) != c.OutputHash {
+		case <-receivedReady(c):
+			if digest(v) != receivedHash(c) {
 				return fail(409, "result_changed", "同一工具的结果不能被重复改写")
 			}
 		default:
 		}
+	}
+	if req != nil && req.ToolsProvided && hasServerSearch(req.Tools) {
+		loaded = authorizedServerTools(req.Tools, loaded)
 	}
 	nextTools := append([]tool{}, s.tools...)
 	if req != nil {
@@ -794,23 +1000,47 @@ func deliverToolsForRequest(s *session, items []map[string]any, req *request) er
 	}
 	ids := make([]string, 0, len(results))
 	for id := range results {
-		ids = append(ids, id)
+		if c := s.pending[id]; !c.Returned && !c.Replayed {
+			ids = append(ids, id)
+		}
 	}
 	sort.Strings(ids)
+	if len(ids) == 0 && (len(extra) > 0 || update != "") {
+		return fail(409, "tool_followup_not_deliverable", "工具结果已交付，请将新增消息单独追加到原对话；本次新增内容未被标记为已处理")
+	}
 	// Commit revocations and schema updates before waking any MCP waiter.
-	s.tools, s.loadedTools, s.toolHash = nextTools, loaded, toolHash
+	commitToolCatalog(s, nextTools, loaded, toolHash)
+	if req != nil && req.ToolsProvided {
+		s.deferredTools = deferredCatalog(req.Tools)
+	}
 	s.policy = policy
-	s.pending[ids[len(ids)-1]].Extra = extra
-	if update != "" {
-		s.pending[ids[len(ids)-1]].Update = update
+	if req != nil {
+		commitRemoteConnections(s, req)
+	}
+	if len(ids) > 0 {
+		s.pending[ids[len(ids)-1]].Extra = extra
+		if update != "" {
+			s.pending[ids[len(ids)-1]].Update = update
+		}
 	}
 	for id, v := range results {
 		c := s.pending[id]
 		select {
-		case <-c.Ready:
+		case <-receivedReady(c):
 		default:
+			if c.remote != nil {
+				c.remote.Approved = v.(bool)
+				c.remote.ApprovalHash = digest(v)
+				c.remote.ApprovalItem = maps.Clone(wireResults[id])
+				c.remote.client = s.remoteConnections[c.remote.Binding.Server]
+				c.receipt("approval_received")
+				close(c.remote.approvalReady)
+				continue
+			}
+			c.ResultItem = maps.Clone(wireResults[id])
 			c.Output = v
 			c.OutputHash = digest(v)
+			c.receipt("result_received")
 			close(c.Ready)
 		}
 	}
@@ -828,6 +1058,8 @@ func (m *Manager) remember(s *session, out *response) {
 }
 
 type response struct {
+	batchID                string
+	trace                  *requestTrace
 	w                      http.ResponseWriter
 	stream, started        bool
 	id, model              string
@@ -852,7 +1084,7 @@ type response struct {
 }
 
 func newResponse(w http.ResponseWriter, stream bool, model string) *response {
-	return &response{w: w, stream: stream, id: newID("resp_agy_"), model: model, created: time.Now().Unix(), textIndex: -1, reasonIndex: -1}
+	return &response{batchID: newID("batch_"), w: w, stream: stream, id: newID("resp_agy_"), model: model, created: time.Now().Unix(), textIndex: -1, reasonIndex: -1}
 }
 func (o *response) envelope(status string, usage Usage) map[string]any {
 	out := o.output
@@ -939,6 +1171,9 @@ func (o *response) writeText(v string, reasoning bool) error {
 	return o.event("response.output_text.delta", map[string]any{"item_id": o.messageID, "output_index": o.textIndex, "content_index": 0, "delta": v})
 }
 func (o *response) call(c *pendingTool) error {
+	if c.remote != nil {
+		return o.remoteEvent(remoteMCPEvent{Item: approvalRequestItem(c), Call: c})
+	}
 	t := c.Tool
 	if isNativeClientTool(t.Type) {
 		item := nativeOutputItem(c)
@@ -1010,6 +1245,7 @@ func (o *response) call(c *pendingTool) error {
 	return o.event("response.output_item.done", map[string]any{"output_index": index, "item": v})
 }
 func (o *response) finish(u Usage) error {
+	o.trace.phase("response_delivery")
 	if o.imagePending != "" {
 		text, _ := rewriteImageParts(o.imagePending, o.imageRefs, true)
 		o.imagePending = ""
@@ -1057,6 +1293,7 @@ func (o *response) finish(u Usage) error {
 	return json.NewEncoder(o.w).Encode(o.envelope("completed", u))
 }
 func (o *response) fail(err error) {
+	o.trace.phase("response_failed")
 	if !o.started {
 		WriteError(o.w, err)
 		return

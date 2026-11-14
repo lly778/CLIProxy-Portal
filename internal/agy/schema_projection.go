@@ -94,13 +94,13 @@ func mergeProjected(nodes []map[string]any, all bool) map[string]any {
 		// Bounds on intersections must be tightened, not silently overwritten.
 		if all {
 			for _, key := range []string{"minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"} {
-				v, ok := node[key].(float64)
+				v, ok := numberRat(node[key])
 				if !ok {
 					continue
 				}
-				prev, exists := out[key].(float64)
-				if !exists || strings.HasPrefix(key, "min") && v > prev || strings.HasPrefix(key, "max") && v < prev {
-					out[key] = v
+				prev, exists := numberRat(out[key])
+				if !exists || strings.HasPrefix(key, "min") && v.Cmp(prev) > 0 || strings.HasPrefix(key, "max") && v.Cmp(prev) < 0 {
+					out[key] = node[key]
 				}
 			}
 		}

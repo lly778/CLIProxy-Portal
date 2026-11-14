@@ -8,18 +8,21 @@ import (
 )
 
 type tool struct {
-	Type          string          `json:"type"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
-	Parameters    map[string]any  `json:"parameters"`
-	Tools         []tool          `json:"tools,omitempty"`
-	Namespace     string          `json:"namespace,omitempty"`
-	Format        map[string]any  `json:"format,omitempty"`
-	Execution     string          `json:"execution,omitempty"`
-	Deferred      bool            `json:"defer_loading,omitempty"`
-	Environment   json.RawMessage `json:"environment,omitempty"`
-	DisplayWidth  int             `json:"display_width,omitempty"`
-	DisplayHeight int             `json:"display_height,omitempty"`
+	remoteSpec     *remoteMCPSpec
+	remoteBinding  *remoteMCPBinding
+	RemoteIdentity string          `json:"remote_definition_id,omitempty"`
+	Type           string          `json:"type"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description"`
+	Parameters     map[string]any  `json:"parameters"`
+	Tools          []tool          `json:"tools,omitempty"`
+	Namespace      string          `json:"namespace,omitempty"`
+	Format         map[string]any  `json:"format,omitempty"`
+	Execution      string          `json:"execution,omitempty"`
+	Deferred       bool            `json:"defer_loading,omitempty"`
+	Environment    json.RawMessage `json:"environment,omitempty"`
+	DisplayWidth   int             `json:"display_width,omitempty"`
+	DisplayHeight  int             `json:"display_height,omitempty"`
 }
 
 // Client transports use Responses function declarations, nested Chat
@@ -28,15 +31,16 @@ type tool struct {
 func (t *tool) UnmarshalJSON(data []byte) error {
 	type plain tool
 	var base plain
-	if err := json.Unmarshal(data, &base); err != nil {
+	if err := unmarshalExact(data, &base); err != nil {
 		return err
 	}
 	var extra struct {
+		ServerURL   string         `json:"server_url"`
 		Function    *plain         `json:"function"`
 		InputSchema map[string]any `json:"input_schema"`
 		MCPSchema   map[string]any `json:"inputSchema"`
 	}
-	if err := json.Unmarshal(data, &extra); err != nil {
+	if err := unmarshalExact(data, &extra); err != nil {
 		return err
 	}
 	if extra.Function != nil && base.Type == "function" {
@@ -60,6 +64,13 @@ func (t *tool) UnmarshalJSON(data []byte) error {
 		base.Type = "function"
 	}
 	*t = tool(base)
+	if base.Type == "mcp" && extra.ServerURL != "" && !(base.Execution == "client" && len(base.Tools) > 0) {
+		spec, err := parseRemoteMCPSpec(data)
+		if err != nil {
+			return err
+		}
+		t.remoteSpec = &spec
+	}
 	return nil
 }
 
@@ -72,15 +83,20 @@ func (t tool) key() string {
 func (t tool) mcpName() string { return "tool_" + digest(t.key())[:24] }
 
 type request struct {
-	followupLimit *int
-	owner         string
-	Model         string          `json:"model"`
-	Stream        bool            `json:"stream"`
-	Previous      string          `json:"previous_response_id"`
-	Instructions  json.RawMessage `json:"instructions"`
-	Input         json.RawMessage `json:"input"`
-	Tools         []tool          `json:"tools"`
-	Reasoning     struct {
+	remoteSpecs        []remoteMCPSpec
+	remoteConnections  map[string]*remoteMCPClient
+	remoteCatalogItems []map[string]any
+	remoteLease        uint64
+	bindRequest        bool
+	followupLimit      *int
+	owner              string
+	Model              string          `json:"model"`
+	Stream             bool            `json:"stream"`
+	Previous           string          `json:"previous_response_id"`
+	Instructions       json.RawMessage `json:"instructions"`
+	Input              json.RawMessage `json:"input"`
+	Tools              []tool          `json:"tools"`
+	Reasoning          struct {
 		Effort string `json:"effort"`
 	} `json:"reasoning"`
 	ToolChoice       json.RawMessage  `json:"tool_choice"`
@@ -93,17 +109,17 @@ type request struct {
 
 func parseRequest(b []byte) (request, error) {
 	var r request
-	if json.Unmarshal(b, &r) != nil || !strings.HasPrefix(r.Model, Prefix) {
+	if unmarshalExact(b, &r) != nil || !strings.HasPrefix(r.Model, Prefix) {
 		return r, fail(400, "invalid_request", "AGY 请求格式无效")
 	}
 	var fields map[string]json.RawMessage
-	_ = json.Unmarshal(b, &fields)
+	_ = unmarshalExact(b, &fields)
 	_, r.ToolsProvided = fields["tools"]
 	for _, name := range []string{"background", "conversation", "text", "response_format", "max_output_tokens", "temperature", "top_p", "truncation"} {
 		if v := fields[name]; len(v) > 0 && string(v) != "null" && string(v) != "false" {
 			if name == "text" {
 				var x map[string]any
-				_ = json.Unmarshal(v, &x)
+				_ = unmarshalExact(v, &x)
 				if len(x) == 0 {
 					continue
 				}
@@ -118,9 +134,9 @@ func parseRequest(b []byte) (request, error) {
 		return r, fail(400, "missing_input", "缺少输入消息")
 	}
 	var text string
-	if json.Unmarshal(r.Input, &text) == nil {
+	if unmarshalExact(r.Input, &text) == nil {
 		r.Items = []map[string]any{{"role": "user", "content": text}}
-	} else if json.Unmarshal(r.Input, &r.Items) != nil {
+	} else if unmarshalExact(r.Input, &r.Items) != nil {
 		return r, fail(400, "invalid_input", "AGY 输入必须是文字或消息列表")
 	}
 	if len(r.Items) > 4096 {
@@ -128,6 +144,7 @@ func parseRequest(b []byte) (request, error) {
 	}
 	r.Items = canonicalHistoryItems(r.Items)
 	flat := []tool{}
+	remoteLabels := map[string]bool{}
 	names := map[string]bool{}
 	var flatten func([]tool, string, int) error
 	flatten = func(list []tool, namespace string, depth int) error {
@@ -135,6 +152,14 @@ func parseRequest(b []byte) (request, error) {
 			return fail(400, "invalid_tool_namespace", "工具命名空间嵌套过深")
 		}
 		for _, t := range list {
+			if t.remoteSpec != nil {
+				if namespace != "" || remoteLabels[t.remoteSpec.Label] || len(r.remoteSpecs) >= 4 {
+					return fail(400, "invalid_remote_mcp", "远程 MCP 服务标签重复、嵌套或数量超过上限")
+				}
+				remoteLabels[t.remoteSpec.Label] = true
+				r.remoteSpecs = append(r.remoteSpecs, *t.remoteSpec)
+				continue
+			}
 			if t.Type == "namespace" {
 				if t.Name == "" || len(t.Tools) == 0 {
 					return fail(400, "invalid_tool_namespace", "工具命名空间缺少名称或工具")
@@ -193,8 +218,8 @@ func parseRequest(b []byte) (request, error) {
 			available = append(available, adapted)
 			continue
 		}
-		if t.Type == "tool_search" && t.Execution == "client" {
-			t.Name = "client_tool_search"
+		if t.Type == "tool_search" && (t.Execution == "client" || t.Execution == "server") {
+			t.Name = t.Execution + "_tool_search"
 			if t.Parameters == nil {
 				t.Parameters = map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}
 			}
@@ -239,6 +264,17 @@ func parseRequest(b []byte) (request, error) {
 		r.UnavailableTools = labels
 	}
 	flat = available
+	clientDiscovery, serverDiscovery := false, false
+	for _, t := range flat {
+		if t.Type == "tool_search" && t.Execution == "server" {
+			serverDiscovery = true
+		} else if isClientSearch(t) {
+			clientDiscovery = true
+		}
+	}
+	if clientDiscovery && serverDiscovery {
+		return r, fail(400, "ambiguous_tool_search", "请为本轮选择一个明确的工具发现执行来源")
+	}
 	for _, t := range flat {
 		if t.Name == "" || len(t.key()) > 256 {
 			return r, fail(400, "invalid_tool_name", "AGY 客户端工具名称为空或过长")
@@ -263,6 +299,7 @@ func itemFingerprint(v map[string]any) string {
 	x := map[string]any{}
 	image := v["type"] == "image_generation_call"
 	reasoning := v["type"] == "reasoning"
+	remoteIdentity := v["type"] == "mcp_call" || v["type"] == "mcp_approval_request"
 	for k, value := range v {
 		// Codex fills these absent optional fields with JSON null when it
 		// records a reasoning item. Only absence/null are interchangeable;
@@ -275,7 +312,8 @@ func itemFingerprint(v map[string]any) string {
 		if image && k == "result_url" {
 			continue
 		}
-		if k != "id" && k != "status" {
+		semanticStatus := v["type"] == "apply_patch_call_output" || v["type"] == "local_shell_call_output" && value == "incomplete"
+		if (k != "id" || remoteIdentity) && (k != "status" || semanticStatus || remoteIdentity) {
 			x[k] = value
 		}
 	}
@@ -304,7 +342,7 @@ func prefix(a, b []string) bool {
 }
 func systemText(r request) (string, error) {
 	var v string
-	if len(r.Instructions) > 0 && string(r.Instructions) != "null" && json.Unmarshal(r.Instructions, &v) != nil {
+	if len(r.Instructions) > 0 && string(r.Instructions) != "null" && unmarshalExact(r.Instructions, &v) != nil {
 		return "", fail(400, "invalid_instructions", "instructions 必须为文本")
 	}
 	if len(r.UnavailableTools) > 0 {

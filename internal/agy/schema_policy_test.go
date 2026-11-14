@@ -40,7 +40,7 @@ func TestAGYSchemaProjectionHandlesRequiredOnlyIntersectionsAndBoundedRecursion(
 	projected := mcpInputSchema(original)
 	props := projected["properties"].(map[string]any)
 	count := props["count"].(map[string]any)
-	if count["minimum"] != float64(3) || count["maximum"] != float64(7) || len(schemaRequired(projected)) != 1 || schemaRequired(projected)[0] != "path" {
+	if !jsonValueEqual(count["minimum"], float64(3)) || !jsonValueEqual(count["maximum"], float64(7)) || len(schemaRequired(projected)) != 1 || schemaRequired(projected)[0] != "path" {
 		t.Fatalf("intersection weakened: %+v", projected)
 	}
 	_ = json.Unmarshal([]byte(`{"type":"object","properties":{"next":{"$ref":"#"},"missing":{"$ref":"https://example.test/schema"}}}`), &original)
@@ -131,7 +131,7 @@ func TestAGYMCPErrorEnvelopeRetainsImagesAndFailureMarker(t *testing.T) {
 	value := map[string]any{"is_error": true, "content": []any{map[string]any{"type": "text", "text": "partial failure"}, map[string]any{"type": "image", "mimeType": "image/png", "data": "YQ=="}}}
 	result := mcpOutput(value, "").(map[string]any)
 	blocks := result["content"].([]any)
-	if result["isError"] != true || len(blocks) != 2 || blocks[1].(map[string]string)["type"] != "image" {
+	if result["isError"] != true || len(blocks) != 3 || !strings.Contains(blocks[0].(map[string]string)["text"], "reported failure") || blocks[2].(map[string]string)["type"] != "image" {
 		t.Fatal("MCP error envelope lost multimodal result")
 	}
 }

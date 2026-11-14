@@ -31,6 +31,7 @@ func requestToolPolicy(r request, tools []tool) (toolPolicy, error) {
 	}
 	var choice struct {
 		Type, Name, Namespace, Mode string
+		ServerLabel                 string `json:"server_label"`
 		Tools                       []map[string]any
 	}
 	if json.Unmarshal(r.ToolChoice, &choice) != nil {
@@ -45,6 +46,16 @@ func requestToolPolicy(r request, tools []tool) (toolPolicy, error) {
 		return p, nil
 	}
 	p.Names = map[string]bool{}
+	addRemote := func(name, label string) bool {
+		found := false
+		for _, t := range tools {
+			if t.remoteBinding != nil && t.remoteBinding.Server == label && (name == "" || name == t.Name) {
+				p.Names[t.key()] = true
+				found = true
+			}
+		}
+		return found
+	}
 	add := func(name, namespace string) bool {
 		for _, t := range tools {
 			if name == t.key() || (name == t.Name && (namespace == t.Namespace || namespace == "")) {
@@ -69,6 +80,12 @@ func requestToolPolicy(r request, tools []tool) (toolPolicy, error) {
 		p.Mode = choice.Mode
 		for _, t := range choice.Tools {
 			kind, _ := t["type"].(string)
+			if kind == "mcp" {
+				if !addRemote(stringField(t, "name"), stringField(t, "server_label")) {
+					return p, fail(400, "invalid_tool_choice", "远程 MCP 选择超出当前授权目录")
+				}
+				continue
+			}
 			if kind == "web_search" || kind == "web_search_preview" {
 				p.Names["google.search_web"], p.Names["google.read_url_content"] = true, true
 				continue
@@ -85,6 +102,12 @@ func requestToolPolicy(r request, tools []tool) (toolPolicy, error) {
 				}
 				if kind == "tool_search" {
 					name = "client_tool_search"
+					for _, candidate := range tools {
+						if candidate.Type == "tool_search" && candidate.Execution == "server" {
+							name = candidate.Name
+							break
+						}
+					}
 				}
 			}
 			ns, _ := t["namespace"].(string)
@@ -93,14 +116,26 @@ func requestToolPolicy(r request, tools []tool) (toolPolicy, error) {
 			}
 		}
 	} else {
+		if choice.Type == "mcp" {
+			if !addRemote(choice.Name, choice.ServerLabel) {
+				return p, fail(400, "invalid_tool_choice", "远程 MCP 选择超出当前授权目录")
+			}
+			p.Mode = "required"
+			return p, nil
+		}
 		if choice.Type != "function" && choice.Type != "custom" && !isNativeClientTool(choice.Type) && choice.Type != "tool_search" {
 			return p, fail(400, "invalid_tool_choice", "不支持该工具选择类型")
 		}
 		name := choice.Name
 		if name == "" && choice.Type != "function" && choice.Type != "custom" {
 			name = "client_" + choice.Type
-			if name == "tool_search" {
-				name = "client_tool_search"
+			if choice.Type == "tool_search" {
+				for _, candidate := range tools {
+					if candidate.Type == "tool_search" && candidate.Execution == "server" {
+						name = candidate.Name
+						break
+					}
+				}
 			}
 		}
 		if !add(name, choice.Namespace) {

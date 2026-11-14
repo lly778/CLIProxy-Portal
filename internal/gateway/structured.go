@@ -73,6 +73,26 @@ func itemRecordEvents(item map[string]any) []RecordEvent {
 	switch kind {
 	case "reasoning":
 		return nil
+	case "mcp_call":
+		name := stringField(item, "name")
+		if server := stringField(item, "server_label"); server != "" {
+			name = server + "." + name
+		}
+		id := stringField(item, "id")
+		events := toolCallRecord(name, id, item["arguments"])
+		if item["output"] != nil || item["error"] != nil {
+			output := item["output"]
+			if text, ok := output.(string); ok {
+				d := json.NewDecoder(strings.NewReader(text))
+				d.UseNumber()
+				var value any
+				if d.Decode(&value) == nil {
+					output = value
+				}
+			}
+			events = append(events, toolResultRecord(name, id, map[string]any{"output": output, "error": item["error"], "status": item["status"]})...)
+		}
+		return events
 	case "function_call", "custom_tool_call":
 		return toolCallRecord(stringField(item, "name"), stringField(item, "call_id"), firstValue(item, "arguments", "input"))
 	case "function_call_output", "custom_tool_call_output":

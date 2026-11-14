@@ -4,13 +4,13 @@
 
 ## 工具续接与会话恢复
 
-客户端服务工具同时接受 Responses 函数定义、Chat Completions 的嵌套 `function`、DSH/Anthropic 的 `input_schema` 和 MCP 的 `inputSchema`。命名空间保持完整身份；客户端已经连接并展开的 MCP 工具可作为函数回传，显式 `execution: client` 的 MCP 工具定义列表也可展开。仅有 `server_url` 的供应商托管 MCP 声明不会被当成客户端执行器。
+客户端服务工具同时接受 Responses 函数定义、Chat Completions 的嵌套 `function`、DSH/Anthropic 的 `input_schema` 和 MCP 的 `inputSchema`。命名空间保持完整身份；客户端已经连接并展开的 MCP 工具可作为函数回传，显式 `execution: client` 的 MCP 工具定义列表也可展开。带 `server_url` 的远程声明走下述独立 MCP broker，由明确连接的远端执行。
 
 网页搜索、网页读取和图片生成统一使用官方 Google 工具。旧的客户端搜索、生图专用适配已删除；初始声明、动态发现、历史工具引用、缓存恢复和调用校验均过滤对应的旧工具，避免混用。文件检索、Python、通用 MCP 及图片查看/回传继续使用客户端执行器。大型工具说明、延迟发现及原始参数校验沿用同一套桥接。
 
 搜索来源和文档文字、MCP 文本资源/资源链接、结构化结果、Anthropic base64 图片及图片生成结果可回填。远程图片地址只作为链接提供，不声称已读取像素；网关不会自行抓取 URL、读取本机文件或解释二进制 PDF。客户端已经提供的历史搜索、图片生成、远程 MCP 等服务记录只用于上下文，不会重新执行。
 
-网页搜索、网页读取和生图直接使用已登录的官方 AGY 服务，不依赖客户端安装对应执行器或另配 DeepSeek 搜索 Key。门户没有安装远程 MCP 执行器以及托管 Shell/代码解释器。
+网页搜索、网页读取和生图直接使用已登录的官方 AGY 服务，不依赖客户端安装对应执行器或另配 DeepSeek 搜索 Key。远程 MCP 需请求者提供相应服务的连接和授权；门户没有托管 Shell/代码解释器。
 
 官方工具通过 CLI 插件白名单启用，`PreToolUse` 调用桥接程序的轻量检查入口，核对正在运行的所属会话和本次 `tool_choice`。内部摘要、禁用工具及不匹配的工具范围均不能调用。生图暂不读取 `ImagePaths` 本地参考文件，图片名只能是文件名片段，防止跨用户或服务器文件访问。上下文预算补丁见下文，不修改工具执行或权限代码。
 
@@ -24,6 +24,37 @@
 - 复杂参数定义在发布给 MCP 时适配本地引用、组合类型、可空类型和元组；实际调用继续校验原始定义。大型工具精简发布描述，必要时通过 `portal_describe_tool` 读取完整原始定义，再用 `portal_call_tool` 分发；这两个辅助工具不执行宿主机命令。
 - 支持客户端函数形式的 `ToolSearch` 返回 `tool_reference`，只解锁本次请求中实际声明的工具；原生客户端工具搜索仍然可用。调用 ID 改写仅在完整历史严格匹配时接受。
 - 输出达到上限后最多自动续写 3 次。MCP 单项取消只取消相应等待，不声称已经停止客户端中运行的程序。MCP 风格失败标记与图片结果可以一起回传。
+
+### 远程 MCP broker（已部署，待真实联调）
+
+支持公共 HTTPS 的 Streamable HTTP 服务，按请求真实执行 initialize/tools/list，返回 `mcp_list_tools`，按原始 schema 校验模型参数。工具执行完成返回自含的 `mcp_call`；不会同时给客户端一个需要再次执行的函数调用。协议依据为 [MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) 及 [Responses MCP 审批语义](https://developers.openai.com/api/docs/guides/tools-connectors-mcp)，支持范围以本节为准。
+
+声明示例（模型、地址和凭据须换成自己的值）：
+
+```json
+{
+  "model": "agy/<已启用模型>",
+  "input": "使用已连接的文档服务读取项目记录",
+  "tools": [{
+    "type": "mcp",
+    "server_label": "docs",
+    "server_url": "https://your-mcp.example/mcp",
+    "authorization": "<该远端服务自己的 bearer token>",
+    "allowed_tools": ["read_record"],
+    "require_approval": "always"
+  }]
+}
+```
+
+默认 `require_approval=always`，模型发起操作时先返回 `mcp_approval_request`；继续请求使用原 `previous_response_id`，在 input 中传 `{"type":"mcp_approval_response","approval_request_id":"<原审批 ID>","approve":true}`，并重新提供原 tools 声明及该远端授权。`approve:false` 直接拒绝，不执行远端操作。批准只是授权，不代表执行成功；只有实际工具结果能确认执行状态。明确指定 `never` 才跳过审批。
+
+`allowed_tools` 当前只接受名称数组，省略表示该服务实际公布的全部工具，空数组表示全部禁用。`require_approval` 只接受 always/never；尚不支持过滤对象、逐工具审批对象、任意 headers、legacy SSE transport 或托管 connectors。最多 4 个服务，当前工具总数最多 256。仅 URL 可以发现目录，默认仍须审批才执行；没有可用连接或授权时明确失败。
+
+原始远端 bearer 仅在当前请求和必要的在途操作内存中使用，不写入模型定义、恢复快照、普通日志或回复，也不从旧请求继承；不向远端转发门户、Google 或其他服务凭据。声明、授权账号、schema 或 tool_choice 改变时重新校验，旧审批不能授权另一个账号/契约。拒绝私网/回环/保留地址、URL 中的账号或查询参数、重定向和环境代理，每次建连重新验证 DNS 地址。
+
+同一原生请求 ID 的重传复用同一个动作；工具执行前保存轻量尝试标记，未知执行结果不自动重发。原生先结束时等待实际远端结果并续接；重启后保留实际结果或明确 unknown，未派发的已批准动作需要本轮授权。执行全局最多 3 个、每原生会话 1 个，默认执行等待上限 10 分钟；每会话新增结果记录预算 10 MiB，恢复后继续计入。图片、结构化内容和大整数保留，结果过大或不可表示时明确报告未知结果，不截断后冒充成功。尝试标记保留 7 天，账号切换/退出清理；不能保证外部服务、断电或新动作 ID 下绝对只执行一次。
+
+本地假服务覆盖审批、执行、拒绝、早结束、重传、冷恢复、压缩及容量边界；尚未进行真实服务或 Codex 客户端验收。客户端项目文件仍通过客户端执行器访问，远端执行的位置由明确连接的 MCP 服务决定。
 
 ### 重试续接与结果复用
 
@@ -133,7 +164,7 @@ Codex 本地压缩会通过普通 Responses 接口发送无工具的 `CONTEXT CH
 系统管理将 AGY 纳入服务合计内存说明，第四张资源卡片显示常驻对话数/上限，请求卡片在待完成任务后内联注明“其中：AGY 任务”，不显示等待工具数量；管理概览隐藏 AGY 任务和常驻对话两行；均读取同一份缓存 5 秒的运行服务内存计数。管理概览的上游模型摘要复用统一账号和模型配置缓存，包含 AGY 的已启用模型，不触发模型目录发现、额度刷新或推理。
 系统管理与管理概览的“模型上游”合并检查 CPA 模型接口及 AGY 桥接服务/登录状态；AGY 检查共享状态及账号缓存，不发送生成请求，不代表已验证 Google 侧模型推理或剩余额度。AGY 不可达、未登录或 CPA 不可达时分别注明；其他正常来源的模型摘要继续展示。
 
-Codex 可自动附带 OpenAI 服务工具声明。`web_search` 和 `image_generation` 由官方 AGY 工具执行，不生成客户端 MCP 调用；文件搜索、托管代码解释器及远程 MCP 等未配置服务仍在 Responses `metadata.portal_unavailable_tools` 返回声明列表，不阻断普通聊天。未知工具类型、未声明本机环境的原生 Shell、空名称和重复名称明确报错。客户端执行的 `tool_search` 已接入标准 `tool_search_call/tool_search_output`；托管的服务器执行模式仍不可用。同步脚本为 agy/ 模型显式设置 `supports_search_tool=true`（客户端工具发现能力），并迁移旧目录；其他模型字段保留。
+Codex 可自动附带 OpenAI 服务工具声明。`web_search` 和 `image_generation` 由官方 AGY 工具执行，不生成客户端 MCP 调用；托管文件搜索、代码解释器及未配置的服务在 Responses `metadata.portal_unavailable_tools` 返回声明列表，不阻断普通聊天。有效远程 MCP 声明走本节 broker，连接失败明确报错。未知工具类型、未声明本机环境的原生 Shell、空名称和重复名称明确报错。客户端 `tool_search` 及对明确延迟工具目录的服务端发现均已接入标准 `tool_search_call/tool_search_output`，后者不联网或调用另一个模型；实际文件操作仍由客户端执行。同步脚本为 agy/ 模型显式设置 `supports_search_tool=true`（客户端工具发现能力），并迁移旧目录；其他模型字段保留。
 2026-11-09 已通过公网接口验证带 Codex 风格可选工具声明的普通回复、命名空间函数及结果的流式回传、命名空间自由文本工具及结果回传，共五次请求；均返回实际用量与不可用能力声明。测试使用无副作用的客户端回传夹具，未执行宿主机命令，未启动真实 Codex 客户端。
 
 官方 CLI 将 MCP 枚举转换为 Google 的字符串枚举。客户端合法的布尔、数字或含空字符串的枚举会在发布给 MCP 时改为参数说明，保留非空字符串枚举；原始 schema 不变，工具回传前仍按原始枚举约束校验。例如 `allowAsync: {type: "boolean", enum: [false]}` 仍只允许 `false`，避免官方转换产生空枚举后被上游拒绝。

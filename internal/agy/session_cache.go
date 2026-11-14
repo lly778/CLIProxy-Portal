@@ -29,6 +29,10 @@ const sessionRetention = 7 * 24 * time.Hour
 // authoritative wire history so an explicit instruction/history change can be
 // rebuilt without re-executing tools. The official session remains in AGY's DB.
 type savedSession struct {
+	NativeToolIDs                              []string                    `json:",omitempty"`
+	RemoteRetainedBytes                        int                         `json:",omitempty"`
+	RemoteBindings                             map[string]remoteMCPBinding `json:",omitempty"`
+	DeferredTools                              []tool                      `json:",omitempty"`
 	OfficialToolsVersion                       int
 	ID, Owner, Model, System, ToolHash, Effort string
 	Tools                                      []tool
@@ -46,13 +50,18 @@ type savedSession struct {
 // A client action already delivered must be restored as a result waiter, never
 // as a new execution. Synchronization channels belong only to the live process.
 type savedWaitingTool struct {
-	ID        string
-	Tool      tool
-	Arguments map[string]any
-	Ready     bool
-	Output    any
-	Update    string
-	Extra     []any
+	Remote                                 *savedRemoteMCPApproval `json:",omitempty"`
+	ProjectionVersion                      int                     `json:",omitempty"`
+	Route                                  string                  `json:",omitempty"`
+	BatchID                                string                  `json:",omitempty"`
+	ObservationRequest, ObservationSession string                  `json:",omitempty"`
+	ID                                     string
+	Tool                                   tool
+	Arguments                              map[string]any
+	Ready                                  bool
+	Output                                 any
+	Update                                 string
+	Extra                                  []any
 }
 
 type sessionDiskCache struct {
@@ -91,6 +100,10 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(last_ms)`,
 		`CREATE TABLE IF NOT EXISTS responses (owner TEXT NOT NULL, response TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, PRIMARY KEY(owner,response))`,
 		`CREATE INDEX IF NOT EXISTS responses_session ON responses(session_id)`,
+		`CREATE TABLE IF NOT EXISTS tool_record_archives (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL,payload BLOB NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS tool_record_expiry ON tool_record_archives(expires_ms)`,
+		`CREATE TABLE IF NOT EXISTS remote_mcp_attempts (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS remote_mcp_attempt_expiry ON remote_mcp_attempts(expires_ms)`,
 		`CREATE TABLE IF NOT EXISTS response_replays (key TEXT PRIMARY KEY, expires_ms INTEGER NOT NULL, payload BLOB NOT NULL)`,
 	} {
 		if _, err = db.Exec(statement); err != nil {
@@ -179,7 +192,7 @@ func (d *sessionDiskCache) routingKey(v savedSession) string {
 // Reindex existing encrypted records once, before serving requests. Only a page
 // of IDs and one decrypted payload are retained; normal requests stay indexed.
 func (d *sessionDiskCache) upgradeHistoryIndex() error {
-	const version = "canonical-tool-ids-v2"
+	const version = "exact-numbers-remote-mcp-identities-v4"
 	var marker []byte
 	err := d.db.QueryRow(`SELECT value FROM cache_meta WHERE id=2`).Scan(&marker)
 	if err == nil && string(marker) == version {
@@ -227,7 +240,7 @@ func (d *sessionDiskCache) upgradeHistoryIndex() error {
 				break
 			}
 			var v savedSession
-			if err = json.Unmarshal(plain, &v); err != nil {
+			if err = unmarshalExact(plain, &v); err != nil {
 				break
 			}
 			if v.ID != id {
@@ -261,7 +274,7 @@ func snapshotSessionLocked(s *session) savedSession {
 	for id, usable := range s.responses {
 		responses[id] = usable
 	}
-	return savedSession{OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
+	return savedSession{NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
 }
 func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if !safeNativeSessionID(v.ID) || v.Owner == "" {
@@ -419,31 +432,66 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 		return nil, err
 	}
 	var v savedSession
-	if json.Unmarshal(plain, &v) != nil || v.ID != id || v.Owner != owner {
+	if unmarshalExact(plain, &v) != nil || v.ID != id || v.Owner != owner {
 		return nil, errors.New("invalid AGY session routing state")
 	}
 	if len(v.Items) > 0 {
 		v.Items = canonicalHistoryItems(v.Items)
 		v.History = requestFingerprints(v.Items)
 	}
-	s := &session{ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+	s := &session{deferredTools: filterClientTools(v.DeferredTools), ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+	if len(v.NativeToolIDs) > nativeToolIdentityLimit {
+		v.NativeToolIDs = v.NativeToolIDs[len(v.NativeToolIDs)-nativeToolIdentityLimit:]
+	}
+	s.nativeToolEpochs = map[string]uint64{}
+	for _, key := range v.NativeToolIDs {
+		if len(key) != 64 {
+			continue
+		}
+		if _, exists := s.nativeToolEpochs[key]; exists {
+			continue
+		}
+		s.nativeToolEpochs[key] = 0
+		s.nativeToolOrder = append(s.nativeToolOrder, key)
+	}
+	s.remoteRetainedBytes = v.RemoteRetainedBytes
+	retained := 0
+	for _, item := range v.Items {
+		if item["type"] == "mcp_call" {
+			data, _ := json.Marshal(item)
+			retained += len(data)
+		}
+	}
+	if retained > s.remoteRetainedBytes {
+		s.remoteRetainedBytes = retained
+	}
 	s.interrupted, s.interruptedOutput = v.Interrupted, v.InterruptedOutput
 	if len(v.WaitingTools) > 0 {
 		s.waitAt = v.WaitAt
 		s.pending = map[string]*pendingTool{}
+		wireResults := map[string]map[string]any{}
+		for _, item := range v.Items {
+			if isToolResultItem(stringField(item, "type")) {
+				wireResults[resultCallID(item)] = item
+			}
+		}
 		for _, saved := range v.WaitingTools {
 			if saved.ID == "" || s.pending[saved.ID] != nil {
 				return nil, errors.New("invalid AGY waiting tool state")
 			}
-			c := &pendingTool{ID: saved.ID, Tool: saved.Tool, Arguments: saved.Arguments, Delivered: true, Relayed: true, Ready: make(chan struct{}), Update: saved.Update, Extra: saved.Extra}
+			c := &pendingTool{ProjectionVersion: saved.ProjectionVersion, Route: saved.Route, BatchID: saved.BatchID, ResultItem: wireResults[saved.ID], traceRequest: saved.ObservationRequest, traceSession: saved.ObservationSession, ID: saved.ID, Tool: saved.Tool, Arguments: saved.Arguments, Delivered: true, Relayed: true, Ready: make(chan struct{}), Update: saved.Update, Extra: saved.Extra}
 			if saved.Ready {
 				c.Output, c.OutputHash = saved.Output, digest(saved.Output)
 				close(c.Ready)
 			}
 			s.pending[c.ID] = c
+			restoreRemoteWaiting(c, saved)
 		}
 	}
 	canonicalSessionHistory(s)
+	if len(s.items) > 0 {
+		s.history = requestFingerprints(s.items)
+	}
 	s.advertisedTools, s.loadedTools = v.AdvertisedTools, v.LoadedTools
 	s.officialVersion = v.OfficialToolsVersion
 	s.tools = filterClientTools(s.tools)
@@ -452,6 +500,9 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 	if s.advertisedTools == nil {
 		s.advertisedTools = append([]tool{}, v.Tools...)
 	}
+	restoreRemoteBindings(s.tools, v.RemoteBindings)
+	restoreRemoteBindings(s.advertisedTools, v.RemoteBindings)
+	restoreRemoteBindings(s.loadedTools, v.RemoteBindings)
 	return s, nil
 }
 
@@ -508,12 +559,26 @@ func (m *Manager) restoreSession(ctx context.Context, s *session, r request) (*s
 // The checkpoint path verifies owner, model and exact history separately. It
 // loads the same native ID without substituting the summary's system prompt.
 func (m *Manager) restoreNativeSession(ctx context.Context, s *session, r request) (*session, error) {
+	release, err := m.claimSessionRecovery(s)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	p, err := m.ensure(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !p.canLoad {
 		return nil, fail(503, "session_restore_unsupported", "当前 AGY 版本不支持恢复硬盘会话")
+	}
+	if p.capabilitySupported("native_load_requires_record_check") {
+		cursor, checkErr := nativeUsageCursor(ctx, m.cfg.Home, s.ID)
+		if os.IsNotExist(checkErr) || checkErr == nil && cursor < 0 {
+			return nil, fail(409, "native_session_missing", "原 AGY 原生记录已不存在或没有历史，未将空会话当作恢复成功")
+		}
+		if checkErr != nil {
+			return nil, fail(503, "session_restore_failed", "无法确认原 AGY 记录，原缓存已保留")
+		}
 	}
 	s.life, s.cancel = context.WithCancel(m.life)
 	s.tenant, s.secret = newID("s_"), newID("token_")
@@ -523,6 +588,7 @@ func (m *Manager) restoreNativeSession(ctx context.Context, s *session, r reques
 	s.reported = map[string]reportedTool{}
 	s.events = make(chan agentEvent, 256)
 	s.proc = p
+	s.catalogRefreshExperiment = m.cfg.ExperimentalCatalogRefresh
 	s.loading = true
 	victim, ok := m.reserveSession(s)
 	if !ok {
@@ -546,12 +612,19 @@ func (m *Manager) restoreNativeSession(ctx context.Context, s *session, r reques
 	var n newSession
 	if err = p.call(c, "session/load", params, &n); err != nil {
 		m.drop(s)
+		if isMissingSession(err) {
+			return nil, err
+		}
 		return nil, fail(503, "session_restore_failed", "AGY 硬盘会话恢复失败，原缓存已保留")
+	}
+	if n.ID != "" && n.ID != s.ID {
+		m.drop(s)
+		return nil, fail(503, "session_restore_failed", "AGY 返回了不同的会话身份，原缓存已保留")
 	}
 	s.mu.Lock()
 	s.options = n.Options
-	s.loading = false
 	s.mu.Unlock()
+	p.observeCapability("session_load")
 	if err = m.selectOptions(c, s, r); err != nil {
 		m.drop(s)
 		return nil, err
@@ -564,6 +637,11 @@ func (m *Manager) restoreNativeSession(ctx context.Context, s *session, r reques
 			m.drop(s)
 			return nil, fail(503, "session_cache_unavailable", "AGY 恢复索引暂时无法更新")
 		}
+	}
+	if !r.bindRequest {
+		s.mu.Lock()
+		s.loading = false
+		s.mu.Unlock()
 	}
 	return s, nil
 }
@@ -579,6 +657,12 @@ func (m *Manager) pruneSessionCache(now time.Time) error {
 		defer func() { <-m.slot }()
 	default:
 		return nil
+	}
+	if _, err := m.disk.db.Exec(`DELETE FROM tool_record_archives WHERE expires_ms<=?`, now.UnixMilli()); err != nil {
+		return err
+	}
+	if _, err := m.disk.db.Exec(`DELETE FROM remote_mcp_attempts WHERE expires_ms<=?`, now.UnixMilli()); err != nil {
+		return err
 	}
 	m.mu.Lock()
 	live := map[string]bool{}

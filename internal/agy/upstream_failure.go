@@ -61,6 +61,10 @@ func publicFailureMessage(code string) string {
 		return "原 AGY 仍在生成，等待本轮完成后才能压缩"
 	case "missing_tool_result":
 		return "当前批次的工具结果尚未回传完整，原调用保持等待"
+	case "unknown_tool_result":
+		return "工具结果无法匹配原调用，未改动当前批次"
+	case "tool_followup_not_deliverable":
+		return "原工具结果已交付，新增消息尚未提交给 AGY，请单独追加到原对话"
 	case "waiting_for_tools":
 		return "原 AGY 会话正在等待客户端工具结果"
 	case "result_changed":
@@ -106,11 +110,13 @@ func publicFailureMessage(code string) string {
 // local conflict or missing result as an upstream HTTP 502.
 func FailureStatus(code string) int {
 	switch code {
-	case "session_busy", "compaction_session_unavailable", "compaction_history_changed", "compaction_tools_pending", "compaction_turn_running", "waiting_for_tools", "result_changed", "followup_history_changed":
+	case "session_busy", "compaction_session_unavailable", "compaction_history_changed", "compaction_tools_pending", "compaction_turn_running", "waiting_for_tools", "result_changed", "followup_history_changed", "tool_followup_not_deliverable", "native_session_missing", "session_restore_unsafe", "remote_authorization_changed", "remote_operation_pending":
 		return 409
+	case "tool_record_unavailable":
+		return 503
 	case "followup_queue_full":
 		return 429
-	case "missing_tool_result":
+	case "missing_tool_result", "unknown_tool_result", "invalid_compaction_history", "ambiguous_tool_search", "invalid_remote_mcp", "invalid_remote_approval", "remote_authorization_required":
 		return 400
 	default:
 		return 502

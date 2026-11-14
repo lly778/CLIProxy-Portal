@@ -44,6 +44,9 @@ func toolResultBlocksDepth(value any, depth int) ([]any, error) {
 			if err != nil {
 				return nil, err
 			}
+			if node["isError"] == true || node["is_error"] == true {
+				blocks = append([]any{map[string]string{"type": "text", "text": "[Client tool reported failure (isError=true); this result is not evidence of a successful action.]"}}, blocks...)
+			}
 			if structured, ok := node["structuredContent"]; ok {
 				b, _ := json.Marshal(structured)
 				blocks = append(blocks, map[string]string{"type": "text", "text": "[Client structured result]\n" + string(b)})
@@ -53,7 +56,7 @@ func toolResultBlocksDepth(value any, depth int) ([]any, error) {
 	}
 	if text, ok := value.(string); ok {
 		var envelope map[string]any
-		if len(text) <= MaxBody && json.Unmarshal([]byte(text), &envelope) == nil {
+		if len(text) <= MaxBody && unmarshalExact([]byte(text), &envelope) == nil {
 			if _, ok := envelope["content"].([]any); ok && (envelope["isError"] != nil || envelope["is_error"] != nil || envelope["structuredContent"] != nil) {
 				return toolResultBlocksDepth(envelope, depth+1)
 			}

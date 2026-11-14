@@ -69,26 +69,50 @@ func closingCheckpoint(s *session, out *response) savedSession {
 	defer s.mu.Unlock()
 	v := snapshotSessionLocked(s)
 	known := map[string]bool{}
+	knownResults := map[string]bool{}
 	for _, item := range v.Items {
 		if isCallItem(stringField(item, "type")) {
 			known[resultCallID(item)] = true
 		}
+		if isToolResultItem(stringField(item, "type")) {
+			knownResults[resultCallID(item)] = true
+		}
 	}
 	for _, id := range pendingIDs(s) {
 		c := s.pending[id]
-		if !c.Delivered || c.Returned || c.Replayed {
+		if !c.Delivered {
 			continue
 		}
-		waiting := savedWaitingTool{ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra}
+		if c.remote != nil {
+			if waiting := snapshotRemoteWaiting(&v, c); waiting != nil {
+				v.WaitingTools = append(v.WaitingTools, *waiting)
+			}
+			continue
+		}
+		ready := false
+		select {
+		case <-c.Ready:
+			ready = true
+		default:
+		}
+		if !known[c.ID] && (!c.Returned && !c.Replayed || ready) {
+			v.Items = append(v.Items, pendingCheckpointItem(c))
+			known[c.ID] = true
+		}
+		if ready && !knownResults[c.ID] {
+			v.Items = append(v.Items, checkpointResult(c))
+			knownResults[c.ID] = true
+		}
+		if c.Returned || c.Replayed {
+			continue
+		}
+		waiting := savedWaitingTool{ProjectionVersion: c.ProjectionVersion, Route: c.Route, BatchID: c.BatchID, ObservationRequest: c.traceRequest, ObservationSession: c.traceSession, ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra}
 		select {
 		case <-c.Ready:
 			waiting.Ready, waiting.Output = true, c.Output
 		default:
 		}
 		v.WaitingTools = append(v.WaitingTools, waiting)
-		if !known[c.ID] {
-			v.Items = append(v.Items, pendingCheckpointItem(c))
-		}
 	}
 	if len(v.WaitingTools) > 0 {
 		v.WaitAt = s.waitAt

@@ -170,7 +170,7 @@ func (m *Manager) officialPolicyHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			s.mu.Lock()
-			allowed := s.running && !s.loading && !s.internal && s.policy.permitsOfficial(p.Call.Name)
+			allowed := nativePromptActive(s) && !s.internal && s.policy.permitsOfficial(p.Call.Name)
 			if s.policy.Serial {
 				allowed = allowed && len(s.officialActive) <= 1
 				for _, call := range s.pending {
@@ -198,9 +198,16 @@ type officialToolEvent struct {
 	Args             map[string]any
 }
 
-func (m *Manager) sendOfficialEvent(s *session, event officialToolEvent) {
+func (m *Manager) sendOfficialEvent(s *session, event officialToolEvent, epochs ...uint64) {
+	s.mu.Lock()
+	epoch := s.epoch
+	if len(epochs) > 0 && epochs[0] != epoch {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
 	select {
-	case s.events <- agentEvent{Official: &event}:
+	case s.events <- agentEvent{Epoch: epoch, Official: &event}:
 	case <-s.life.Done():
 	default:
 		s.cancel()
@@ -220,6 +227,7 @@ func (o *response) official(home string, s *session, event officialToolEvent) er
 	if o.officialCalls == nil {
 		o.officialCalls = map[string]*officialResponseCall{}
 	}
+	o.trace.emit(Observation{ID: digest([]string{s.owner, s.ID, event.ID, event.Status}), SessionID: s.ID, Kind: "official_tool", State: event.Status, Category: "google_official", Tool: event.Name, CallID: event.ID})
 	call := o.officialCalls[event.ID]
 	if call == nil {
 		call = &officialResponseCall{Index: len(o.output), Started: time.Now()}

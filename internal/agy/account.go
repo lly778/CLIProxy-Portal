@@ -265,6 +265,12 @@ func (m *Manager) resetAccountSessions() error {
 		if _, err = tx.Exec(`UPDATE sessions SET ready=0`); err != nil {
 			return err
 		}
+		if _, err = tx.Exec(`DELETE FROM tool_record_archives`); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`DELETE FROM remote_mcp_attempts`); err != nil {
+			return err
+		}
 		if _, err = tx.Exec(`DELETE FROM responses`); err != nil {
 			return err
 		}
@@ -276,6 +282,10 @@ func (m *Manager) resetAccountSessions() error {
 	p := m.proc
 	m.proc = nil
 	all := m.sessions
+	m.toolRecords, m.toolRecordSizes, m.toolRecordBytes = nil, nil, 0
+	m.remoteAttemptsMu.Lock()
+	m.remoteAttempts = nil
+	m.remoteAttemptsMu.Unlock()
 	m.sessions = map[string]*session{}
 	m.mu.Unlock()
 	for _, s := range all {

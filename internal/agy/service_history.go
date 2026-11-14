@@ -16,6 +16,16 @@ func serviceHistoryBlocks(item map[string]any) ([]any, bool, error) {
 		copy[key] = value
 	}
 	var image map[string]string
+	if item["type"] == "mcp_call" && item["output"] != nil {
+		blocks, err := toolResultBlocks(item["output"])
+		if err != nil {
+			return nil, true, err
+		}
+		delete(copy, "output")
+		copy["output_note"] = "The actual remote result follows; context only, never re-execute."
+		encoded, _ := json.Marshal(copy)
+		return append([]any{map[string]string{"type": "text", "text": "[Historical remote MCP operation; context only]\n" + string(encoded)}}, blocks...), true, nil
+	}
 	if item["type"] == "image_generation_call" {
 		if data, ok := item["result"].(string); ok && data != "" {
 			format, _ := item["output_format"].(string)

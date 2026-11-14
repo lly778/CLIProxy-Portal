@@ -8,6 +8,18 @@ import (
 	"unicode/utf8"
 )
 
+func TestRemoteMCPStructuredCaptureKeepsActualIdentityResultAndNoBearerOrMedia(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"mcp","authorization":"private-bearer","server_url":"https://mcp.example.test"}],"input":[{"type":"mcp_approval_request","id":"approval-one","name":"write","arguments":"{}"},{"type":"mcp_approval_response","approval_request_id":"approval-one","approve":true},{"type":"mcp_call","id":"remote-one","server_label":"docs","name":"write","arguments":"{\"record\":9007199254740993}","status":"completed","error":null,"output":"{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"saved\"},{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\"private-image-data\"}],\"structuredContent\":{\"record\":9007199254740993}}"}]}`)
+	events := requestRecordEvents(body)
+	if len(events) != 2 || events[0].ToolCallID != "remote-one" || events[1].ToolName != "docs.write" || events[1].Type != "tool_result" {
+		t.Fatal("remote result or identity missing", events)
+	}
+	encoded, _ := json.Marshal(events)
+	if !strings.Contains(string(encoded), "9007199254740993") || !strings.Contains(string(encoded), "saved") || strings.Contains(string(encoded), "private-bearer") || strings.Contains(string(encoded), "private-image-data") {
+		t.Fatal("remote capture lost precision or persisted credential/media")
+	}
+}
+
 func TestStructuredRequestParsersKeepToolsButNotDefinitionsOrPrivateRoles(t *testing.T) {
 	tests := []struct {
 		name string

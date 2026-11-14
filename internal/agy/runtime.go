@@ -14,7 +14,7 @@ const embeddedAddress = "127.0.0.1:18320"
 
 // StartEmbedded runs the bridge in the portal process. The official CLI stays
 // an external, read-only mounted executable; its data lives on a separate bind.
-func StartEmbedded(secret string) (func(), <-chan error, error) {
+func StartEmbedded(secret string, observers ...func(Observation) error) (func(), <-chan error, error) {
 	command := env("AGY_COMMAND", "/opt/cliproxy-agy/bin/agy")
 	info, err := os.Stat(command)
 	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
@@ -28,7 +28,16 @@ func StartEmbedded(secret string) (func(), <-chan error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	m, err := NewManager(RuntimeConfig{Command: command, Home: env("AGY_HOME", "/var/lib/cliproxy-agy"), Secret: secret, MaxSessions: limit})
+	var observe func(Observation) error
+	experimentalRefresh, err := strconv.ParseBool(env("AGY_CATALOG_REFRESH_EXPERIMENTAL", "false"))
+	if err != nil {
+		_ = l.Close()
+		return nil, nil, errors.New("invalid AGY experimental catalog refresh setting")
+	}
+	if len(observers) > 0 {
+		observe = observers[0]
+	}
+	m, err := NewManager(RuntimeConfig{ExperimentalCatalogRefresh: experimentalRefresh, Observe: observe, Command: command, Home: env("AGY_HOME", "/var/lib/cliproxy-agy"), Secret: secret, MaxSessions: limit})
 	if err != nil {
 		_ = l.Close()
 		return nil, nil, err

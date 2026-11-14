@@ -1,7 +1,6 @@
 package agy
 
 import (
-	"encoding/json"
 	"sort"
 )
 
@@ -15,7 +14,7 @@ func referencedTools(output any, declared []tool) ([]tool, error) {
 		switch node := value.(type) {
 		case string:
 			var parsed any
-			if json.Unmarshal([]byte(node), &parsed) == nil {
+			if unmarshalExact([]byte(node), &parsed) == nil {
 				if _, same := parsed.(string); !same {
 					walk(parsed, depth+1)
 				}

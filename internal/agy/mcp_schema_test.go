@@ -26,7 +26,7 @@ func TestAGYMCPProjectsEnumsWithoutChangingClientValidation(t *testing.T) {
 			} `json:"tools"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil || len(reply.Result.Tools) != 4 {
+	if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil || len(reply.Result.Tools) != 5 {
 		t.Fatalf("MCP tools/list failed: %d %s %v", w.Code, w.Body.String(), err)
 	}
 	projected := reply.Result.Tools[0].Schema

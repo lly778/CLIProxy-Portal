@@ -28,20 +28,24 @@ type rpcReply struct {
 	err   error
 }
 type process struct {
-	cmd       *exec.Cmd
-	in        io.WriteCloser
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	pending   map[string]chan rpcReply
-	done      chan struct{}
-	once      sync.Once
-	seq       atomic.Int64
-	canLoad   bool
-	onUpdate  func(json.RawMessage)
-	onRequest func(string, json.RawMessage) (any, error)
+	evidence      RuntimeEvidence
+	cmd           *exec.Cmd
+	in            io.WriteCloser
+	writeMu       sync.Mutex
+	mu            sync.Mutex
+	pending       map[string]chan rpcReply
+	promptOrigins map[string]nativeEventOrigin
+	done          chan struct{}
+	once          sync.Once
+	seq           atomic.Int64
+	canLoad       bool
+	captureOrigin func(*process, json.RawMessage) nativeEventOrigin
+	finishOrigin  func(nativeEventOrigin)
+	onUpdate      func(nativeEventOrigin, json.RawMessage)
+	onRequest     func(nativeEventOrigin, string, json.RawMessage) (any, error)
 }
 
-func startProcess(command, home, workspace string, update func(json.RawMessage), request func(string, json.RawMessage) (any, error)) (*process, error) {
+func startProcess(command, home, workspace string, capture func(*process, json.RawMessage) nativeEventOrigin, finish func(nativeEventOrigin), update func(nativeEventOrigin, json.RawMessage), request func(nativeEventOrigin, string, json.RawMessage) (any, error)) (*process, error) {
 	cmd := exec.Command(command, "acp", "--gemini-dir", home, "--app-data-dir", "agy", "--agent", "portal-bridge", "--process-per-session", "--disable-telemetry")
 	cmd.Dir = workspace
 	configureProcess(cmd)
@@ -61,7 +65,7 @@ func startProcess(command, home, workspace string, update func(json.RawMessage),
 		out.Close()
 		return nil, fail(503, "worker_unavailable", "AGY 进程无法启动，请检查服务器安装")
 	}
-	p := &process{cmd: cmd, in: in, pending: map[string]chan rpcReply{}, done: make(chan struct{}), onUpdate: update, onRequest: request}
+	p := &process{cmd: cmd, in: in, pending: map[string]chan rpcReply{}, done: make(chan struct{}), captureOrigin: capture, finishOrigin: finish, onUpdate: update, onRequest: request}
 	go p.read(out)
 	go func() { _ = cmd.Wait(); p.close() }()
 	return p, nil
@@ -86,6 +90,7 @@ func (p *process) close() {
 			ch <- rpcReply{err: fail(503, "worker_lost", "AGY 会话进程已结束，请重新发起对话")}
 			delete(p.pending, id)
 		}
+		p.promptOrigins = nil
 	})
 }
 func (p *process) write(v any) error {
@@ -103,20 +108,34 @@ func (p *process) call(ctx context.Context, method string, params any, out any) 
 	id, _ := json.Marshal(p.seq.Add(1))
 	key := string(id)
 	ch := make(chan rpcReply, 1)
+	var origin nativeEventOrigin
+	if method == "session/prompt" && p.captureOrigin != nil {
+		raw, _ := json.Marshal(params)
+		origin = p.captureOrigin(p, raw)
+	}
 	p.mu.Lock()
 	if !p.alive() {
 		p.mu.Unlock()
 		return fail(503, "worker_lost", "AGY 进程已结束")
 	}
 	p.pending[key] = ch
+	if origin.Process != nil {
+		if p.promptOrigins == nil {
+			p.promptOrigins = map[string]nativeEventOrigin{}
+		}
+		p.promptOrigins[key] = origin
+	}
 	p.mu.Unlock()
-	defer func() { p.mu.Lock(); delete(p.pending, key); p.mu.Unlock() }()
+	defer func() { p.mu.Lock(); delete(p.pending, key); delete(p.promptOrigins, key); p.mu.Unlock() }()
 	if err := p.write(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}); err != nil {
 		return fail(503, "transport_error", "AGY 协议连接中断")
 	}
 	select {
 	case r := <-ch:
 		if r.err != nil {
+			if isMissingSession(r.err) && method != "session/load" {
+				return fail(502, "agent_error", publicFailureMessage("agent_error"))
+			}
 			return r.err
 		}
 		if out != nil {
@@ -139,15 +158,23 @@ func (p *process) read(r io.Reader) {
 			return
 		}
 		if f.Method != "" {
+			origin := nativeEventOrigin{Process: p}
+			if p.captureOrigin != nil {
+				origin = p.captureOrigin(p, f.Params)
+			}
 			if len(f.ID) == 0 {
 				if f.Method == "session/update" && p.onUpdate != nil {
-					p.onUpdate(f.Params)
+					p.onUpdate(origin, f.Params)
 				}
 				continue
 			}
 			// A permission request must not block reception of model updates or RPC replies.
-			go func(f frame) {
-				result, err := p.onRequest(f.Method, f.Params)
+			go func(f frame, origin nativeEventOrigin) {
+				var result any
+				err := errors.New("client capability unavailable")
+				if p.onRequest != nil {
+					result, err = p.onRequest(origin, f.Method, f.Params)
+				}
 				v := map[string]any{"jsonrpc": "2.0", "id": f.ID}
 				if err != nil {
 					v["error"] = &rpcError{-32601, "Client capability unavailable"}
@@ -155,13 +182,18 @@ func (p *process) read(r io.Reader) {
 					v["result"] = result
 				}
 				_ = p.write(v)
-			}(f)
+			}(f, origin)
 			continue
 		}
 		p.mu.Lock()
 		ch := p.pending[string(f.ID)]
+		origin := p.promptOrigins[string(f.ID)]
 		delete(p.pending, string(f.ID))
+		delete(p.promptOrigins, string(f.ID))
 		p.mu.Unlock()
+		if origin.Process != nil && p.finishOrigin != nil {
+			p.finishOrigin(origin)
+		}
 		if ch != nil {
 			r := rpcReply{value: f.Result}
 			if f.Error != nil {
@@ -172,6 +204,9 @@ func (p *process) read(r io.Reader) {
 	}
 }
 func mapRPCError(e *rpcError) error {
+	if explicitMissingSession(e) {
+		return fail(409, "native_session_missing", "原 AGY 原生会话不存在")
+	}
 	if failure := upstreamFailure(e.Message); failure != nil {
 		return failure
 	}

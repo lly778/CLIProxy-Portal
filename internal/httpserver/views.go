@@ -214,6 +214,11 @@ func (s *Server) requestView(e cpamp.EventRow) webui.RequestView {
 			}
 		}
 	}
+	if s.Store != nil && e.PortalTimingID != "" && e.APIKeyHash != "" {
+		if events, err := s.Store.AGYObservations(contextBackground(), e.PortalTimingID, e.APIKeyHash); err == nil {
+			view.LatencyDetail += agyObservationDetail(events)
+		}
+	}
 	if s.CaptureVault != nil && e.RequestID != "" && e.APIKeyHash != "" {
 		if capture, err := s.Store.GatewayCaptureByCPARequest(contextBackground(), strings.ToLower(e.RequestID), strings.ToLower(e.APIKeyHash)); err == nil && capture.RequestContentType == gateway.StructuredCaptureContentType {
 			eventAt := time.UnixMilli(e.TimestampMS)

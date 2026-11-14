@@ -60,7 +60,7 @@ func filterDiscoveryResult(value any, depth int) any {
 	switch node := value.(type) {
 	case string:
 		var parsed any
-		if json.Unmarshal([]byte(node), &parsed) == nil {
+		if unmarshalExact([]byte(node), &parsed) == nil {
 			if _, same := parsed.(string); !same {
 				b, _ := json.Marshal(filterDiscoveryResult(parsed, depth+1))
 				return string(b)

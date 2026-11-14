@@ -214,7 +214,11 @@ func serve(cfg config.Config, st *store.Store) error {
 			return fmt.Errorf("read AGY service secret: %w", readErr)
 		}
 		if cfg.AGYEmbedded {
-			closeBridge, bridgeErrors, startErr := agy.StartEmbedded(shared)
+			closeBridge, bridgeErrors, startErr := agy.StartEmbedded(shared, func(v agy.Observation) error {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				return st.SaveAGYObservation(ctx, v)
+			})
 			if startErr != nil {
 				return fmt.Errorf("start embedded AGY bridge: %w", startErr)
 			}
@@ -357,6 +361,9 @@ func background(ctx context.Context, st *store.Store, keys *service.Keys, cfg co
 				logger.Warn("pending key job failed", "error", err)
 			}
 		case <-cleanup.C:
+			if err := st.PruneAGYObservations(ctx); err != nil {
+				logger.Warn("AGY observation cleanup failed")
+			}
 			if err := st.CleanupSessions(ctx); err != nil {
 				logger.Warn("session cleanup failed", "error", err)
 			}

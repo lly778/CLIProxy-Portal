@@ -171,15 +171,16 @@ func (s Settings) Resolve(public string) (ModelRule, bool) {
 }
 
 type Status struct {
-	Ready           bool   `json:"ready"`
-	State           string `json:"state"`
-	Sessions        int    `json:"sessions"`
-	Message         string `json:"message,omitempty"`
-	MaxSessions     int    `json:"max_sessions,omitempty"`
-	DiskSessions    int64  `json:"disk_sessions,omitempty"`
-	ActiveSessions  int    `json:"active_sessions,omitempty"`
-	WaitingSessions int    `json:"waiting_sessions,omitempty"`
-	CacheError      bool   `json:"cache_error,omitempty"`
+	Ready           bool             `json:"ready"`
+	State           string           `json:"state"`
+	Sessions        int              `json:"sessions"`
+	Message         string           `json:"message,omitempty"`
+	MaxSessions     int              `json:"max_sessions,omitempty"`
+	DiskSessions    int64            `json:"disk_sessions,omitempty"`
+	ActiveSessions  int              `json:"active_sessions,omitempty"`
+	WaitingSessions int              `json:"waiting_sessions,omitempty"`
+	CacheError      bool             `json:"cache_error,omitempty"`
+	Runtime         *RuntimeEvidence `json:"runtime,omitempty"`
 }
 
 type Error struct {
@@ -206,8 +207,18 @@ func newID(prefix string) string {
 	}
 	return prefix + hex.EncodeToString(b[:])
 }
+
+// Keep persisted HTTP replay identities unchanged across numeric decoder upgrades.
+func wireDigest(v any) string {
+	b, _ := json.Marshal(v)
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
+}
 func digest(v any) string {
 	b, _ := json.Marshal(v)
+	if exact, err := canonicalJSONNumbers(b); err == nil {
+		b = exact
+	}
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:])
 }

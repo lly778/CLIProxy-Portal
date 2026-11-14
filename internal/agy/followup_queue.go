@@ -39,7 +39,7 @@ func followupInput(history, fps []string, items []map[string]any) (int, bool) {
 // Admission for a follow-up must not need the slot currently owned by its
 // original response. Actual generation still reacquires a slot after waiting.
 func canQueueFollowup(s *session, r request) bool {
-	if isCodexCompactionRequest(r) || r.ToolsProvided && len(r.Tools) == 0 {
+	if isCodexCompactionRequest(r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
 		return false
 	}
 	system, err := systemText(r)
@@ -56,7 +56,7 @@ func canQueueFollowup(s *session, r request) bool {
 }
 
 func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, out *response, releaseSlot func(), takeSlot func() error) (bool, func(), error) {
-	if isCodexCompactionRequest(*r) || r.ToolsProvided && len(r.Tools) == 0 {
+	if isCodexCompactionRequest(*r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
 		return false, nil, nil
 	}
 	system, err := systemText(*r)
@@ -75,6 +75,11 @@ func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, 
 		return false, nil, nil
 	}
 	input := r.Items[shared:]
+	if remoteContinuationCandidate(s) && s.requestMu.TryLock() {
+		s.requestMu.Unlock()
+		s.mu.Unlock()
+		return false, nil, nil
+	}
 	busy := s.running || hasWaitingResults(s) || len(s.followups) > 0
 	if !busy && s.requestMu.TryLock() {
 		s.requestMu.Unlock()
@@ -107,6 +112,7 @@ func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, 
 		}
 	}
 	defer remove()
+	traceFrom(ctx).phase("queued_followup")
 	releaseSlot()
 	if r.Stream {
 		if err := out.event("response.in_progress", map[string]any{"response": out.envelope("in_progress", Usage{}), "stage": "queued_followup"}); err != nil {

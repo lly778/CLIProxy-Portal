@@ -38,17 +38,17 @@ func historicalLoadedTools(r request) ([]tool, error) {
 	if !search {
 		return nil, nil
 	}
-	calls := map[string]bool{}
+	calls := map[string]string{}
 	loaded := []tool{}
 	for _, item := range r.Items {
 		id, _ := item["call_id"].(string)
-		if item["type"] == "tool_search_call" && item["execution"] == "client" && id != "" {
-			calls[id] = true
+		if item["type"] == "tool_search_call" && (item["execution"] == "client" || item["execution"] == "server") && id != "" {
+			calls[id] = stringField(item, "execution")
 		}
 		if item["type"] == "function_call" && item["name"] == "ToolSearch" && id != "" {
-			calls[id] = true
+			calls[id] = "client"
 		}
-		if item["type"] == "function_call_output" && calls[id] {
+		if item["type"] == "function_call_output" && calls[id] != "" {
 			tools, err := referencedTools(item["output"], r.Tools)
 			if err != nil {
 				return nil, err
@@ -56,13 +56,16 @@ func historicalLoadedTools(r request) ([]tool, error) {
 			loaded = mergeTools(tools, loaded)
 			delete(calls, id)
 		}
-		if item["type"] == "tool_search_output" && item["execution"] == "client" && calls[id] {
+		if item["type"] == "tool_search_output" && stringField(item, "execution") == calls[id] && calls[id] != "" {
 			if _, ok := item["tools"].([]any); !ok {
 				return nil, fail(400, "invalid_tool_search_result", "历史工具发现结果缺少定义数组")
 			}
 			tools, err := parseLoadedTools(item["tools"])
 			if err != nil {
 				return nil, err
+			}
+			if calls[id] == "server" && len(authorizedServerTools(r.Tools, tools)) != len(tools) {
+				return nil, fail(400, "invalid_tool_search_result", "服务端发现结果超出当前明确声明的工具目录")
 			}
 			loaded = mergeTools(tools, loaded)
 			delete(calls, id)
@@ -101,7 +104,11 @@ func requestedTools(s *session, r request) ([]tool, []tool) {
 		search = search || isClientSearch(t)
 	}
 	if search {
-		return mergeTools(base, s.loadedTools), append([]tool{}, s.loadedTools...)
+		loaded := append([]tool{}, s.loadedTools...)
+		if hasServerSearch(base) || hasServerSearch(s.tools) {
+			loaded = authorizedServerTools(r.Tools, loaded)
+		}
+		return mergeTools(base, loaded), loaded
 	}
 	return base, []tool{}
 }
@@ -171,13 +178,18 @@ func parseLoadedTools(value any) ([]tool, error) {
 // All callers hold s.mu. Names and arguments remain validated against the
 // current client declarations even when AGY still advertises an older schema.
 func allowedToolCall(s *session, name string, args map[string]any) (tool, map[string]any, bool) {
+	t, args, reason := resolveToolCall(s, name, args)
+	return t, args, reason == ""
+}
+
+func resolveToolCall(s *session, name string, args map[string]any) (tool, map[string]any, string) {
 	indirect := name == callToolName
 	if indirect {
 		name, _ = args["name"].(string)
 		args, _ = args["arguments"].(map[string]any)
 	}
 	if args == nil {
-		return tool{}, nil, false
+		return tool{}, nil, "invalid_arguments"
 	}
 	for _, t := range s.tools {
 		if excludedClientTool(t) {
@@ -185,31 +197,36 @@ func allowedToolCall(s *session, name string, args map[string]any) (tool, map[st
 		}
 		if (!indirect && t.mcpName() == name) || (indirect && t.key() == name) {
 			if !s.policy.permits(t) {
-				return tool{}, nil, false
+				return t, nil, "policy_denied"
 			}
 			if isNativeClientTool(t.Type) {
 				if !nativeArgumentsValid(t, args) {
-					return tool{}, nil, false
+					return t, nil, "native_schema_mismatch"
 				}
 			} else if t.Type == "custom" {
 				if _, ok := args["input"].(string); !ok {
-					return tool{}, nil, false
+					return t, nil, "custom_input_required"
 				}
 			} else if !validArguments(normalizeSchema(t.Parameters), args, 0) {
-				return tool{}, nil, false
+				return t, nil, "schema_mismatch"
 			}
-			return t, args, true
+			return t, args, ""
 		}
 	}
-	return tool{}, nil, false
+	return tool{}, nil, "not_available"
 }
 
 // Only retries of a call for which we already emitted a still-running notice
 // reuse an existing result. Ordinary parallel identical calls keep distinct IDs.
 // The caller holds s.mu, so the allowlist check and reservation are atomic.
 func parkToolCall(s *session, name string, args map[string]any) (*pendingTool, bool) {
-	t, args, ok := allowedToolCall(s, name, args)
-	if !ok {
+	route := "direct"
+	if name == callToolName {
+		route = "portal_call_tool"
+	}
+	t, args, reason := resolveToolCall(s, name, args)
+	if reason != "" {
+		s.trace.emit(Observation{Kind: "tool_rejected", State: "rejected", Tool: t.key(), Reason: reason, Route: route, ProjectionVersion: schemaProjectionVersion})
 		return nil, false
 	}
 	encoded, _ := json.Marshal(args)
@@ -218,6 +235,9 @@ func parkToolCall(s *session, name string, args map[string]any) (*pendingTool, b
 	}
 	for _, existing := range s.pending {
 		if !existing.Relayed || existing.Tool.key() != t.key() || digest(existing.Arguments) != digest(args) {
+			continue
+		}
+		if t.remoteBinding != nil && (existing.remote == nil || digest(existing.remote.Binding) != digest(*t.remoteBinding)) {
 			continue
 		}
 		select {
@@ -241,8 +261,27 @@ func parkToolCall(s *session, name string, args map[string]any) (*pendingTool, b
 	if len(s.pending) >= 128 {
 		return nil, false
 	}
-	call := &pendingTool{ID: newID("call_"), Tool: t, Arguments: args, Ready: make(chan struct{})}
+	call := &pendingTool{ProjectionVersion: schemaProjectionVersion, Route: route, trace: s.trace, traceSession: s.ID, ID: newID("call_"), Tool: t, Arguments: args, Ready: make(chan struct{})}
+	if t.remoteBinding != nil {
+		call.ID = newID("mcp_")
+		call.Route = "remote_mcp"
+		call.remote = &remoteMCPApproval{Binding: *t.remoteBinding, CallID: call.ID, Epoch: s.epoch, Outcome: "not_started", approvalReady: make(chan struct{})}
+		if t.remoteBinding.ApprovalRequired {
+			call.ID = newID("mcpr_")
+		} else {
+			call.remote.Approved = true
+			close(call.remote.approvalReady)
+			call.Delivered = true
+		}
+		if !t.remoteBinding.ApprovalRequired {
+			call.remote.client = s.remoteConnections[t.remoteBinding.Server]
+		}
+	}
+	if call.trace != nil {
+		call.traceRequest = call.trace.request
+	}
 	s.pending[call.ID] = call
+	call.receipt("issued")
 	s.policy.Used = true
 	return call, true
 }

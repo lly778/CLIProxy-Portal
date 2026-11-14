@@ -89,6 +89,7 @@ func TestAGYFinalNativeWarningRemainsFailureAfterPartialOutput(t *testing.T) {
 
 func TestAGYWarningRecoveryRecognizesNewToolsButNotStaleUpdates(t *testing.T) {
 	m, s := recoveryFixture(t, func(*session, frame) any { return nil })
+	s.running = true
 	for _, tc := range []struct {
 		kind, status string
 		alreadySeen  bool

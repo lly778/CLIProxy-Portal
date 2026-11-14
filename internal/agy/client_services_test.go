@@ -157,7 +157,11 @@ func TestAGYDocumentsAndPreviousHostedCallsAreContextOnly(t *testing.T) {
 	if _, err := toolResultBlocks(nested); err == nil {
 		t.Fatal("unbounded recursive result accepted")
 	}
-	for _, decl := range []string{`{"type":"mcp","server_label":"remote","server_url":"https://example.test/mcp"}`, `{"type":"file_search"}`, `{"type":"code_interpreter"}`} {
+	r, err := parseRequest([]byte(`{"model":"agy/test","input":"test","tools":[{"type":"mcp","server_label":"remote","server_url":"https://example.test/mcp"}]}`))
+	if err != nil || len(r.Tools) != 0 || len(r.remoteSpecs) != 1 || r.remoteSpecs[0].Approval != "always" {
+		t.Fatal("remote declaration manufactured tools or skipped approval before discovery")
+	}
+	for _, decl := range []string{`{"type":"file_search"}`, `{"type":"code_interpreter"}`} {
 		r, err := parseRequest([]byte(`{"model":"agy/test","input":"test","tools":[` + decl + `]}`))
 		if err != nil || len(r.Tools) != 0 || len(r.UnavailableTools) != 1 {
 			t.Fatal("a declaration manufactured an executor")

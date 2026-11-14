@@ -2,8 +2,6 @@ package agy
 
 import (
 	"encoding/json"
-	"math"
-	"reflect"
 )
 
 // Validate the structural subset shared by function schemas and MCP. The
@@ -33,13 +31,13 @@ func validateArguments(root, schema map[string]any, value any, depth int, budget
 	if list, ok := schema["enum"].([]any); ok {
 		found := false
 		for _, x := range list {
-			found = found || reflect.DeepEqual(x, value)
+			found = found || jsonValueEqual(x, value)
 		}
 		if !found {
 			return false
 		}
 	}
-	if constant, ok := schema["const"]; ok && !reflect.DeepEqual(constant, value) {
+	if constant, ok := schema["const"]; ok && !jsonValueEqual(constant, value) {
 		return false
 	}
 	for _, kind := range []string{"anyOf", "oneOf", "allOf"} {
@@ -72,8 +70,8 @@ func validateArguments(root, schema map[string]any, value any, depth int, budget
 			_, ok := value.(bool)
 			return ok
 		case "number", "integer":
-			v, ok := value.(float64)
-			return ok && (typ != "integer" || math.Trunc(v) == v)
+			v, ok := numberRat(value)
+			return ok && (typ != "integer" || v.IsInt())
 		}
 		return false
 	}
@@ -130,6 +128,6 @@ func validateArguments(root, schema map[string]any, value any, depth int, budget
 func normalizeSchema(s map[string]any) map[string]any {
 	b, _ := json.Marshal(s)
 	var out map[string]any
-	_ = json.Unmarshal(b, &out)
+	_ = unmarshalExact(b, &out)
 	return out
 }
