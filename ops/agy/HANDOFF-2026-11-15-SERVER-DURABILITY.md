@@ -1,4 +1,4 @@
-# 服务器侧续接保护（2026-11-15，保持原保存策略，待部署）
+# 服务器侧续接保护（2026-11-15，保持原保存策略，已部署）
 
 用户先要求改善客户端与服务器历史不一致，并明确客户端无法修改；后续明确要求恢复原策略：**移出内存、关闭或中断时才保存完整会话**。本记录取代此前频繁保存草案。
 
@@ -23,6 +23,17 @@
 
 - 恢复原 TestAGYGenerationsAndToolHandoffsSaveSessionOnlyOnRemoval，验证普通文字生成、工具交付、真实结果回传均不写入完整 sessions 快照，归档才保存最新响应链。
 - 保留 8 个新增续接/重试测试，冷恢复测试改为按原归档路径保存后验证，不再假设每轮都落完整快照。
-- 本轮没有部署；服务器从未运行频繁保存草案，仍为 2026-11-15 18:00 发布的 87135fa1…，无需服务器回滚。没有真实模型或工具业务调用，无关 ops/__pycache__/ 保留并排除。
+- **18:59:42.583 +0800 已部署**，源代码 **6b6ea46b336d04bf6a64134841cf38ed5081a009** 已推送 main。服务器从未运行频繁保存草案，无需回滚；本次直接以保留原保存时机的版本替换 18:00 的 87135fa1…。没有真实模型或工具业务调用，无关 ops/__pycache__/ 保留并排除。
 - AGY 包回归、最终 go test ./... -timeout 90s、go vet ./... 和 git diff --check 均通过；已确认生产代码不再引用新增边界保存函数，原移出内存保存测试恢复并通过。
 - 删除旧临时 41b88fe1… 构建的清理命令被自动审批/工具策略拦截，文件暂留；已撤回发布资格，不能将其当作当前源码产物部署。未尝试绕过策略删除。
+
+## 18:59 发布验收（+0800）
+
+- 发布前再次验证 8 个新增续接/重试回归及原 TestAGYGenerationsAndToolHandoffsSaveSessionOnlyOnRemoval，通过差异检查，并从提交后的当前源码重新构建 Linux amd64/CGO_ENABLED=0/trimpath。
+- 发布产物：`C:\Users\lly77\AppData\Local\Temp\codex-agy-archive-continuity-e2cb18e77bfd497293854fba0d38d423\portal-linux-amd64`，**27,875,277 bytes**，SHA256 **a272e706056dcf6542a932d2472e2ba8e7941e3a16548bd7f0d5d3b083ecb9f2**。没有使用已撤回的 41b88fe1… 构建。
+- 上传完整后核对文件长度和完整 SHA256；AGY sessions/active/waiting 均为 0，门户至 CPA 连续 **27.000 秒**无 TCP 数据或连接活动，再次检查后原子替换二进制，仅重建门户。未创建备份或回滚副本。
+- 门户容器 **ff27f326604c** 于 **2026-11-15 18:59:42.583 +0800** 启动。**19:00:29** 实际运行 exe 和挂载程序哈希均与上述产物一致；healthy，启动 ERROR/panic/fatal 计数 0；服务器本地、门户公网与 API 公网 /healthz 均 HTTP 200，客户端访问两处公网也均为 200。
+- 两张新表 session_client_routes、session_handoff_routes 及各自清理索引存在，验收时路由均为 0：本次没有主动发起业务请求，绑定将在后续自然请求按原归档路径保存，不猜造旧会话的客户端标识。原 session_tail_routes/session_tail_lookup 与 exact-numbers-recovery-overlays-v5 标记保留。
+- AGY 惰性状态 not_connected/sessions=0/disk_sessions=302，未发起真实模型或客户端/远端工具业务验证。续接实际效果仍待自然请求观察。
+- CPA **6a99f7e729f7**（2026-10-22T05:50:39.056779009Z）、CPAMP **688354d0aead**（2026-11-14T19:01:36.313887916Z）与本次部署前的 ID/启动时间完全一致，未被本次部署重启。AGY CLI 仍为 **8b4fc29f938cab08c47e7471238184fe77a6c9757e0d640bf980f133998a6f7c**，AGY_CATALOG_REFRESH_EXPERIMENTAL=false，C4 未启用。
+- `.6b6ea46.new` 暂存文件已原子替换消失；本次远端临时部署助手已删除。此前被工具策略阻止删除的本地旧草案文件仍不具备发布资格。
