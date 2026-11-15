@@ -144,7 +144,8 @@ func validateRebuildResults(s *session, req request) error {
 
 // Keep the actual accepted wire result in an eviction checkpoint, including
 // results already consumed through MCP just before the HTTP handler failed.
-// Ready is checked by the caller; a missing result is never manufactured.
+// Ready is checked by the caller. Missing client results remain unavailable;
+// explicit bridge recovery notices are separately marked as unknown evidence.
 func checkpointResult(c *pendingTool) map[string]any {
 	if c.ResultItem != nil {
 		return c.ResultItem

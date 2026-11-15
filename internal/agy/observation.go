@@ -126,6 +126,9 @@ func (c *pendingTool) receipt(state string) {
 // Only explicit structured results establish an outcome. Human-readable text
 // and a generated function_call.status=completed establish no execution result.
 func receiptOutcome(v any) string {
+	if isRecoveryUnknown(v) {
+		return "unknown"
+	}
 	if text, ok := v.(string); ok {
 		var structured map[string]any
 		if unmarshalExact([]byte(text), &structured) != nil {

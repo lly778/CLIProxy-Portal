@@ -179,6 +179,10 @@ func rememberRequest(s *session, req request, fingerprints []string) {
 // The caller holds requestMu: no client response/result may race this checkpoint.
 // Native execution is cancelled only after its client-visible state is durable.
 func (m *Manager) archiveWaitingSession(ctx context.Context, s *session) error {
+	return m.archiveWaitingSessionMode(ctx, s, false)
+}
+
+func (m *Manager) archiveWaitingSessionMode(ctx context.Context, s *session, quiesce bool) (resultErr error) {
 	if m.disk == nil || s.proc == nil || s.internal {
 		return fail(503, "session_cache_unavailable", "AGY 等待中的工具交互暂时无法转存")
 	}
@@ -197,7 +201,21 @@ func (m *Manager) archiveWaitingSession(ctx context.Context, s *session) error {
 			return fail(409, "session_busy", "AGY 正在交付工具结果，请稍后转存")
 		}
 	}
+	if quiesce {
+		if _, ok := detachedTailStart(s); !ok {
+			s.mu.Unlock()
+			return fail(409, "session_busy", "原工具状态已改变，未撤销等待")
+		}
+		s.loading = true
+	}
 	s.mu.Unlock()
+	defer func() {
+		if resultErr != nil && quiesce {
+			s.mu.Lock()
+			s.loading = false
+			s.mu.Unlock()
+		}
+	}()
 	v := closingCheckpoint(s, nil)
 	if len(v.WaitingTools) == 0 {
 		// Native execution may have consumed the last result without ending
@@ -217,17 +235,21 @@ func (m *Manager) archiveWaitingSession(ctx context.Context, s *session) error {
 	s.persisted = true
 	s.mu.Unlock()
 	s.cancel()
+	var closeErr error
 	if s.proc.alive() {
 		s.proc.notify("session/cancel", map[string]string{"sessionId": s.ID})
 		// Releasing the MCP wait lets the official process close the native
 		// session. Its persisted ID and pending client calls remain recoverable.
-		_ = s.proc.call(ctx, "session/close", map[string]string{"sessionId": s.ID}, nil)
+		closeErr = s.proc.call(ctx, "session/close", map[string]string{"sessionId": s.ID}, nil)
 	}
 	m.mu.Lock()
 	if m.sessions[s.tenant] == s {
 		delete(m.sessions, s.tenant)
 	}
 	m.mu.Unlock()
+	if quiesce && closeErr != nil {
+		return fail(503, "session_restore_failed", "旧原生调用尚未确认关闭，恢复记录已保留，请稍后重试")
+	}
 	return nil
 }
 

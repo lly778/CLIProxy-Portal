@@ -229,6 +229,10 @@ func parkToolCall(s *session, name string, args map[string]any) (*pendingTool, b
 		s.trace.emit(Observation{Kind: "tool_rejected", State: "rejected", Tool: t.key(), Reason: reason, Route: route, ProjectionVersion: schemaProjectionVersion})
 		return nil, false
 	}
+	if uncertainRecoveryAction(s, t, args) {
+		s.trace.emit(Observation{Kind: "tool_rejected", State: "rejected", Tool: t.key(), Reason: "unacknowledged_outcome_unknown", Route: route})
+		return nil, false
+	}
 	encoded, _ := json.Marshal(args)
 	if len(encoded) > MaxText {
 		return nil, false

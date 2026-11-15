@@ -33,6 +33,7 @@ func routingFingerprints(items []map[string]any) []string {
 // same acceptance rules; an index key alone is never sufficient for recovery.
 func sessionMatchesRequest(s *session, r request) bool {
 	canonicalSessionHistory(s)
+	r.Items = expandRecoveryHistory(s, r.Items)
 	if r.Previous != "" {
 		if s.responses[r.Previous] {
 			return true
@@ -61,7 +62,11 @@ func sessionMatchesRequest(s *session, r request) bool {
 		_, match := checkpointHistory(s, r.Items)
 		return match
 	}
-	return !s.running && prefix(s.history, requestFingerprints(r.Items))
+	if !s.running && prefix(s.history, requestFingerprints(r.Items)) {
+		return true
+	}
+	_, detached := detachedTailMatch(s, r)
+	return detached
 }
 
 // Codex may put a reasoning item after the tool calls from the same assistant

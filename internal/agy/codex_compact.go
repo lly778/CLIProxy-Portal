@@ -15,6 +15,18 @@ func checkpointHistory(s *session, items []map[string]any) ([]map[string]any, bo
 	if prefix(s.history, requestFingerprints(aligned)) {
 		return aligned, true
 	}
+	if len(s.recoveryOverlays) > 0 {
+		projected, ok := recoveryProjection(s.items, s.recoveryOverlays)
+		if !ok {
+			return nil, false
+		}
+		comparison := &session{items: projected, history: requestFingerprints(projected)}
+		client, matched := checkpointHistory(comparison, items)
+		if !matched {
+			return nil, false
+		}
+		return append(append([]map[string]any(nil), s.items...), client[len(projected):]...), true
+	}
 	visible := func(items []map[string]any) []map[string]any {
 		out := make([]map[string]any, 0, len(items))
 		for _, item := range items {

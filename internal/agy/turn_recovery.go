@@ -127,6 +127,9 @@ func lateResultPrompt(s *session) ([]any, bool, error) {
 				return nil, false, err
 			}
 			label := "Completed client tool result"
+			if isRecoveryUnknown(c.Output) {
+				label = recoveryUnknownLabel
+			}
 			if c.remote != nil {
 				label = "Completed remote MCP result"
 			}
@@ -151,6 +154,12 @@ func lateResultPrompt(s *session) ([]any, bool, error) {
 			}
 		}
 		instruction := "Continue the task using these actual tool results. Do not repeat completed actions."
+		for _, c := range s.pending {
+			if isRecoveryUnknown(c.Output) {
+				instruction = recoveryUnknownInstruction
+				break
+			}
+		}
 		if s.checkpointing {
 			instruction = codexCompactionInstructions
 		}
@@ -224,6 +233,7 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	tools, loaded := requestedTools(s, r)
 	responses := s.responses
 	deferred := s.deferredTools
+	overlays := cloneRecoveryOverlays(s.recoveryOverlays)
 	s.mu.Unlock()
 	if r.ToolsProvided {
 		deferred = deferredCatalog(r.Tools)
@@ -248,6 +258,7 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	}
 	next.mu.Lock()
 	next.responses = responses
+	carryRecoveryOverlays(next, r.Items, overlays)
 	next.mu.Unlock()
 	return next, nil
 }

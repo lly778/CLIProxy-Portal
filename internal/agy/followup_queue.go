@@ -39,7 +39,7 @@ func followupInput(history, fps []string, items []map[string]any) (int, bool) {
 // Admission for a follow-up must not need the slot currently owned by its
 // original response. Actual generation still reacquires a slot after waiting.
 func canQueueFollowup(s *session, r request) bool {
-	if isCodexCompactionRequest(r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
+	if r.detachedResume || isCodexCompactionRequest(r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
 		return false
 	}
 	system, err := systemText(r)
@@ -56,7 +56,7 @@ func canQueueFollowup(s *session, r request) bool {
 }
 
 func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, out *response, releaseSlot func(), takeSlot func() error) (bool, func(), error) {
-	if isCodexCompactionRequest(*r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
+	if r.detachedResume || isCodexCompactionRequest(*r) || r.ToolsProvided && len(r.Tools) == 0 && len(r.remoteSpecs) == 0 {
 		return false, nil, nil
 	}
 	system, err := systemText(*r)

@@ -83,6 +83,7 @@ func (t tool) key() string {
 func (t tool) mcpName() string { return "tool_" + digest(t.key())[:24] }
 
 type request struct {
+	detachedResume     bool
 	remoteSpecs        []remoteMCPSpec
 	remoteConnections  map[string]*remoteMCPClient
 	remoteCatalogItems []map[string]any

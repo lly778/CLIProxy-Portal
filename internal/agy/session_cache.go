@@ -29,6 +29,7 @@ const sessionRetention = 7 * 24 * time.Hour
 // authoritative wire history so an explicit instruction/history change can be
 // rebuilt without re-executing tools. The official session remains in AGY's DB.
 type savedSession struct {
+	RecoveryOverlays                           []recoveryOverlay           `json:",omitempty"`
 	NativeToolIDs                              []string                    `json:",omitempty"`
 	RemoteRetainedBytes                        int                         `json:",omitempty"`
 	RemoteBindings                             map[string]remoteMCPBinding `json:",omitempty"`
@@ -100,6 +101,8 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(last_ms)`,
 		`CREATE TABLE IF NOT EXISTS responses (owner TEXT NOT NULL, response TEXT NOT NULL, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, PRIMARY KEY(owner,response))`,
 		`CREATE INDEX IF NOT EXISTS responses_session ON responses(session_id)`,
+		`CREATE TABLE IF NOT EXISTS session_tail_routes (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,owner TEXT NOT NULL,model TEXT NOT NULL,history_key TEXT NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS session_tail_lookup ON session_tail_routes(owner,model,history_key)`,
 		`CREATE TABLE IF NOT EXISTS tool_record_archives (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL,payload BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS tool_record_expiry ON tool_record_archives(expires_ms)`,
 		`CREATE TABLE IF NOT EXISTS remote_mcp_attempts (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL)`,
@@ -180,7 +183,11 @@ func (d *sessionDiskCache) historyKeys(history []string) []string {
 func (d *sessionDiskCache) routingKey(v savedSession) string {
 	history := v.History
 	if len(v.Items) > 0 {
-		history = routingFingerprints(v.Items)
+		items, ok := recoveryProjection(v.Items, v.RecoveryOverlays)
+		if !ok {
+			return ""
+		}
+		history = routingFingerprints(items)
 	}
 	keys := d.historyKeys(history)
 	if len(keys) == 0 {
@@ -192,7 +199,7 @@ func (d *sessionDiskCache) routingKey(v savedSession) string {
 // Reindex existing encrypted records once, before serving requests. Only a page
 // of IDs and one decrypted payload are retained; normal requests stay indexed.
 func (d *sessionDiskCache) upgradeHistoryIndex() error {
-	const version = "exact-numbers-remote-mcp-identities-v4"
+	const version = "exact-numbers-recovery-overlays-v5"
 	var marker []byte
 	err := d.db.QueryRow(`SELECT value FROM cache_meta WHERE id=2`).Scan(&marker)
 	if err == nil && string(marker) == version {
@@ -250,6 +257,15 @@ func (d *sessionDiskCache) upgradeHistoryIndex() error {
 			if _, err = tx.Exec(`UPDATE sessions SET history_key=? WHERE id=?`, d.routingKey(v), id); err != nil {
 				break
 			}
+			if _, err = tx.Exec(`DELETE FROM session_tail_routes WHERE session_id=?`, id); err != nil {
+				break
+			}
+			if key := savedDetachedKey(d, v); key != "" {
+				_, err = tx.Exec(`INSERT INTO session_tail_routes(session_id,owner,model,history_key) VALUES(?,?,?,?)`, id, d.hash(v.Owner), d.hash(v.Model), key)
+				if err != nil {
+					break
+				}
+			}
 		}
 		if err != nil {
 			_ = tx.Rollback()
@@ -274,7 +290,7 @@ func snapshotSessionLocked(s *session) savedSession {
 	for id, usable := range s.responses {
 		responses[id] = usable
 	}
-	return savedSession{NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
+	return savedSession{RecoveryOverlays: cloneRecoveryOverlays(s.recoveryOverlays), NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
 }
 func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if !safeNativeSessionID(v.ID) || v.Owner == "" {
@@ -316,6 +332,16 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 				if _, err = tx.Exec(`INSERT INTO responses(owner,response,session_id) VALUES(?,?,?)`, d.hash(v.Owner), d.hash(id), v.ID); err != nil {
 					return err
 				}
+			}
+		}
+	}
+	if _, err = tx.Exec(`DELETE FROM session_tail_routes WHERE session_id=?`, v.ID); err != nil {
+		return err
+	}
+	if ready {
+		if key := savedDetachedKey(d, v); key != "" {
+			if _, err = tx.Exec(`INSERT INTO session_tail_routes(session_id,owner,model,history_key) VALUES(?,?,?,?)`, v.ID, d.hash(v.Owner), d.hash(v.Model), key); err != nil {
+				return err
 			}
 		}
 	}
@@ -372,11 +398,17 @@ func (d *sessionDiskCache) find(owner string, r request, live map[string]bool) (
 		n := min(256, len(keys))
 		cursor := ""
 		for {
-			args := []any{d.hash(owner), d.hash(r.Model), cutoff, cursor}
+			args := []any{d.hash(owner), d.hash(r.Model)}
 			for _, key := range keys[:n] {
 				args = append(args, key)
 			}
-			q := `SELECT id FROM sessions WHERE owner=? AND model=? AND ready=1 AND last_ms>=? AND id>? AND history_key IN (` + strings.TrimSuffix(strings.Repeat("?,", n), ",") + `) ORDER BY id LIMIT 128`
+			args = append(args, d.hash(owner), d.hash(r.Model))
+			for _, key := range keys[:n] {
+				args = append(args, key)
+			}
+			args = append(args, cutoff, cursor)
+			marks := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+			q := `SELECT id FROM sessions WHERE id IN (SELECT id FROM sessions INDEXED BY sessions_history WHERE owner=? AND model=? AND history_key IN (` + marks + `) UNION SELECT session_id FROM session_tail_routes WHERE owner=? AND model=? AND history_key IN (` + marks + `)) AND ready=1 AND last_ms>=? AND id>? ORDER BY id LIMIT 128`
 			rows, err := d.db.Query(q, args...)
 			if err != nil {
 				return nil, err
@@ -440,6 +472,10 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 		v.History = requestFingerprints(v.Items)
 	}
 	s := &session{deferredTools: filterClientTools(v.DeferredTools), ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
+	s.recoveryOverlays = cloneRecoveryOverlays(v.RecoveryOverlays)
+	if _, ok := recoveryProjection(s.items, s.recoveryOverlays); !ok {
+		return nil, errors.New("invalid AGY recovery overlay")
+	}
 	if len(v.NativeToolIDs) > nativeToolIdentityLimit {
 		v.NativeToolIDs = v.NativeToolIDs[len(v.NativeToolIDs)-nativeToolIdentityLimit:]
 	}

@@ -36,6 +36,9 @@ func toolResultBlocksDepth(value any, depth int) ([]any, error) {
 		return nil, fail(400, "invalid_tool_result", "工具结果嵌套过深")
 	}
 	if node, ok := value.(map[string]any); ok {
+		if isRecoveryUnknown(node) {
+			return toolResultBlocksDepth(node["content"], depth+1)
+		}
 		_, hasError := node["isError"]
 		_, hasLegacyError := node["is_error"]
 		_, hasStructured := node["structuredContent"]

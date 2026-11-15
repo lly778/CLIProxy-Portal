@@ -166,10 +166,23 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace.phase("session_loading")
+	if s != nil {
+		s.mu.Lock()
+		req.Items = expandRecoveryHistory(s, req.Items)
+		_, req.detachedResume = detachedTailMatch(s, req)
+		s.mu.Unlock()
+	}
 	if len(req.remoteSpecs) > 0 {
 		metadataCtx, done := context.WithTimeout(r.Context(), 30*time.Second)
 		e = m.prepareRemoteTools(metadataCtx, owner, &req)
 		done()
+		if e != nil {
+			WriteError(w, e)
+			return
+		}
+	}
+	if req.detachedResume {
+		s, e = m.coldDetachedSession(r.Context(), s, &req)
 		if e != nil {
 			WriteError(w, e)
 			return
@@ -236,7 +249,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			trace.phase("restoring_session")
 			s, e = m.restoreSession(r.Context(), s, req)
 		}
-		if isMissingSession(e) && !checkpoint {
+		if isMissingSession(e) && !checkpoint && !req.detachedResume {
 			trace.phase("rebuilding_missing_session")
 			s, e = m.rebuildMissingSession(r.Context(), original, req)
 		}
@@ -354,6 +367,14 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		m.drop(s)
 		out.fail(fail(503, "worker_lost", "AGY 会话已失效，请重新发起对话"))
 		return
+	}
+	if req.detachedResume {
+		if e = m.prepareDetachedResume(s, &req); e != nil {
+			out.fail(e)
+			return
+		}
+		sendItems = req.Items
+		trace.emit(Observation{Kind: "session", State: "resume", SessionID: s.ID, Reason: "unacknowledged_tool_tail"})
 	}
 	system, e := systemText(req)
 	if e != nil {
@@ -480,7 +501,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			out.fail(resumeErr)
 			return
 		}
-		if !resumingRemote {
+		if !resumingRemote && !req.detachedResume {
 			e = deliverToolsForRequest(s, req.Items, &req)
 		}
 		if e != nil {

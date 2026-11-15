@@ -49,6 +49,7 @@ type reportedTool struct {
 	Official     bool
 }
 type session struct {
+	recoveryOverlays                                   []recoveryOverlay
 	remoteRetainedBytes                                int
 	remoteInFlight                                     bool
 	remoteConnections                                  map[string]*remoteMCPClient

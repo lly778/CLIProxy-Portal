@@ -216,6 +216,9 @@ func inspectToolHistory(items []map[string]any) (toolHistory, error) {
 			c.Output = item
 		}
 		record.Outcome = c.outcome()
+		if isRecoveryUnknown(item["output"]) {
+			record.Provenance = "bridge_recovery_no_client_result"
+		}
 		delete(pending, id)
 	}
 	for _, record := range h.Records {
