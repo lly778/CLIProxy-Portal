@@ -1,4 +1,4 @@
-# AGY 迟到客户端工具结果补交（2026-11-15，已实现，未部署）
+# AGY 迟到客户端工具结果补交（2026-11-15，21:04 已部署）
 
 用户要求补齐“恢复时默认跳过未知操作后，客户端后来回传真实结果，严格核对归属后补充事实”的缺口。本次仅修改服务器桥接，不要求客户端更新。
 
@@ -25,6 +25,16 @@
 
 - 新增回归覆盖 function/custom、真实成功/失败、图片、结构化数据/大整数、UNKNOWN 不伪造成成功、相同结果确认与差异拒绝、整批原子校验、模型/系统/用户/调用归属隔离、伪造内部类型拒绝、完整历史两种形态、忙会话保护、正常后续工具调用、冷路由/v5 迁移/歧义/级联删除、压缩事实与 Codex 原会话摘要、中断恢复及上游失败后的新消息续接。
 - 最终全量 `go test ./...`、`go vet ./...` 和 `git diff --check` 已通过；受影响 AGY/HTTP 包复测通过；新增补交测试连续 10 次通过，也验证了补交后再次出现工具交接时，原有一次受限恢复仍能正常工作。
-- Linux amd64（CGO=0）构建通过，暂存产物：`C:\Users\lly77\AppData\Local\Temp\codex-agy-late-results-a0ef30bf6c5b49b6b3210a5210a9c3bb\portal-linux-amd64`，19,546,272 bytes，SHA256 `80d442adc1a9e3dec604f8442fb6366ec0c65d118cdda566882486aa7815d136`。该产物尚未上传或替换线上程序。
-- 尚未部署、尚未推送；未发起真实模型或客户端工具业务验收。线上仍是之前 19:59 部署的 `2e65871…` 实现，详见 [自动恢复交接](HANDOFF-2026-11-15-AUTO-RECOVERY.md)。
+- 实现阶段 Linux amd64（CGO=0）构建通过，暂存产物 `C:\Users\lly77\AppData\Local\Temp\codex-agy-late-results-a0ef30bf6c5b49b6b3210a5210a9c3bb\portal-linux-amd64`（19,546,272 bytes、SHA256 `80d442adc1a9e3dec604f8442fb6366ec0c65d118cdda566882486aa7815d136`）已由下方提交后正式构建替代，没有部署该暂存产物。
+- 用户明确要求“部署推送”后，**21:04:04.700 +0800 已部署**；实现代码 **0c9bb3a21f6af889d0d00dab82277f19cbfdda39** 已推送 main，替换之前 19:59 的 `2e65871…` 实现。没有发起真实模型或客户端工具业务验收，实际补交效果待自然请求观察。
 - 无关的 `ops/__pycache__/` 保留且不纳入本次修改。
+
+## 21:04 发布验收（Asia/Hong_Kong）
+
+- 从已提交源码重新进行 Linux amd64/CGO=0/trimpath 构建：`C:\Users\lly77\AppData\Local\Temp\codex-agy-late-results-release-abae8079f60240c5b01113052aac7f7b\portal-linux-amd64`，**27,992,257 bytes**，SHA256 **b432e596413dde5b0d5411214ae9bbdadf64fe5787c86c722bc5b55a19b54505**。构建元数据 vcs.revision=0c9bb3a21f6af889d0d00dab82277f19cbfdda39；仅无关未跟踪 ops/__pycache__/ 导致 modified=true，应用源码与提交一致。
+- 上传后完整校验 SHA256，确认 AGY 无活跃/等待任务、常驻会话为 0；门户至 CPA 连续 **27.000 秒**无 TCP 数据或连接活动，最终复核后原子替换，仅重建门户，不重建镜像或其他服务，没有创建备份或回滚副本。
+- 门户容器 **2be42476eac2** 于 **2026-11-15 21:04:04.700 +0800** 启动。**21:05:02** 验收 healthy，实际 portal 子进程（不是 docker-init）的运行 exe 与挂载程序均为上述 b432e596…；启动 ERROR/panic/fatal 计数 **0**。
+- 服务器本地、门户公网、API 公网 /healthz 均为 **HTTP 200**；客户端直接访问两个公网健康检查也均为 200。
+- 加密缓存迁移标记 **late-client-result-routes-v6**，session_late_result_routes 与 session_late_result_session 存在，原 client/handoff/tail 路由保留；磁盘会话数仍为 **302**。现有快照生成的迟到补交路由为 **0**，没有为旧记录猜造未知声明或执行回执。AGY not_connected/sessions=0 是重启后的惰性状态，未出现 cache_error。
+- CPA **6a99f7e729f7**（2026-10-22T05:50:39.056779009Z）、CPAMP **688354d0aead**（2026-11-14T19:01:36.313887916Z）的 ID 和启动时间均与部署前一致，没有重启。AGY CLI SHA256 仍为 **8b4fc29f938cab08c47e7471238184fe77a6c9757e0d640bf980f133998a6f7c**；实际 AGY_CATALOG_REFRESH_EXPERIMENTAL=false。客户端、CLI、预算、并发及实验开关均未修改。
+- 完整会话仍只在移出内存、关闭或中断等原边界保存；真实成功/失败以实际结果为准。`.0c9bb3a.new` 已原子替换消失，服务器临时部署助手已删除。发布说明单独提交推送，不纳入无关缓存目录。
