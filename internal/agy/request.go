@@ -85,6 +85,8 @@ func (t tool) mcpName() string { return "tool_" + digest(t.key())[:24] }
 type request struct {
 	clientKey          string
 	replayKey          string
+	handoffRetry       bool
+	recoveryResponse   string
 	detachedResume     bool
 	remoteSpecs        []remoteMCPSpec
 	remoteConnections  map[string]*remoteMCPClient

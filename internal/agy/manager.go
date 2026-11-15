@@ -50,6 +50,9 @@ type reportedTool struct {
 }
 type session struct {
 	clientBindings                                     []string
+	handoffRecoveries                                  []string
+	failedRecoveryResponses                            []string
+	recoveryFailure                                    string
 	recoveryOverlays                                   []recoveryOverlay
 	remoteRetainedBytes                                int
 	remoteInFlight                                     bool
@@ -100,6 +103,7 @@ type session struct {
 	interruptedOutput                                  []map[string]any
 	requestPrevious                                    string
 	requestReplayKey                                   string
+	requestInputItems                                  int
 	usageCursor                                        int64
 	promptWarning                                      error
 	proc                                               *process

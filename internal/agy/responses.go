@@ -121,7 +121,8 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
-	if e = m.guardHandoffRetry(owner, req.replayKey); e != nil {
+	retrySession, e := m.prepareHandoffRetry(owner, &req)
+	if e != nil {
 		WriteError(w, e)
 		return
 	}
@@ -136,7 +137,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		slotHeld = true
 	default:
 		if !checkpoint {
-			candidate, err := m.find(owner, req)
+			candidate, err := retrySession, error(nil)
+			if candidate == nil {
+				candidate, err = m.find(owner, req)
+			}
 			if err != nil {
 				WriteError(w, err)
 				return
@@ -164,6 +168,8 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 	if checkpoint {
 		s, e = m.prepareCodexCompaction(owner, &req)
+	} else if retrySession != nil {
+		s = retrySession
 	} else if s == nil {
 		s, e = m.find(owner, req)
 	}
@@ -172,11 +178,21 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace.phase("session_loading")
+	if s != nil && !req.handoffRetry {
+		if e = prepareFailedRecoveryFollowup(s, &req); e != nil {
+			WriteError(w, e)
+			return
+		}
+	}
 	if s != nil {
 		s.mu.Lock()
 		req.Items = expandRecoveryHistory(s, req.Items)
 		_, req.detachedResume = detachedTailMatch(s, req)
 		s.mu.Unlock()
+		if req.handoffRetry && !req.detachedResume {
+			WriteError(w, fail(409, "followup_history_changed", "原交接已推进，恢复记录已保留，未将旧请求重新执行"))
+			return
+		}
 	}
 	if len(req.remoteSpecs) > 0 {
 		metadataCtx, done := context.WithTimeout(r.Context(), 30*time.Second)
@@ -195,6 +211,20 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := newResponse(w, req.Stream, req.Model)
+	out.continuableFailure = req.handoffRetry
+	if s != nil {
+		s.mu.Lock()
+		out.continuableFailure = out.continuableFailure || len(s.recoveryOverlays) > 0
+		s.mu.Unlock()
+	}
+	recoverySource := s
+	out.onFailure = func() {
+		target := s
+		if target == nil {
+			target = recoverySource
+		}
+		m.linkRecoveryFailure(target, out)
+	}
 	out.requestKey = req.replayKey
 	out.trace = trace
 	trace.emit(Observation{Kind: "response", State: "created", ResponseID: out.id})
@@ -346,6 +376,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.loading = false
+	out.continuableFailure = out.continuableFailure || len(s.recoveryOverlays) > 0
 	s.trace = trace
 	trace.bind(s.ID)
 	if s.proc != nil {
@@ -613,6 +644,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	s.items = append([]map[string]any(nil), req.Items...)
 	s.requestPrevious = req.Previous
 	s.requestReplayKey = req.replayKey
+	s.requestInputItems = len(req.Items)
 	if req.Previous != "" {
 		s.responses[req.Previous] = false
 	}
@@ -1098,6 +1130,9 @@ func (m *Manager) remember(s *session, out *response) {
 }
 
 type response struct {
+	failureCode            string
+	onFailure              func()
+	continuableFailure     bool
 	requestKey             string
 	batchID                string
 	trace                  *requestTrace
@@ -1335,13 +1370,19 @@ func (o *response) finish(u Usage) error {
 }
 func (o *response) fail(err error) {
 	o.trace.phase("response_failed")
-	if !o.started {
-		WriteError(o.w, err)
-		return
-	}
 	var e *Error
 	if !errors.As(err, &e) {
 		e = &Error{502, "agent_error", "AGY 请求中断"}
+	}
+	o.failureCode = e.Code
+	if o.onFailure != nil {
+		callback := o.onFailure
+		o.onFailure = nil
+		callback()
+	}
+	if !o.started {
+		WriteError(o.w, err)
+		return
 	}
 	v := o.envelope("failed", Usage{})
 	v["error"] = map[string]string{"code": e.Code, "message": e.Message}

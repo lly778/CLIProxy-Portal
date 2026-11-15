@@ -198,7 +198,7 @@ func (m *Manager) mcp(w http.ResponseWriter, r *http.Request) {
 			if allowed && uncertainRecoveryAction(s, candidate, args) {
 				s.trace.emit(Observation{Kind: "tool_rejected", State: "rejected", Tool: candidate.key(), Reason: "unacknowledged_outcome_unknown"})
 				s.mu.Unlock()
-				result = mcpError("A previous matching operation has an UNKNOWN outcome after a disconnected response. No new call was made. Do not repeat that operation; verify its effects with a read-only check first.")
+				result = mcpError("A previous matching operation has an UNKNOWN outcome after a disconnected response. No new call was made. Do not repeat that operation. " + recoveryUnknownPolicy)
 				break
 			}
 			if allowed && candidate.Type == "tool_search" && candidate.Execution == "server" {

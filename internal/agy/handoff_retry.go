@@ -27,17 +27,11 @@ func hasRequestHandoff(s *session, key string) bool {
 	return false
 }
 
-// Normal retries still use the existing response cache. If that cache was lost
-// in a crash but an original tool handoff survived, do not start the original
-// prompt again. Result continuations and new user input have different keys.
-// No failed-request tombstone is created; this guard exists only as long as
-// the original waiting call exists and never implies that the action ran.
-func (m *Manager) guardHandoffRetry(owner, key string) error {
+// Resolve only the exact original owner-scoped request, including its canonical
+// payload. A header alone can never select a recovery or authorize a tool action.
+func (m *Manager) handoffRetrySession(owner, key string) (*session, error) {
 	if key == "" {
-		return nil
-	}
-	blocked := func() error {
-		return fail(409, "tool_handoff_pending", "原工具交接记录已保留，请回传原调用结果或按最新历史续接，未重复执行原请求")
+		return nil, nil
 	}
 	m.mu.Lock()
 	live := map[string]bool{}
@@ -49,33 +43,58 @@ func (m *Manager) guardHandoffRetry(owner, key string) error {
 		}
 	}
 	m.mu.Unlock()
+	var found *session
+	accept := func(s *session) error {
+		if !hasRequestHandoff(s, key) {
+			return nil
+		}
+		if found != nil && found.ID != s.ID {
+			return fail(409, "ambiguous_session", "原请求对应多个工具交接，未自动选择或重复执行")
+		}
+		found = s
+		return nil
+	}
 	for _, s := range all {
-		if hasRequestHandoff(s, key) {
-			return blocked()
+		if err := accept(s); err != nil {
+			return nil, err
 		}
 	}
 	if m.disk == nil {
-		return nil
+		return found, nil
 	}
 	d := m.disk
 	cutoff := time.Now().Add(-sessionRetention).UnixMilli()
-	// Metadata lookup only: no scan or decryption of conversation bodies.
 	rows, err := d.db.Query(`SELECT s.id FROM session_handoff_routes r JOIN sessions s ON s.id=r.session_id WHERE r.owner=? AND r.request_key=? AND s.ready=1 AND s.last_ms>=?`, d.hash(owner), key, cutoff)
 	if err != nil {
-		return fail(503, "session_cache_unavailable", "AGY 工具交接索引暂不可用")
+		return nil, fail(503, "session_cache_unavailable", "AGY 工具交接索引暂不可用")
 	}
-	defer rows.Close()
+	var ids []string
 	for rows.Next() {
 		var id string
 		if err = rows.Scan(&id); err != nil {
-			return fail(503, "session_cache_unavailable", "AGY 工具交接索引暂不可用")
+			break
 		}
 		if !live[id] {
-			return blocked()
+			ids = append(ids, id)
 		}
 	}
-	if rows.Err() != nil {
-		return fail(503, "session_cache_unavailable", "AGY 工具交接索引暂不可用")
+	if err == nil {
+		err = rows.Err()
 	}
-	return nil
+	_ = rows.Close()
+	if err != nil {
+		return nil, fail(503, "session_cache_unavailable", "AGY 工具交接索引暂不可用")
+	}
+	for _, id := range ids {
+		s, err := d.loadSession(id, owner, cutoff)
+		if err != nil {
+			return nil, fail(503, "session_cache_unavailable", "AGY 工具交接记录暂不可用")
+		}
+		if s != nil {
+			if err := accept(s); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return found, nil
 }

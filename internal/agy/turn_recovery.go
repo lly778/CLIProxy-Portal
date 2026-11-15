@@ -234,6 +234,9 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	responses := s.responses
 	deferred := s.deferredTools
 	bindings := append([]string(nil), s.clientBindings...)
+	recoveries := append([]string(nil), s.handoffRecoveries...)
+	failedResponses := append([]string(nil), s.failedRecoveryResponses...)
+	failure := s.recoveryFailure
 	overlays := cloneRecoveryOverlays(s.recoveryOverlays)
 	s.mu.Unlock()
 	if r.ToolsProvided {
@@ -260,6 +263,9 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	next.mu.Lock()
 	next.responses = responses
 	next.clientBindings = bindings
+	next.handoffRecoveries = recoveries
+	next.failedRecoveryResponses = failedResponses
+	next.recoveryFailure = failure
 	carryRecoveryOverlays(next, r.Items, overlays)
 	next.mu.Unlock()
 	return next, nil

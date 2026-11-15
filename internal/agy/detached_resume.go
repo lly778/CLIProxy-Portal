@@ -10,10 +10,11 @@ const recoveryOverlayLimit = 8
 const recoveryOverlayBytes = 64 << 10
 const recoveryUnknownOrigin = "bridge_unacknowledged_tail"
 const recoveryUnknownLabel = "Bridge recovery notice: client result unavailable, execution UNKNOWN"
-const recoveryUnknownInstruction = "Continue using the preserved results and explicit unknown-status recovery notices. Never automatically repeat an unacknowledged operation; verify its effects read-only first."
+const recoveryUnknownPolicy = "By default, skip operations with an UNKNOWN execution outcome without retrying them or launching verification calls just to resolve the uncertainty. Keep their status UNKNOWN: skipped does not mean completed, successful, or confirmed failed. Continue independent authorized work; defer steps that depend on an unknown operation. In the reply, identify the skipped operations and dependent steps left pending. Keep the conversation open for new instructions or actual results. If the user explicitly requests verification, use available read-only checks and preserve UNKNOWN when evidence is inconclusive."
+const recoveryUnknownInstruction = "Continue using the preserved results and explicit unknown-status recovery notices. Never automatically repeat an unacknowledged operation. " + recoveryUnknownPolicy
 
 // These are fingerprints and positions in the authoritative server history,
-// not a second copy of the conversation. The client never received these items.
+// not a second copy of the conversation. The client may not have retained them.
 type recoveryOverlay struct {
 	At    int
 	Items []string
@@ -116,6 +117,17 @@ func detachedTailStart(s *session) (int, bool) {
 }
 
 func detachedTailMatch(s *session, r request) (int, bool) {
+	if r.handoffRetry {
+		cut, ok := handoffRetryTail(s, r)
+		if !ok || r.Previous != "" || isCodexCompactionRequest(r) {
+			return 0, false
+		}
+		base, ok := recoveryProjection(s.items[:cut], s.recoveryOverlays)
+		if !ok || len(r.Items) < len(base) || !prefix(requestFingerprints(base), requestFingerprints(r.Items)) {
+			return 0, false
+		}
+		return cut, len(r.Items) == len(base) || r.recoveryResponse != "" && onlyFollowupMessages(r.Items[len(base):])
+	}
 	if r.Previous != "" || isCodexCompactionRequest(r) || s.model != r.Model {
 		return 0, false
 	}
@@ -170,7 +182,7 @@ func isRecoveryUnknown(v any) bool {
 }
 
 func recoveryUnknownResult() any {
-	return map[string]any{"portal_result_origin": recoveryUnknownOrigin, "execution_state": "unknown", "isError": true, "content": []any{map[string]string{"type": "text", "text": "Bridge recovery notice, not a client tool result: the previous connection ended and no result was acknowledged for this operation. Execution and outcome are UNKNOWN, not successful or confirmed failed. Do not automatically repeat this action. Verify its effects read-only before further work."}}}
+	return map[string]any{"portal_result_origin": recoveryUnknownOrigin, "execution_state": "unknown", "isError": true, "content": []any{map[string]string{"type": "text", "text": "Bridge recovery notice, not a client tool result: the previous connection ended and no result was acknowledged for this operation. Execution and outcome are UNKNOWN, not successful or confirmed failed. Do not automatically repeat this action. " + recoveryUnknownPolicy}}}
 }
 
 // Complete validations before touching a waiter. A live waiter is first saved
@@ -213,8 +225,14 @@ func (m *Manager) coldDetachedSession(ctx context.Context, s *session, r *reques
 	if activeDelivery {
 		return nil, fail(409, "session_busy", "原回复仍有客户端接收，不能撤销工具等待")
 	}
-	if err := m.archiveWaitingSessionMode(ctx, s, true); err != nil {
-		return nil, err
+	var archiveErr error
+	if r.handoffRetry {
+		archiveErr = m.archiveWaitingSessionValidated(ctx, s, true, r)
+	} else {
+		archiveErr = m.archiveWaitingSessionMode(ctx, s, true)
+	}
+	if archiveErr != nil {
+		return nil, archiveErr
 	}
 	cold, err := m.disk.loadSession(s.ID, s.owner, time.Now().Add(-sessionRetention).UnixMilli())
 	if err != nil || cold == nil {
@@ -243,6 +261,12 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 	if err != nil {
 		return err
 	}
+	if r.handoffRetry {
+		extra = append([]any{map[string]string{"type": "text", "text": handoffRecoveryInstruction}}, extra...)
+		if s.recoveryFailure != "" {
+			extra = append(extra, map[string]string{"type": "text", "text": "[Previous recovery response failed: " + s.recoveryFailure + ". This does not establish the execution outcome of an uncertain tool. Continue using actual results and the new user instructions.]"})
+		}
+	}
 	tools, loaded := requestedTools(s, *r)
 	policy, err := requestToolPolicy(*r, tools)
 	if err != nil {
@@ -256,7 +280,14 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 		extra = append([]any{map[string]string{"type": "text", "text": text}}, extra...)
 	}
 	var added []map[string]any
+	var outputs []map[string]any
 	var calls []*pendingTool
+	knownResults := map[string]map[string]any{}
+	for _, item := range s.items {
+		if isToolResultItem(stringField(item, "type")) {
+			knownResults[resultCallID(item)] = item
+		}
+	}
 	for _, id := range pendingIDs(s) {
 		c := s.pending[id]
 		if c.Returned || c.Replayed {
@@ -269,7 +300,17 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 		} else {
 			item["type"] = "custom_tool_call_output"
 		}
-		added = append(added, item)
+		select {
+		case <-c.Ready:
+			item = checkpointResult(c) // Actual acknowledged result, never replaced.
+		default:
+		}
+		outputs = append(outputs, item)
+		if previous := knownResults[c.ID]; previous == nil {
+			added = append(added, item)
+		} else if itemFingerprint(previous) != itemFingerprint(item) {
+			return fail(409, "result_changed", "已有真实结果不同，原记录未改写")
+		}
 	}
 	overlayItems := append(append([]map[string]any(nil), s.items[cut:]...), added...)
 	if data, _ := json.Marshal(overlayItems); len(data) > recoveryOverlayBytes {
@@ -277,9 +318,16 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 	}
 	// Validate the whole new native input before releasing old tool waits.
 	var blocks []any
-	for _, c := range calls {
-		blocks = append(blocks, map[string]string{"type": "text", "text": "[" + recoveryUnknownLabel + "; context only, do not execute again] " + c.ID + " " + c.Tool.key()})
-		b, _ := toolResultBlocks(recoveryUnknownResult())
+	for i, c := range calls {
+		label := "Received client tool result"
+		if isRecoveryUnknown(outputs[i]["output"]) {
+			label = recoveryUnknownLabel
+		}
+		blocks = append(blocks, map[string]string{"type": "text", "text": "[" + label + "; context only, do not execute again] " + c.ID + " " + c.Tool.key()})
+		b, err := toolResultBlocks(outputs[i]["output"])
+		if err != nil {
+			return err
+		}
 		blocks = append(blocks, b...)
 	}
 	blocks = append(blocks, extra...)
@@ -296,16 +344,23 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 		return nil
 	}
 	for i, c := range calls {
-		c.Output = added[i]["output"]
-		c.OutputHash = digest(c.Output)
-		c.ResultItem = added[i]
+		select {
+		case <-c.Ready:
+		default:
+			c.Output = outputs[i]["output"]
+			c.OutputHash = digest(c.Output)
+			c.ResultItem = outputs[i]
+			c.receipt("result_unknown")
+			close(c.Ready)
+		}
 		c.Extra, c.Update = nil, ""
 		if i == len(calls)-1 {
 			c.Extra = extra
 			c.Update = update
 		}
-		c.receipt("result_unknown")
-		close(c.Ready)
+	}
+	if r.handoffRetry {
+		s.handoffRecoveries = append(s.handoffRecoveries, r.replayKey)
 	}
 	s.recoveryOverlays = append(s.recoveryOverlays, recoveryOverlay{At: cut, Items: requestFingerprints(overlayItems)})
 	s.items = append(append([]map[string]any(nil), s.items...), added...)

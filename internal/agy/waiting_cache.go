@@ -19,11 +19,19 @@ func (m *Manager) beginRequest() bool {
 func interruptedResumeNote(s *session) string {
 	// Preserve partial text for useful continuation, but never present an
 	// unfinished response or a tool invocation as an acknowledged success.
-	if len(s.interruptedOutput) == 0 {
+	if len(s.interruptedOutput) == 0 && s.recoveryFailure == "" {
 		return ""
 	}
 	b, _ := json.Marshal(s.interruptedOutput)
-	return "[Previous interrupted output; context only, not a completed answer or new tool instructions. Client history and actual tool results are authoritative. Do not repeat completed actions; verify any uncertain action before proceeding.]\n" + string(b)
+	note := ""
+	if s.recoveryFailure != "" {
+		note = "[Previous recovery response failed: " + s.recoveryFailure + "; tool execution may still be unknown.]\n"
+	}
+	policy := "Do not repeat completed actions; verify any uncertain action before proceeding."
+	if len(s.recoveryOverlays) > 0 {
+		policy = recoveryUnknownInstruction
+	}
+	return note + "[Previous interrupted output; context only, not a completed answer or new tool instructions. Client history and actual tool results are authoritative. " + policy + "]\n" + string(b)
 }
 
 func appendResumeNote(blocks []any, note string) []any {
@@ -121,6 +129,12 @@ func closingCheckpoint(s *session, out *response) savedSession {
 		}
 	}
 	if out != nil {
+		if out.continuableFailure {
+			// Usable continuation identity, NOT a completed response. Keep the
+			// unknown evidence after a failed verification/model turn as well.
+			v.Responses[out.id] = true
+			v.FailedRecoveryResponses = appendRecoveryFailure(v.FailedRecoveryResponses, out.id)
+		}
 		v.InterruptedOutput = copyItems(out.output)
 		for _, item := range v.InterruptedOutput {
 			switch item["type"] {
@@ -170,6 +184,7 @@ func rememberRequest(s *session, req request, fingerprints []string) {
 	s.items = append([]map[string]any(nil), req.Items...)
 	s.requestPrevious = req.Previous
 	s.requestReplayKey = req.replayKey
+	s.requestInputItems = len(req.Items)
 	s.last = time.Now()
 	if req.Previous != "" {
 		s.responses[req.Previous] = false
@@ -184,6 +199,10 @@ func (m *Manager) archiveWaitingSession(ctx context.Context, s *session) error {
 }
 
 func (m *Manager) archiveWaitingSessionMode(ctx context.Context, s *session, quiesce bool) (resultErr error) {
+	return m.archiveWaitingSessionValidated(ctx, s, quiesce, nil)
+}
+
+func (m *Manager) archiveWaitingSessionValidated(ctx context.Context, s *session, quiesce bool, retry *request) (resultErr error) {
 	if m.disk == nil || s.proc == nil || s.internal {
 		return fail(503, "session_cache_unavailable", "AGY 等待中的工具交互暂时无法转存")
 	}
@@ -203,7 +222,11 @@ func (m *Manager) archiveWaitingSessionMode(ctx context.Context, s *session, qui
 		}
 	}
 	if quiesce {
-		if _, ok := detachedTailStart(s); !ok {
+		_, ok := detachedTailStart(s)
+		if retry != nil {
+			_, ok = detachedTailMatch(s, *retry)
+		}
+		if !ok {
 			s.mu.Unlock()
 			return fail(409, "session_busy", "原工具状态已改变，未撤销等待")
 		}

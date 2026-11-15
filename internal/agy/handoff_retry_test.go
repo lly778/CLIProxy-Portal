@@ -17,7 +17,7 @@ func identifiedRecoveryRequest(m *Manager, body, identity string) *httptest.Resp
 	return w
 }
 
-func TestLostResponseCacheCannotRestartPromptWithOriginalToolHandoff(t *testing.T) {
+func TestLostResponseCacheResumesOriginalTaskWithoutRedispatch(t *testing.T) {
 	var prompts atomic.Int64
 	m, source := recoveryFixture(t, func(target *session, _ frame) any {
 		if prompts.Add(1) == 1 {
@@ -54,17 +54,25 @@ func TestLostResponseCacheCannotRestartPromptWithOriginalToolHandoff(t *testing.
 	}
 	m.sessions = map[string]*session{}
 	retry := identifiedRecoveryRequest(m, body, "original-request")
-	if retry.Code != 409 || !strings.Contains(retry.Body.String(), "tool_handoff_pending") || prompts.Load() != 1 {
-		t.Fatal("lost replay cache regenerated original tools", prompts.Load(), retry.Body.String())
+	if retry.Code != 200 || strings.Contains(retry.Body.String(), `"type":"function_call"`) || prompts.Load() != 2 {
+		t.Fatal("lost replay cache failed to resume without redispatch", prompts.Load(), retry.Body.String())
+	}
+	var recovered struct{ ID string }
+	if err := json.Unmarshal(retry.Body.Bytes(), &recovered); err != nil || recovered.ID == "" {
+		t.Fatal("recovery did not produce a continuation identity", err)
+	}
+	replayed := identifiedRecoveryRequest(m, body, "original-request")
+	if replayed.Body.String() != retry.Body.String() || prompts.Load() != 2 {
+		t.Fatal("recovered response was not reused on another identical retry")
 	}
 	var count int
 	if err := d.db.QueryRow(`SELECT COUNT(*) FROM session_handoff_routes`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("tool handoff identity was not durable", count, err)
 	}
-	// A real result is a continuation, not another execution of the old prompt.
-	nextBody, _ := json.Marshal(map[string]any{"model": "agy/test", "previous_response_id": result.ID, "input": []any{map[string]any{"type": "function_call_output", "call_id": "original-write", "output": "actual saved result"}}})
+	// A new instruction continues this same recovered native conversation.
+	nextBody, _ := json.Marshal(map[string]any{"model": "agy/test", "previous_response_id": recovered.ID, "input": "continue independent work"})
 	next := identifiedRecoveryRequest(m, string(nextBody), "result-request")
-	if next.Code != 200 || prompts.Load() != 2 || !strings.Contains(next.Body.String(), "original actual result") {
+	if next.Code != 200 || prompts.Load() != 3 || !strings.Contains(next.Body.String(), "original actual result") {
 		t.Fatal("guard blocked original result continuation", prompts.Load(), next.Body.String())
 	}
 	var resident *session
@@ -110,7 +118,7 @@ func TestFailedGenerationWithoutHandoffStillRetriesNormally(t *testing.T) {
 	}
 }
 
-func TestHandoffRetryGuardRemainsOwnerAndPayloadScoped(t *testing.T) {
+func TestHandoffRetryLookupRemainsOwnerAndPayloadScoped(t *testing.T) {
 	m, s := recoveryFixture(t, func(*session, frame) any { return nil })
 	d := protocolDisk(t, m)
 	c := continuityCall(s)
@@ -121,14 +129,14 @@ func TestHandoffRetryGuardRemainsOwnerAndPayloadScoped(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.sessions = map[string]*session{}
-	if err := m.guardHandoffRetry("owner", key); err == nil {
-		t.Fatal("original unacknowledged request was not recognized")
+	if found, err := m.handoffRetrySession("owner", key); err != nil || found == nil || found.ID != s.ID {
+		t.Fatal("original unacknowledged request was not recognized", err)
 	}
-	if err := m.guardHandoffRetry("other-owner", key); err != nil {
-		t.Fatal("another owner inherited an old operation blocker", err)
+	if found, err := m.handoffRetrySession("other-owner", key); err != nil || found != nil {
+		t.Fatal("another owner inherited an old operation", err)
 	}
 	changed := m.handoffRequestKey("owner", r.Header, []byte(`{"model":"agy/test","input":"verify the effect read-only"}`))
-	if err := m.guardHandoffRetry("owner", changed); err != nil {
+	if found, err := m.handoffRetrySession("owner", changed); err != nil || found != nil {
 		t.Fatal("new independent input was treated as a duplicate execution", err)
 	}
 }

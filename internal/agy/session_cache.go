@@ -29,6 +29,10 @@ const sessionRetention = 7 * 24 * time.Hour
 // authoritative wire history so an explicit instruction/history change can be
 // rebuilt without re-executing tools. The official session remains in AGY's DB.
 type savedSession struct {
+	RecoveryFailure                            string                      `json:",omitempty"`
+	FailedRecoveryResponses                    []string                    `json:",omitempty"`
+	RequestInputItems                          int                         `json:",omitempty"`
+	HandoffRecoveries                          []string                    `json:",omitempty"`
 	RequestReplayKey                           string                      `json:",omitempty"`
 	ClientBindings                             []string                    `json:",omitempty"`
 	RecoveryOverlays                           []recoveryOverlay           `json:",omitempty"`
@@ -297,7 +301,7 @@ func snapshotSessionLocked(s *session) savedSession {
 	for id, usable := range s.responses {
 		responses[id] = usable
 	}
-	return savedSession{RequestReplayKey: s.requestReplayKey, ClientBindings: append([]string(nil), s.clientBindings...), RecoveryOverlays: cloneRecoveryOverlays(s.recoveryOverlays), NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
+	return savedSession{RecoveryFailure: s.recoveryFailure, FailedRecoveryResponses: append([]string(nil), s.failedRecoveryResponses...), RequestInputItems: s.requestInputItems, HandoffRecoveries: append([]string(nil), s.handoffRecoveries...), RequestReplayKey: s.requestReplayKey, ClientBindings: append([]string(nil), s.clientBindings...), RecoveryOverlays: cloneRecoveryOverlays(s.recoveryOverlays), NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
 }
 func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if !safeNativeSessionID(v.ID) || v.Owner == "" {
@@ -512,6 +516,10 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 	s.recoveryOverlays = cloneRecoveryOverlays(v.RecoveryOverlays)
 	s.clientBindings = append([]string(nil), v.ClientBindings...)
 	s.requestReplayKey = v.RequestReplayKey
+	s.requestInputItems = v.RequestInputItems
+	s.handoffRecoveries = append([]string(nil), v.HandoffRecoveries...)
+	s.failedRecoveryResponses = append([]string(nil), v.FailedRecoveryResponses...)
+	s.recoveryFailure = v.RecoveryFailure
 	if _, ok := recoveryProjection(s.items, s.recoveryOverlays); !ok {
 		return nil, errors.New("invalid AGY recovery overlay")
 	}
