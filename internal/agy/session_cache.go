@@ -114,6 +114,8 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS session_client_session ON session_client_routes(session_id)`,
 		`CREATE TABLE IF NOT EXISTS session_handoff_routes (owner TEXT NOT NULL,request_key TEXT NOT NULL,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,PRIMARY KEY(owner,request_key,session_id))`,
 		`CREATE INDEX IF NOT EXISTS session_handoff_session ON session_handoff_routes(session_id)`,
+		`CREATE TABLE IF NOT EXISTS session_late_result_routes (owner TEXT NOT NULL,model TEXT NOT NULL,call_key TEXT NOT NULL,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,PRIMARY KEY(owner,model,call_key,session_id))`,
+		`CREATE INDEX IF NOT EXISTS session_late_result_session ON session_late_result_routes(session_id)`,
 		`CREATE TABLE IF NOT EXISTS tool_record_archives (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL,payload BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS tool_record_expiry ON tool_record_archives(expires_ms)`,
 		`CREATE TABLE IF NOT EXISTS remote_mcp_attempts (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL)`,
@@ -210,7 +212,7 @@ func (d *sessionDiskCache) routingKey(v savedSession) string {
 // Reindex existing encrypted records once, before serving requests. Only a page
 // of IDs and one decrypted payload are retained; normal requests stay indexed.
 func (d *sessionDiskCache) upgradeHistoryIndex() error {
-	const version = "exact-numbers-recovery-overlays-v5"
+	const version = "late-client-result-routes-v6"
 	var marker []byte
 	err := d.db.QueryRow(`SELECT value FROM cache_meta WHERE id=2`).Scan(&marker)
 	if err == nil && string(marker) == version {
@@ -263,6 +265,9 @@ func (d *sessionDiskCache) upgradeHistoryIndex() error {
 			}
 			if v.ID != id {
 				err = errors.New("invalid AGY session routing state")
+				break
+			}
+			if err = d.putLateResultRoutes(tx, v); err != nil {
 				break
 			}
 			if _, err = tx.Exec(`UPDATE sessions SET history_key=? WHERE id=?`, d.routingKey(v), id); err != nil {
@@ -323,6 +328,10 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 		return err
 	}
 	defer tx.Rollback()
+	// Validate corrections before any snapshot/index replacement.
+	if _, ok := recoveredClientCalls(v.Items, v.RecoveryOverlays); !ok {
+		return errors.New("invalid AGY recovered client result state")
+	}
 	r, err := tx.Exec(`INSERT OR IGNORE INTO sessions(id,owner,model,history_key,last_ms,ready,payload) VALUES(?,?,?,?,?,?,?)`, v.ID, d.hash(v.Owner), d.hash(v.Model), lastKey, v.Last.UnixMilli(), ready, payload)
 	if err != nil {
 		return err
@@ -386,6 +395,9 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 			}
 		}
 	}
+	if err = d.putLateResultRoutes(tx, v); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err == nil {
 		d.count.Add(inserted)
 	}
@@ -396,6 +408,9 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 // IDs, while the shared memory/disk matcher checks actual content and call links.
 func (d *sessionDiskCache) find(owner string, r request, live map[string]bool) (*session, error) {
 	r.Items = canonicalHistoryItems(r.Items)
+	if s, err := d.findLateResultSession(owner, r, live); err != nil || s != nil {
+		return s, err
+	}
 	cutoff := time.Now().Add(-sessionRetention).UnixMilli()
 	load := func(id string) (*session, error) {
 		if live[id] {
@@ -522,6 +537,9 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 	s.recoveryFailure = v.RecoveryFailure
 	if _, ok := recoveryProjection(s.items, s.recoveryOverlays); !ok {
 		return nil, errors.New("invalid AGY recovery overlay")
+	}
+	if _, ok := recoveredClientCalls(s.items, s.recoveryOverlays); !ok {
+		return nil, errors.New("invalid AGY late client result record")
 	}
 	if len(v.NativeToolIDs) > nativeToolIdentityLimit {
 		v.NativeToolIDs = v.NativeToolIDs[len(v.NativeToolIDs)-nativeToolIdentityLimit:]

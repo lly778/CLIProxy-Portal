@@ -83,6 +83,10 @@ func (t tool) key() string {
 func (t tool) mcpName() string { return "tool_" + digest(t.key())[:24] }
 
 type request struct {
+	lateResultInput    []map[string]any
+	lateResultAck      bool
+	lateResultRebuilt  bool
+	lateResults        []map[string]any
 	clientKey          string
 	replayKey          string
 	handoffRetry       bool
@@ -148,6 +152,11 @@ func parseRequest(b []byte) (request, error) {
 		return r, fail(413, "context_too_large", "输入消息数量超过 AGY 接入限制")
 	}
 	r.Items = canonicalHistoryItems(r.Items)
+	for _, item := range r.Items {
+		if item["type"] == lateClientResultType {
+			return r, fail(400, "unsupported_input_item", "客户端不能提交内部工具结果更正记录")
+		}
+	}
 	flat := []tool{}
 	remoteLabels := map[string]bool{}
 	names := map[string]bool{}
@@ -379,7 +388,12 @@ func promptBlocksLimit(items []map[string]any, limit int) ([]any, error) {
 			continue
 		}
 		if typ != "" && typ != "message" {
-			if historical, handled, err := serviceHistoryBlocks(item); handled {
+			historical, handled, err := serviceHistoryBlocks(item)
+			if typ == lateClientResultType {
+				historical, err = lateClientResultBlocks(item)
+				handled = true
+			}
+			if handled {
 				if err != nil {
 					return nil, err
 				}

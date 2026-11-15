@@ -36,6 +36,16 @@ func sessionMatchesRequest(s *session, r request) bool {
 		return false
 	}
 	canonicalSessionHistory(s)
+	if carriesRecoveredResult(s, r.Items) {
+		if r.Previous != "" {
+			if _, owned := s.responses[r.Previous]; !owned {
+				return false
+			}
+		}
+		// Route even a conflicting receipt to its original call so the strict
+		// validation returns an error instead of creating a fresh model task.
+		return true
+	}
 	r.Items = expandRecoveryHistory(s, r.Items)
 	if r.Previous != "" {
 		if s.responses[r.Previous] {

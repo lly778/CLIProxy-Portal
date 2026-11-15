@@ -89,11 +89,30 @@ type toolHistory struct {
 func inspectToolHistory(items []map[string]any) (toolHistory, error) {
 	h := toolHistory{}
 	pending, seen := map[string]int{}, map[string]bool{}
+	closed := map[string]int{}
 	invalid := func() (toolHistory, error) {
 		return h, fail(400, "invalid_compaction_history", "压缩历史中的工具调用、结果或执行来源无法完整匹配，原历史未被替换")
 	}
 	for i, item := range items {
 		kind := stringField(item, "type")
+		if kind == lateClientResultType {
+			index, exists := closed[resultCallID(item)]
+			actual, ok := lateClientResult(item)
+			if !exists || !ok {
+				return invalid()
+			}
+			record := &h.Records[index]
+			if !isRecoveryUnknown(record.Result["output"]) || item["call_fingerprint"] != itemFingerprint(record.Call) || item["unknown_fingerprint"] != itemFingerprint(record.Result) || !clientResultFor(record.Call, actual) {
+				return invalid()
+			}
+			if _, err := toolResultBlocks(actual["output"]); err != nil {
+				return h, err
+			}
+			record.Result, record.ResultHash, record.ResultIndex = actual, itemFingerprint(actual), i
+			record.Outcome = (&pendingTool{Tool: tool{Type: "function"}, Output: actual["output"]}).outcome()
+			record.Provenance = "client_late_result"
+			continue
+		}
 		if kind == "mcp_call" {
 			id := stringField(item, "id")
 			if id == "" || len(id) > 256 || seen[id] {
@@ -218,6 +237,7 @@ func inspectToolHistory(items []map[string]any) (toolHistory, error) {
 		record.Outcome = c.outcome()
 		if isRecoveryUnknown(item["output"]) {
 			record.Provenance = "bridge_recovery_no_client_result"
+			closed[id] = index
 		}
 		delete(pending, id)
 	}

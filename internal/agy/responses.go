@@ -178,6 +178,19 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	trace.phase("session_loading")
+	if s != nil {
+		if e = prepareLateClientResults(s, &req); e != nil {
+			WriteError(w, e)
+			return
+		}
+	} else if !fullHistoryInput(req.Items) {
+		for _, item := range req.Items {
+			if isToolResultItem(stringField(item, "type")) {
+				WriteError(w, fail(409, "unknown_tool_result", "无法找到工具结果所属的原会话，未另建任务"))
+				return
+			}
+		}
+	}
 	if s != nil && !req.handoffRetry {
 		if e = prepareFailedRecoveryFollowup(s, &req); e != nil {
 			WriteError(w, e)
@@ -272,6 +285,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	sendItems = req.Items
 	if s != nil && s.proc == nil {
 		original := s
+		if req.lateResultAck && s.interrupted {
+			out.fail(fail(409, "late_result_resume_required", "真实结果已记录，请先续接中断的对话"))
+			return
+		}
 		system, _ := systemText(req)
 		if s.interrupted {
 			req.ResumeNote = interruptedResumeNote(s)
@@ -299,6 +316,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			out.fail(e)
 			return
 		}
+		req.lateResultRebuilt = req.lateResultInput != nil && s.ID != original.ID
 	}
 	if s == nil {
 		if _, sizeErr := promptBlocks(sendItems); contextTooLarge(sizeErr) {
@@ -402,6 +420,23 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	trace.phase("session_ready")
 	locked := s
 	defer func() { locked.requestMu.Unlock() }()
+	if req.lateResultInput != nil && !req.lateResultRebuilt {
+		if e = prepareLateClientResults(s, &req); e != nil {
+			out.fail(e)
+			return
+		}
+		sendItems = req.Items
+	}
+	if req.lateResultAck {
+		s.mu.Lock()
+		bindClientConversation(s, req)
+		s.last = time.Now()
+		s.mu.Unlock()
+		trace.emit(Observation{Kind: "response", State: "late_result_duplicate", ResponseID: out.id, SessionID: s.ID})
+		m.remember(s, out)
+		_ = out.finish(Usage{})
+		return
+	}
 	if finishQueued != nil {
 		defer finishQueued()
 	}
@@ -465,6 +500,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	if !same || len(history) > 0 && !prefix(history, requestFingerprints(req.Items)) && completeHistory {
+		if req.lateResultInput != nil {
+			out.fail(fail(409, "late_result_history_changed", "补交期间原会话已推进，未重建或重跑任务"))
+			return
+		}
 		if !req.ToolsProvided {
 			s.mu.Lock()
 			req.Tools = mergeTools(s.tools, s.deferredTools)
@@ -624,6 +663,9 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s.last = time.Now()
 		s.mu.Unlock()
 		rememberRequest(s, req, fps)
+		for _, actual := range req.lateResults {
+			trace.emit(Observation{Kind: "tool", State: "result_received", Category: "client_tool", CallID: resultCallID(actual), ResultHash: digest(actual["output"]), Outcome: receiptOutcome(actual["output"]), Reason: "late_client_result"})
+		}
 		s.mu.Lock()
 		commitToolCatalog(s, nextTools, loaded, toolHash)
 		if !checkpoint {

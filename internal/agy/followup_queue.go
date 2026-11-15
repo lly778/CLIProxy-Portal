@@ -62,7 +62,7 @@ func canQueueFollowup(s *session, r request) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if carriesPendingResult(s, r.Items) {
+	if carriesPendingResult(s, r.Items) || carriesRecoveredResult(s, r.Items) || r.lateResultInput != nil {
 		return false
 	}
 	if s.proc == nil || s.model != r.Model || s.system != digest(system) || len(s.history) == 0 {
@@ -81,7 +81,7 @@ func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, 
 		return false, nil, err
 	}
 	s.mu.Lock()
-	if carriesPendingResult(s, r.Items) {
+	if carriesPendingResult(s, r.Items) || carriesRecoveredResult(s, r.Items) || r.lateResultInput != nil {
 		s.mu.Unlock()
 		return false, nil, nil
 	}

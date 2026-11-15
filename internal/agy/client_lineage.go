@@ -40,6 +40,9 @@ func (m *Manager) clientConversationKey(h http.Header) string {
 }
 
 func clientBindingAllows(s *session, r request) bool {
+	if carriesRecoveredResult(s, r.Items) {
+		return true // Owner-scoped call identity; acceptance is validated later.
+	}
 	// An explicit owned response chain can establish a new header alias.
 	if r.Previous != "" || r.clientKey == "" || len(s.clientBindings) == 0 || slices.Contains(s.clientBindings, r.clientKey) {
 		return true

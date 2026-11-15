@@ -11,6 +11,7 @@ const codexCompactionInstructions = "Produce only the context checkpoint/handoff
 // message, call and result exactly, while retaining the original native
 // session's reasoning records rather than replaying a different copy.
 func checkpointHistory(s *session, items []map[string]any) ([]map[string]any, bool) {
+	items = expandRecoveryHistory(s, items)
 	aligned, _ := alignToolIDs(s, items)
 	if prefix(s.history, requestFingerprints(aligned)) {
 		return aligned, true

@@ -24,24 +24,26 @@ func recoveryProjection(items []map[string]any, overlays []recoveryOverlay) ([]m
 	if len(overlays) == 0 {
 		return items, true
 	}
-	if len(overlays) > recoveryOverlayLimit {
+	if !validRecoveryOverlays(items, overlays) {
 		return nil, false
 	}
 	out := make([]map[string]any, 0, len(items))
 	next := 0
 	for _, o := range overlays {
-		if o.At < next || len(o.Items) == 0 || len(o.Items) > 24 || o.At+len(o.Items) > len(items) {
-			return nil, false
-		}
-		for i, fp := range o.Items {
-			if itemFingerprint(items[o.At+i]) != fp {
-				return nil, false
-			}
-		}
 		out = append(out, items[next:o.At]...)
 		next = o.At + len(o.Items)
 	}
-	return append(out, items[next:]...), true
+	out = append(out, items[next:]...)
+	for i, item := range out {
+		if item["type"] == lateClientResultType {
+			actual, ok := lateClientResult(item)
+			if !ok {
+				return nil, false
+			}
+			out[i] = actual
+		}
+	}
+	return out, true
 }
 
 // A full-history caller may omit the lost server-only tail on every subsequent
@@ -52,7 +54,21 @@ func expandRecoveryHistory(s *session, items []map[string]any) []map[string]any 
 	}
 	projected, ok := recoveryProjection(s.items, s.recoveryOverlays)
 	if !ok || len(items) < len(projected) || !prefix(requestFingerprints(projected), requestFingerprints(items)) {
-		return items
+		calls, valid := recoveredClientCalls(s.items, s.recoveryOverlays)
+		if !valid || len(calls) == 0 || !fullHistoryInput(items) {
+			return items
+		}
+		tail, embedded, valid := recoveryClientTail(s, items)
+		if !valid {
+			return items
+		}
+		for _, item := range embedded {
+			c := calls[resultCallID(item)]
+			if c.actual == nil || itemFingerprint(c.actual) != itemFingerprint(item) {
+				return items
+			}
+		}
+		return append(append([]map[string]any(nil), s.items...), tail...)
 	}
 	return append(append([]map[string]any(nil), s.items...), items[len(projected):]...)
 }
@@ -378,6 +394,10 @@ func (m *Manager) prepareDetachedResumeMode(s *session, r *request, validateOnly
 // Protect only explicitly uncertain operations, never ordinary same-argument
 // calls. Read-only verification may proceed through another client tool.
 func uncertainRecoveryAction(s *session, t tool, args map[string]any) bool {
+	if len(s.recoveryOverlays) == 0 {
+		return false
+	}
+	resolved, valid := recoveredClientCalls(s.items, s.recoveryOverlays)
 	for _, o := range s.recoveryOverlays {
 		end := o.At + len(o.Items)
 		if end > len(s.items) {
@@ -396,6 +416,9 @@ func uncertainRecoveryAction(s *session, t tool, args map[string]any) bool {
 			}
 			call := calls[id]
 			if call == nil {
+				continue
+			}
+			if valid && resolved[id].actual != nil && receiptOutcome(resolved[id].actual["output"]) != "unknown" {
 				continue
 			}
 			name := stringField(call, "name")
