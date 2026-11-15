@@ -9,6 +9,20 @@ import (
 // be able to receive its tool results, even with a one-slot configuration.
 const maxQueuedFollowups = 4
 
+// A replayed result can already be part of the durable history prefix after a
+// restart. It still resumes its parked call; queuing it as a user follow-up
+// would wait forever for the very result carried by this request.
+func carriesPendingResult(s *session, items []map[string]any) bool {
+	for _, item := range items {
+		if isToolResultItem(stringField(item, "type")) {
+			if c := s.pending[resultCallID(item)]; c != nil && !c.Returned && !c.Replayed {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type queuedFollowup struct {
 	base   []string
 	anchor string
@@ -48,6 +62,9 @@ func canQueueFollowup(s *session, r request) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if carriesPendingResult(s, r.Items) {
+		return false
+	}
 	if s.proc == nil || s.model != r.Model || s.system != digest(system) || len(s.history) == 0 {
 		return false
 	}
@@ -64,6 +81,10 @@ func (m *Manager) waitUserFollowup(ctx context.Context, s *session, r *request, 
 		return false, nil, err
 	}
 	s.mu.Lock()
+	if carriesPendingResult(s, r.Items) {
+		s.mu.Unlock()
+		return false, nil, nil
+	}
 	if s.model != r.Model || s.system != digest(system) || len(s.history) == 0 {
 		s.mu.Unlock()
 		return false, nil, nil

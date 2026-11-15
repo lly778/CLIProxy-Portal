@@ -16,6 +16,7 @@ const awaitName = "portal_await_tool"
 const describeToolName = "portal_describe_tool"
 
 type pendingTool struct {
+	requestKey         string
 	remote             *remoteMCPApproval
 	ProjectionVersion  int
 	Route              string

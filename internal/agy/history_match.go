@@ -32,6 +32,9 @@ func routingFingerprints(items []map[string]any) []string {
 // The caller owns s.mu (or an unshared disk candidate). Memory and disk use the
 // same acceptance rules; an index key alone is never sufficient for recovery.
 func sessionMatchesRequest(s *session, r request) bool {
+	if !clientBindingAllows(s, r) {
+		return false
+	}
 	canonicalSessionHistory(s)
 	r.Items = expandRecoveryHistory(s, r.Items)
 	if r.Previous != "" {

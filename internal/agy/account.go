@@ -274,6 +274,12 @@ func (m *Manager) resetAccountSessions() error {
 		if _, err = tx.Exec(`DELETE FROM responses`); err != nil {
 			return err
 		}
+		if _, err = tx.Exec(`DELETE FROM session_client_routes`); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(`DELETE FROM session_handoff_routes`); err != nil {
+			return err
+		}
 		if err = tx.Commit(); err != nil {
 			return err
 		}

@@ -107,6 +107,8 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.bindRequest = true
 	req.owner = owner
+	req.clientKey = m.clientConversationKey(r.Header)
+	req.replayKey = m.handoffRequestKey(owner, r.Header, b)
 	r, trace := m.traceRequest(r, owner, req.Model)
 	defer trace.phase("request_finished")
 	if _, e = systemText(req); e != nil {
@@ -116,6 +118,10 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	// Validate all content, including historical tool images, before releasing
 	// any parked tool or changing the active allowlist.
 	if _, e = promptBlocksLimit(req.Items, MaxBody); e != nil {
+		WriteError(w, e)
+		return
+	}
+	if e = m.guardHandoffRetry(owner, req.replayKey); e != nil {
 		WriteError(w, e)
 		return
 	}
@@ -189,6 +195,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out := newResponse(w, req.Stream, req.Model)
+	out.requestKey = req.replayKey
 	out.trace = trace
 	trace.emit(Observation{Kind: "response", State: "created", ResponseID: out.id})
 	out.imageBase = publicImageBase(r.Header.Get("X-Portal-Image-Base-URL"))
@@ -220,6 +227,11 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if s != nil && req.Previous != "" {
 		s.mu.Lock()
+		if s.interrupted && req.replayKey != "" && s.requestReplayKey == req.replayKey {
+			// The accepted input is already in the durable checkpoint. Repeating
+			// its delta would append the same user instruction/results twice.
+			req.Items = append([]map[string]any(nil), s.items...)
+		}
 		completeHistory = len(s.items) > 0
 		if completeHistory && !prefix(s.history, requestFingerprints(req.Items)) && !fullHistoryInput(req.Items) {
 			req.Items = append(append([]map[string]any(nil), s.items...), req.Items...)
@@ -508,6 +520,9 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			out.fail(e)
 			return
 		}
+		s.mu.Lock()
+		bindClientConversation(s, req)
+		s.mu.Unlock()
 		m.startRemoteJobs(s)
 		if !running {
 			blocks, waiting, err := lateResultPrompt(s)
@@ -572,6 +587,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			blocks = append([]any{map[string]string{"type": "text", "text": delta}}, blocks...)
 		}
 		s.mu.Lock()
+		bindClientConversation(s, req)
 		s.running = true
 		s.reported = map[string]reportedTool{}
 		s.last = time.Now()
@@ -596,6 +612,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	s.history = fps
 	s.items = append([]map[string]any(nil), req.Items...)
 	s.requestPrevious = req.Previous
+	s.requestReplayKey = req.replayKey
 	if req.Previous != "" {
 		s.responses[req.Previous] = false
 	}
@@ -686,6 +703,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				event.Call.BatchID = out.batchID
+				event.Call.requestKey = out.requestKey
 				event.Call.Delivered = true
 				s.mu.Unlock()
 				if e = out.call(event.Call); e != nil {
@@ -738,6 +756,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 						c := s.pending[id]
 						if !c.Delivered {
 							c.BatchID = out.batchID
+							c.requestKey = out.requestKey
 							c.Delivered = true
 							calls = append(calls, c)
 						}
@@ -813,7 +832,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-func (m *Manager) find(owner string, r request) (*session, error) {
+func (m *Manager) findHistory(owner string, r request) (*session, error) {
 	r.Items = canonicalHistoryItems(r.Items)
 	m.mu.Lock()
 	var found *session
@@ -1079,6 +1098,7 @@ func (m *Manager) remember(s *session, out *response) {
 }
 
 type response struct {
+	requestKey             string
 	batchID                string
 	trace                  *requestTrace
 	w                      http.ResponseWriter

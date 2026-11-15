@@ -42,7 +42,7 @@ func snapshotRemoteWaiting(v *savedSession, c *pendingTool) *savedWaitingTool {
 	if c.Returned || c.Replayed {
 		return nil
 	}
-	return &savedWaitingTool{Remote: saved, ProjectionVersion: c.ProjectionVersion, Route: c.Route, BatchID: c.BatchID, ObservationRequest: c.traceRequest, ObservationSession: c.traceSession, ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra, Ready: ready, Output: output}
+	return &savedWaitingTool{RequestKey: c.requestKey, Remote: saved, ProjectionVersion: c.ProjectionVersion, Route: c.Route, BatchID: c.BatchID, ObservationRequest: c.traceRequest, ObservationSession: c.traceSession, ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra, Ready: ready, Output: output}
 }
 
 func restoreRemoteWaiting(c *pendingTool, saved savedWaitingTool) {

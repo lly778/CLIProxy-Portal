@@ -29,6 +29,8 @@ const sessionRetention = 7 * 24 * time.Hour
 // authoritative wire history so an explicit instruction/history change can be
 // rebuilt without re-executing tools. The official session remains in AGY's DB.
 type savedSession struct {
+	RequestReplayKey                           string                      `json:",omitempty"`
+	ClientBindings                             []string                    `json:",omitempty"`
 	RecoveryOverlays                           []recoveryOverlay           `json:",omitempty"`
 	NativeToolIDs                              []string                    `json:",omitempty"`
 	RemoteRetainedBytes                        int                         `json:",omitempty"`
@@ -51,6 +53,7 @@ type savedSession struct {
 // A client action already delivered must be restored as a result waiter, never
 // as a new execution. Synchronization channels belong only to the live process.
 type savedWaitingTool struct {
+	RequestKey                             string                  `json:",omitempty"`
 	Remote                                 *savedRemoteMCPApproval `json:",omitempty"`
 	ProjectionVersion                      int                     `json:",omitempty"`
 	Route                                  string                  `json:",omitempty"`
@@ -103,6 +106,10 @@ func openSessionDiskCache(home, secret string) (*sessionDiskCache, error) {
 		`CREATE INDEX IF NOT EXISTS responses_session ON responses(session_id)`,
 		`CREATE TABLE IF NOT EXISTS session_tail_routes (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,owner TEXT NOT NULL,model TEXT NOT NULL,history_key TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS session_tail_lookup ON session_tail_routes(owner,model,history_key)`,
+		`CREATE TABLE IF NOT EXISTS session_client_routes (owner TEXT NOT NULL,model TEXT NOT NULL,client_key TEXT NOT NULL,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,PRIMARY KEY(owner,model,client_key,session_id))`,
+		`CREATE INDEX IF NOT EXISTS session_client_session ON session_client_routes(session_id)`,
+		`CREATE TABLE IF NOT EXISTS session_handoff_routes (owner TEXT NOT NULL,request_key TEXT NOT NULL,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,PRIMARY KEY(owner,request_key,session_id))`,
+		`CREATE INDEX IF NOT EXISTS session_handoff_session ON session_handoff_routes(session_id)`,
 		`CREATE TABLE IF NOT EXISTS tool_record_archives (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL,payload BLOB NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS tool_record_expiry ON tool_record_archives(expires_ms)`,
 		`CREATE TABLE IF NOT EXISTS remote_mcp_attempts (id TEXT PRIMARY KEY,owner TEXT NOT NULL,expires_ms INTEGER NOT NULL)`,
@@ -290,7 +297,7 @@ func snapshotSessionLocked(s *session) savedSession {
 	for id, usable := range s.responses {
 		responses[id] = usable
 	}
-	return savedSession{RecoveryOverlays: cloneRecoveryOverlays(s.recoveryOverlays), NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
+	return savedSession{RequestReplayKey: s.requestReplayKey, ClientBindings: append([]string(nil), s.clientBindings...), RecoveryOverlays: cloneRecoveryOverlays(s.recoveryOverlays), NativeToolIDs: append([]string(nil), s.nativeToolOrder...), RemoteRetainedBytes: s.remoteRetainedBytes, RemoteBindings: savedRemoteBindings(s.tools), DeferredTools: s.deferredTools, OfficialToolsVersion: s.officialVersion, ID: s.ID, Owner: s.owner, Model: s.model, System: s.system, ToolHash: s.toolHash, Effort: s.effort, Tools: s.tools, AdvertisedTools: s.advertisedTools, LoadedTools: s.loadedTools, History: append([]string(nil), s.history...), Items: append([]map[string]any(nil), s.items...), Responses: responses, Last: s.last, Interrupted: s.interrupted, InterruptedOutput: copyItems(s.interruptedOutput)}
 }
 func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	if !safeNativeSessionID(v.ID) || v.Owner == "" {
@@ -337,6 +344,36 @@ func (d *sessionDiskCache) put(v savedSession, ready bool) error {
 	}
 	if _, err = tx.Exec(`DELETE FROM session_tail_routes WHERE session_id=?`, v.ID); err != nil {
 		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM session_client_routes WHERE session_id=?`, v.ID); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM session_handoff_routes WHERE session_id=?`, v.ID); err != nil {
+		return err
+	}
+	requestKeys := map[string]bool{}
+	for _, w := range v.WaitingTools {
+		if w.RequestKey == "" || requestKeys[w.RequestKey] {
+			continue
+		}
+		if len(w.RequestKey) != 64 {
+			return errors.New("invalid AGY handoff request identity")
+		}
+		requestKeys[w.RequestKey] = true
+		if _, err = tx.Exec(`INSERT INTO session_handoff_routes(owner,request_key,session_id) VALUES(?,?,?)`, d.hash(v.Owner), w.RequestKey, v.ID); err != nil {
+			return err
+		}
+	}
+	if len(v.ClientBindings) > clientBindingLimit {
+		return errors.New("too many AGY client bindings")
+	}
+	for _, key := range v.ClientBindings {
+		if len(key) != 64 {
+			return errors.New("invalid AGY client binding")
+		}
+		if _, err = tx.Exec(`INSERT INTO session_client_routes(owner,model,client_key,session_id) VALUES(?,?,?,?)`, d.hash(v.Owner), d.hash(v.Model), key, v.ID); err != nil {
+			return err
+		}
 	}
 	if ready {
 		if key := savedDetachedKey(d, v); key != "" {
@@ -473,6 +510,8 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 	}
 	s := &session{deferredTools: filterClientTools(v.DeferredTools), ID: v.ID, owner: v.Owner, model: v.Model, system: v.System, toolHash: v.ToolHash, effort: v.Effort, tools: v.Tools, history: v.History, items: v.Items, responses: v.Responses, last: v.Last, persisted: true}
 	s.recoveryOverlays = cloneRecoveryOverlays(v.RecoveryOverlays)
+	s.clientBindings = append([]string(nil), v.ClientBindings...)
+	s.requestReplayKey = v.RequestReplayKey
 	if _, ok := recoveryProjection(s.items, s.recoveryOverlays); !ok {
 		return nil, errors.New("invalid AGY recovery overlay")
 	}
@@ -516,6 +555,7 @@ func (d *sessionDiskCache) loadSession(id, owner string, cutoff int64) (*session
 				return nil, errors.New("invalid AGY waiting tool state")
 			}
 			c := &pendingTool{ProjectionVersion: saved.ProjectionVersion, Route: saved.Route, BatchID: saved.BatchID, ResultItem: wireResults[saved.ID], traceRequest: saved.ObservationRequest, traceSession: saved.ObservationSession, ID: saved.ID, Tool: saved.Tool, Arguments: saved.Arguments, Delivered: true, Relayed: true, Ready: make(chan struct{}), Update: saved.Update, Extra: saved.Extra}
+			c.requestKey = saved.RequestKey
 			if saved.Ready {
 				c.Output, c.OutputHash = saved.Output, digest(saved.Output)
 				close(c.Ready)

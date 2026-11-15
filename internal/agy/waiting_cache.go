@@ -106,7 +106,7 @@ func closingCheckpoint(s *session, out *response) savedSession {
 		if c.Returned || c.Replayed {
 			continue
 		}
-		waiting := savedWaitingTool{ProjectionVersion: c.ProjectionVersion, Route: c.Route, BatchID: c.BatchID, ObservationRequest: c.traceRequest, ObservationSession: c.traceSession, ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra}
+		waiting := savedWaitingTool{RequestKey: c.requestKey, ProjectionVersion: c.ProjectionVersion, Route: c.Route, BatchID: c.BatchID, ObservationRequest: c.traceRequest, ObservationSession: c.traceSession, ID: c.ID, Tool: c.Tool, Arguments: c.Arguments, Update: c.Update, Extra: c.Extra}
 		select {
 		case <-c.Ready:
 			waiting.Ready, waiting.Output = true, c.Output
@@ -169,6 +169,7 @@ func rememberRequest(s *session, req request, fingerprints []string) {
 	s.history = append([]string(nil), fingerprints...)
 	s.items = append([]map[string]any(nil), req.Items...)
 	s.requestPrevious = req.Previous
+	s.requestReplayKey = req.replayKey
 	s.last = time.Now()
 	if req.Previous != "" {
 		s.responses[req.Previous] = false

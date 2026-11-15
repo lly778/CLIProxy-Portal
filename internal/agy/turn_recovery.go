@@ -233,6 +233,7 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	tools, loaded := requestedTools(s, r)
 	responses := s.responses
 	deferred := s.deferredTools
+	bindings := append([]string(nil), s.clientBindings...)
 	overlays := cloneRecoveryOverlays(s.recoveryOverlays)
 	s.mu.Unlock()
 	if r.ToolsProvided {
@@ -258,6 +259,7 @@ func (m *Manager) rebuildSession(ctx context.Context, s *session, r request) (*s
 	}
 	next.mu.Lock()
 	next.responses = responses
+	next.clientBindings = bindings
 	carryRecoveryOverlays(next, r.Items, overlays)
 	next.mu.Unlock()
 	return next, nil

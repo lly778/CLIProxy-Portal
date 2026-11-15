@@ -51,6 +51,7 @@ func (m *Manager) rebuildMissingSession(ctx context.Context, old *session, r req
 		deferred = deferredCatalog(r.Tools)
 	}
 	responses := maps.Clone(old.responses)
+	bindings := append([]string(nil), old.clientBindings...)
 	overlays := cloneRecoveryOverlays(old.recoveryOverlays)
 	old.mu.Unlock()
 	r.Tools, r.ToolsProvided = mergeTools(mergeTools(tools, loaded), deferred), true
@@ -66,6 +67,7 @@ func (m *Manager) rebuildMissingSession(ctx context.Context, old *session, r req
 	}
 	next.mu.Lock()
 	next.responses = responses
+	next.clientBindings = bindings
 	carryRecoveryOverlays(next, r.Items, overlays)
 	next.mu.Unlock()
 	traceFrom(ctx).emit(Observation{Kind: "session", State: "rebuild", SessionID: next.ID, Reason: "confirmed_missing_session"})
