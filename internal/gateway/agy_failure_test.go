@@ -48,6 +48,13 @@ func TestAGYGatewayRecordsSpecificFailureForJSONAndSSE(t *testing.T) {
 		{"session_busy", "上一笔请求", 409},
 		{"compaction_tools_pending", "交付", 409},
 		{"missing_tool_result", "回传完整", 400},
+		{"invalid_instructions", "instructions", 400},
+		{"opaque_context_unsupported", "不透明", 400},
+		{"unsupported_input_item", "上下文项目类型", 400},
+		{"image_url_unsupported", "内嵌图片", 400},
+		{"context_too_large", "安全限制", 413},
+		{"upstream_resource_exhausted", "限流", 429},
+		{"agent_execution_failed", "因错误终止", 502},
 	} {
 		for _, stream := range []bool{false, true} {
 			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -24,6 +24,12 @@ func TestAGYLogDetailsAreEnglishWithoutChangingStoredOrClientErrors(t *testing.T
 	for _, tc := range []struct{ code, message, want string }{
 		{"session_busy", "该 AGY 会话已有进行中的请求", "Session is busy"},
 		{"agy_generation_failed", "AGY 上游调用失败，具体原因未能识别", "specific reason unavailable"},
+		{"agent_execution_failed", "AGY 执行因错误终止", "execution terminated"},
+		{"invalid_instructions", "instructions 必须为文本", "Instructions must be text"},
+		{"opaque_context_unsupported", "不支持加密历史", "encrypted or opaque context"},
+		{"unsupported_input_item", "不支持上下文类型", "input item type unsupported"},
+		{"image_url_unsupported", "需要内嵌图片", "embedded image data"},
+		{"context_too_large", "上下文过大", "input safety limit"},
 		{"compaction_tools_pending", "原工具调用仍在交付", "still being delivered"},
 		{"unknown_tool_result", "工具结果无法匹配原调用", "does not match an original call"},
 		{"invalid_late_result", "补交结果无法核对", "original recovered client call"},

@@ -728,7 +728,7 @@ func (m *Manager) updateFrom(origin nativeEventOrigin, raw json.RawMessage) {
 				// an intermediate warning as the assistant's final answer.
 				s.mu.Lock()
 				if s.epoch == epoch && s.running && !s.loading && origin.matches(s) {
-					s.promptWarning = failure
+					s.promptWarning = retainPromptWarning(s.promptWarning, failure)
 				}
 				s.mu.Unlock()
 				return
@@ -762,6 +762,10 @@ func agentFailure(text string) error {
 	}
 	if strings.Contains(v, "api error") {
 		return fail(502, "agent_api_error", publicFailureMessage("agent_api_error"))
+	}
+	message := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(v, "⚠"), "\ufe0f"))
+	if message == "agent execution terminated due to error." || message == "agent execution terminated due to error" || strings.HasPrefix(message, "agent execution terminated due to error.\n") {
+		return fail(502, "agent_execution_failed", publicFailureMessage("agent_execution_failed"))
 	}
 	return nil
 }

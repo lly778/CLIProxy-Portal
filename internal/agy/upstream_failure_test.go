@@ -46,7 +46,7 @@ func TestUpstreamFailureReasonsRemainSpecificAndPrivate(t *testing.T) {
 
 func TestTrackerReadsFailureReasonForJSONAndSSE(t *testing.T) {
 	for _, stream := range []bool{false, true} {
-		for _, code := range []string{"session_busy", "compaction_tools_pending", "missing_tool_result", "upstream_capacity_exhausted", "upstream_stream_idle_timeout", "auth_required", "private-unknown-code"} {
+		for _, code := range []string{"session_busy", "compaction_tools_pending", "missing_tool_result", "upstream_capacity_exhausted", "upstream_stream_idle_timeout", "upstream_resource_exhausted", "agent_execution_failed", "auth_required", "private-unknown-code"} {
 			body, _ := json.Marshal(map[string]any{"error": map[string]string{"code": code, "message": "private provider diagnostic"}})
 			if stream {
 				body = []byte("data: {\"type\":\"response.failed\",\"response\":" + string(body) + "}\n\n")
@@ -67,5 +67,58 @@ func TestTrackerReadsFailureReasonForJSONAndSSE(t *testing.T) {
 				t.Fatal("raw provider error entered log summary")
 			}
 		}
+	}
+}
+
+func TestLocalValidationReasonsSurviveJSONAndSSEWithoutPrivateData(t *testing.T) {
+	for code, local := range validationFailures {
+		for _, stream := range []bool{false, true} {
+			body, _ := json.Marshal(map[string]any{"status": "failed", "error": map[string]string{"code": code, "message": "private-instructions https://private.invalid/?token=secret-credential"}})
+			if stream {
+				body = []byte("data: {\"type\":\"response.failed\",\"response\":" + string(body) + "}\n\n")
+			}
+			tracker := &Tracker{Stream: stream}
+			tracker.Feed(body)
+			tracker.Finish()
+			if tracker.Completed || tracker.Failure != code || FailureStatus(tracker.Failure) != local.status {
+				t.Fatalf("stream=%v code=%s lost local failure: %+v", stream, code, tracker)
+			}
+			var summary struct{ Code, Message string }
+			encoded := FailureSummary(tracker.Failure)
+			if json.Unmarshal([]byte(encoded), &summary) != nil || summary.Code != code || summary.Message != local.message || strings.Contains(encoded, "private") || strings.Contains(encoded, "secret-credential") {
+				t.Fatal("summary lost the local reason or leaked input", encoded)
+			}
+		}
+	}
+}
+
+func TestEarlyInputValidationReturnsSpecificErrorWithoutModelCall(t *testing.T) {
+	for _, tc := range []struct{ code, body string }{
+		{"invalid_instructions", `{"model":"agy/test","instructions":[],"input":"continue"}`},
+		{"opaque_context_unsupported", `{"model":"agy/test","input":[{"type":"reasoning","encrypted_content":"private-reasoning"}]}`},
+		{"unsupported_input_item", `{"model":"agy/test","input":[{"type":"unsupported-kind","content":"private-input"}]}`},
+		{"invalid_role", `{"model":"agy/test","input":[{"role":"invalid","content":"private-input"}]}`},
+		{"image_url_unsupported", `{"model":"agy/test","input":[{"role":"user","content":[{"type":"input_image","image_url":"https://private.invalid/picture"}]}]}`},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			m, s := recoveryFixture(t, func(*session, frame) any { t.Error("invalid input started a model prompt"); return nil })
+			before := digest(snapshotSession(s))
+			w := recoveryRequest(m, tc.body)
+			tracker := &Tracker{}
+			tracker.Feed(w.Body.Bytes())
+			tracker.Finish()
+			if w.Code != 400 || tracker.Failure != tc.code || tracker.Completed || digest(snapshotSession(s)) != before || len(m.sessions) != 1 {
+				t.Fatalf("local validation was relabeled or mutated the session: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestTrackerErrorEnvelopeCannotRemainCompleted(t *testing.T) {
+	tracker := &Tracker{}
+	tracker.Feed([]byte(`{"status":"completed","error":{"code":"agent_execution_failed"}}`))
+	tracker.Finish()
+	if tracker.Completed || tracker.Failure != "agent_execution_failed" {
+		t.Fatal("an error envelope was counted as completed", tracker)
 	}
 }

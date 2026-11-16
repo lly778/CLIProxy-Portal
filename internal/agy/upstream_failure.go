@@ -2,6 +2,7 @@ package agy
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 )
 
@@ -48,6 +49,9 @@ func upstreamFailure(text string) *Error {
 }
 
 func publicFailureMessage(code string) string {
+	if local, ok := validationFailures[code]; ok {
+		return local.message
+	}
 	switch code {
 	case "session_busy":
 		return "原 AGY 会话仍在处理上一笔请求，请等待完成后再提交新消息"
@@ -95,7 +99,9 @@ func publicFailureMessage(code string) string {
 		return "AGY 官方账号服务已停用，请更换账号或向官方申诉"
 	case "auth_required":
 		return "AGY 官方账号认证失败，需要重新登录"
-	case "agent_error", "agent_api_error", "agy_generation_failed", "agent_execution_failed":
+	case "agent_execution_failed":
+		return "AGY 执行因错误终止，未正常完成回复"
+	case "agent_error", "agent_api_error", "agy_generation_failed":
 		return "AGY 上游调用失败，具体原因未能识别"
 	case "model_idle_timeout":
 		return "AGY 等待模型回复超时"
@@ -109,18 +115,31 @@ func publicFailureMessage(code string) string {
 // status faithful to the bounded application error instead of relabeling every
 // local conflict or missing result as an upstream HTTP 502.
 func FailureStatus(code string) int {
+	if local, ok := validationFailures[code]; ok {
+		return local.status
+	}
 	switch code {
 	case "session_busy", "compaction_session_unavailable", "compaction_history_changed", "compaction_tools_pending", "compaction_turn_running", "waiting_for_tools", "result_changed", "followup_history_changed", "tool_followup_not_deliverable", "native_session_missing", "session_restore_unsafe", "remote_authorization_changed", "remote_operation_pending":
 		return 409
 	case "tool_record_unavailable":
 		return 503
-	case "followup_queue_full":
+	case "followup_queue_full", "upstream_resource_exhausted", "quota_exhausted":
 		return 429
 	case "missing_tool_result", "unknown_tool_result", "invalid_compaction_history", "ambiguous_tool_search", "invalid_remote_mcp", "invalid_remote_approval", "remote_authorization_required":
 		return 400
 	default:
 		return 502
 	}
+}
+
+// A generic final termination marker must not erase the specific provider
+// reason recorded during this same prompt's native retry sequence.
+func retainPromptWarning(previous, next error) error {
+	var current, prior *Error
+	if errors.As(next, &current) && current.Code == "agent_execution_failed" && errors.As(previous, &prior) && prior.Code != "agent_error" && prior.Code != "agent_api_error" && prior.Code != "agent_execution_failed" {
+		return previous
+	}
+	return next
 }
 
 // The existing request-log formatter reads this bounded, allowlisted summary.

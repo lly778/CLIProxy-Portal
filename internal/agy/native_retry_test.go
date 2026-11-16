@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ func retryTestText(m *Manager, s *session, text string, thought bool) {
 }
 
 const retryTestWarning = "⚠ API error: UNAVAILABLE: No capacity available for model test on the server"
+const retryTestTermination = "\n⚠ Agent execution terminated due to error.\n"
 
 func TestAGYWarningWaitsForNativeRetryAndRecoveredAnswer(t *testing.T) {
 	warned, resume := make(chan struct{}), make(chan struct{})
@@ -115,7 +117,7 @@ func TestAGYWarningRecoveryRecognizesNewToolsButNotStaleUpdates(t *testing.T) {
 }
 
 func TestAGYFinalWarningPreservesCancellationAndSpecificRPCFailures(t *testing.T) {
-	for _, original := range []error{nil, fail(502, "agent_error", "generic RPC failure"), context.Canceled, fail(503, "worker_lost", "transport closed"), fail(502, "upstream_access_denied", "access denied")} {
+	for _, original := range []error{nil, fail(502, "agent_error", "generic RPC failure"), fail(502, "agent_execution_failed", "generic RPC failure"), context.Canceled, fail(503, "worker_lost", "transport closed"), fail(502, "upstream_access_denied", "access denied")} {
 		warning := upstreamFailure("No capacity available")
 		s := &session{promptWarning: warning}
 		got := s.finishPrompt(original)
@@ -150,5 +152,93 @@ func TestAGYSummaryWaitsForNativeRecoveryAndRejectsFinalWarnings(t *testing.T) {
 		} else if err == nil || text != "" {
 			t.Fatalf("failed summary was accepted: %s %v", text, err)
 		}
+	}
+}
+
+func TestAGYExecutionTerminationIsFailureAndPreservesRetryReason(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, prior := range []string{"", "⚠ API error (attempt 8): RESOURCE_EXHAUSTED (code 429): Resource has been exhausted (e.g. check quota).", retryTestWarning} {
+			t.Run(fmt.Sprintf("stream=%v/prior=%s", stream, prior), func(t *testing.T) {
+				var calls atomic.Int64
+				var m *Manager
+				m, _ = recoveryFixture(t, func(s *session, f frame) any {
+					calls.Add(1)
+					if prior != "" {
+						for i := 0; i < 8; i++ {
+							retryTestText(m, s, prior, false)
+						}
+					}
+					retryTestText(m, s, retryTestTermination, false)
+					return map[string]any{"stopReason": "end_turn"}
+				})
+				body, _ := json.Marshal(map[string]any{"model": "agy/test", "previous_response_id": "previous", "input": "continue", "stream": stream})
+				w := recoveryRequest(m, string(body))
+				tracker := &Tracker{Stream: stream}
+				tracker.Feed(w.Body.Bytes())
+				tracker.Finish()
+				want := "agent_execution_failed"
+				if prior != "" {
+					want = agentFailure(prior).(*Error).Code
+				}
+				if tracker.Completed || tracker.Failure != want || tracker.Usage.Known || calls.Load() != 1 || strings.Contains(w.Body.String(), `"status":"completed"`) || strings.Contains(w.Body.String(), "⚠") {
+					t.Fatalf("native termination became success or lost its reason: %d %s", w.Code, w.Body.String())
+				}
+				if !stream && w.Code != FailureStatus(want) {
+					t.Fatalf("status = %d, want %d", w.Code, FailureStatus(want))
+				}
+			})
+		}
+	}
+}
+
+func TestAGYExecutionTerminationDoesNotLeakIntoNextPrompt(t *testing.T) {
+	m, s := recoveryFixture(t, func(*session, frame) any { return nil })
+	s.running = true
+	retryTestText(m, s, retryTestTermination, false)
+	if err := s.finishPrompt(nil); err == nil || err.(*Error).Code != "agent_execution_failed" {
+		t.Fatal("terminal marker was not recognized", err)
+	}
+	if s.finishPrompt(nil) != nil {
+		t.Fatal("terminal marker leaked into a later prompt")
+	}
+	for _, ordinary := range []string{
+		"The log contains: ⚠ Agent execution terminated due to error.",
+		"`⚠ Agent execution terminated due to error.` is a diagnostic example.",
+		"Agent execution terminated due to error.",
+		"⚠ Agent execution terminated due to error is only an example in the document.",
+	} {
+		if agentFailure(ordinary) != nil {
+			t.Fatal("ordinary assistant text became a provider failure", ordinary)
+		}
+	}
+}
+
+func TestAGYSummaryRejectsExecutionTerminationMarker(t *testing.T) {
+	var m *Manager
+	m, _ = recoveryFixture(t, func(s *session, f frame) any {
+		retryTestText(m, s, retryTestTermination, false)
+		return map[string]any{"stopReason": "end_turn"}
+	})
+	text, err := m.summaryTurn(t.Context(), "agy/test", []any{map[string]string{"type": "text", "text": "summarize history"}}, nil)
+	if err == nil || text != "" {
+		t.Fatal("termination notice was accepted as a successful summary", text, err)
+	}
+}
+
+func TestAGYGenericTerminationNoticeDoesNotCancelNativeRecovery(t *testing.T) {
+	var m *Manager
+	var calls atomic.Int64
+	m, _ = recoveryFixture(t, func(s *session, f frame) any {
+		calls.Add(1)
+		retryTestText(m, s, retryTestTermination, false)
+		retryTestText(m, s, "actual answer after native recovery", false)
+		return map[string]any{"stopReason": "end_turn"}
+	})
+	w := recoveryRequest(m, `{"model":"agy/test","previous_response_id":"previous","input":"continue","stream":true}`)
+	tracker := &Tracker{Stream: true}
+	tracker.Feed(w.Body.Bytes())
+	tracker.Finish()
+	if !tracker.Completed || tracker.Failure != "" || calls.Load() != 1 || !strings.Contains(w.Body.String(), "actual answer after native recovery") || strings.Contains(w.Body.String(), "terminated due to error") {
+		t.Fatal("recovered native response was cancelled or diagnostic was exposed", w.Body.String())
 	}
 }

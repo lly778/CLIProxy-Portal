@@ -107,6 +107,7 @@ func (t *Tracker) read(b []byte) {
 	t.Effort = r.Reasoning.Effort
 	t.Completed = r.Status == "completed"
 	if r.Status == "failed" || r.Error != nil {
+		t.Completed = false
 		t.Failure = "agy_generation_failed"
 		if r.Error != nil {
 			if publicFailureMessage(r.Error.Code) != "" {

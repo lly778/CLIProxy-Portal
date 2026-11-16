@@ -102,7 +102,7 @@ func finishPromptWarning(err, warning error) error {
 		return err
 	}
 	var native *Error
-	if err == nil || errors.As(err, &native) && (native.Code == "agent_error" || native.Code == "agent_api_error") {
+	if err == nil || errors.As(err, &native) && (native.Code == "agent_error" || native.Code == "agent_api_error" || native.Code == "agent_execution_failed") {
 		return warning
 	}
 	return err
