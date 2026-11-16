@@ -42,12 +42,13 @@ function Read-Yes([string]$Prompt, [bool]$DefaultYes = $false) {
         else { Write-Host '请输入 y 或 n；回车为 n。' }
     }
 }
-function Assert-URL([string]$URL, [bool]$RootOnly = $false) {
+function Assert-URL([string]$URL, [bool]$RootOnly = $false, [bool]$AllowRemoteHttp = $false) {
     $parsed = $null
     if (-not [Uri]::TryCreate($URL, [UriKind]::Absolute, [ref]$parsed) -or
         $parsed.UserInfo -or $parsed.Query -or $parsed.Fragment -or
         ($RootOnly -and $parsed.AbsolutePath -ne '/') -or
-        ($parsed.Scheme -ne 'https' -and -not ($parsed.Scheme -eq 'http' -and $parsed.IsLoopback))) {
+        ($parsed.Scheme -ne 'https' -and -not ($parsed.Scheme -eq 'http' -and ($parsed.IsLoopback -or $AllowRemoteHttp)))) {
+        if ($AllowRemoteHttp) { throw 'API 地址无效，必须使用 HTTP 或 HTTPS，且不能包含凭据、查询参数或片段。' }
         throw '地址无效，远程服务必须使用 HTTPS，只有本机地址允许 HTTP。'
     }
 }
@@ -85,7 +86,7 @@ function Get-PublicConfig([string]$Base) {
             }
         }
         if (-not $ids.ContainsKey([string](Get-Field $config 'default_model' ''))) { throw '默认模型不在模型列表中。' }
-        Assert-URL ([string](Get-Field $config 'api_base_url' ''))
+        Assert-URL ([string](Get-Field $config 'api_base_url' '')) $false $true
         return $config
     } finally {
         if ($null -ne $response) { $response.Dispose() }
