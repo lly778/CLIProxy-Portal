@@ -251,6 +251,9 @@ func requestFailureText(e cpamp.EventRow) string {
 	if e.FailStatusCode != nil && *e.FailStatusCode >= 100 {
 		parts = append(parts, fmt.Sprintf("HTTP %d", *e.FailStatusCode))
 	}
+	if diagnostic := agyOriginalDiagnostic(e); diagnostic != "" {
+		return strings.Join(append(parts, diagnostic), " · ")
+	}
 	summary := strings.TrimSpace(e.FailSummary)
 	if summary == "" {
 		return strings.Join(parts, " · ")

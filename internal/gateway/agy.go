@@ -256,7 +256,7 @@ func (g *Gateway) routeAGY(w http.ResponseWriter, r *http.Request, m *requestMea
 			// transport/upload failures rather than replacing them on cleanup.
 			m.mu.Lock()
 			if m.row.FailureReason == "agy_request_failed" || m.row.FailureReason == "" {
-				m.row.FailureReason = agy.FailureSummary(tracker.Failure)
+				m.row.FailureReason = agy.ResponseFailureSummary(tracker.Failure, resp)
 				if resp.StatusCode < 400 {
 					m.row.StatusCode = agy.FailureStatus(tracker.Failure)
 				}

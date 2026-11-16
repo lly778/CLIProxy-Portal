@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,11 +58,22 @@ func TestAGYGatewayRecordsSpecificFailureForJSONAndSSE(t *testing.T) {
 		{"agent_execution_failed", "因错误终止", 502},
 	} {
 		for _, stream := range []bool{false, true} {
+			diagnostic := ""
+			if strings.HasPrefix(failure.code, "upstream_") || failure.code == "agent_execution_failed" {
+				diagnostic = "Original CLI " + failure.code + "\nNative Stack: worker.go:123"
+			}
 			worker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Header.Get("X-Portal-Followup-Limit") != "0" {
 					t.Error("gateway did not reserve tool-result admission capacity")
 				}
-				encoded, _ := json.Marshal(map[string]any{"status": "failed", "error": map[string]string{"code": failure.code}})
+				if diagnostic != "" {
+					// A private worker trailer must be recorded, never forwarded.
+					defer func() {
+						w.Header().Set(http.TrailerPrefix+"X-Portal-AGY-CLI-Diagnostic", base64.StdEncoding.EncodeToString([]byte(diagnostic)))
+					}()
+					w.Header().Add("Trailer", "X-Portal-AGY-CLI-Diagnostic")
+				}
+				encoded, _ := json.Marshal(map[string]any{"status": "failed", "error": map[string]string{"code": failure.code, "message": failure.message}})
 				if stream {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = w.Write([]byte("data: {\"type\":\"response.created\",\"response\":{\"status\":\"in_progress\"}}\n\n"))
@@ -97,8 +109,14 @@ func TestAGYGatewayRecordsSpecificFailureForJSONAndSSE(t *testing.T) {
 					}
 					continue
 				}
-				var summary struct{ Code, Message string }
-				if json.Unmarshal([]byte(m.row.FailureReason), &summary) != nil || summary.Code != failure.code || !strings.Contains(summary.Message, failure.message) || m.row.StatusCode != failure.status {
+				if strings.Contains(w.Body.String(), "Native Stack") || len(w.Result().Trailer) != 0 || w.Header().Get("X-Portal-AGY-CLI-Diagnostic") != "" || w.Header().Get("Trailer") != "" {
+					t.Fatal("private diagnostic was forwarded to client")
+				}
+				var summary struct {
+					Code, Message string
+					Diagnostic    string `json:"cli_diagnostic"`
+				}
+				if json.Unmarshal([]byte(m.row.FailureReason), &summary) != nil || summary.Diagnostic != diagnostic || summary.Code != failure.code || !strings.Contains(summary.Message, failure.message) || m.row.StatusCode != failure.status {
 					t.Fatalf("stream=%v lost specific reason: %+v", stream, m.row)
 				}
 			}

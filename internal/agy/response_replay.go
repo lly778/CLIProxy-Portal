@@ -24,6 +24,7 @@ type cachedResponse struct {
 
 type responseReplay struct {
 	originRequest string
+	diagnostic    string
 	mu            sync.Mutex
 	changed       chan struct{}
 	headers       http.Header
@@ -232,6 +233,9 @@ func (m *Manager) replayResponse(w http.ResponseWriter, r *http.Request, execute
 				if noResponse || panicked {
 					WriteError(rw, fail(503, "worker_lost", "AGY 请求未完成"))
 				}
+				e.mu.Lock()
+				e.diagnostic = rw.header.Get(http.TrailerPrefix + cliDiagnosticTrailer)
+				e.mu.Unlock()
 				m.finishResponseReplay(key, e)
 			}()
 			execute(rw, r)
@@ -247,6 +251,7 @@ func serveResponseReplay(w http.ResponseWriter, ctx context.Context, e *response
 	for {
 		e.mu.Lock()
 		status, headers, done, changed := e.status, e.headers, e.done, e.changed
+		diagnostic := e.diagnostic
 		advance := e.progress != progress
 		progress = e.progress
 		var chunk []byte
@@ -274,6 +279,9 @@ func serveResponseReplay(w http.ResponseWriter, ctx context.Context, e *response
 			continue
 		}
 		if done {
+			if diagnostic != "" {
+				w.Header().Set(http.TrailerPrefix+cliDiagnosticTrailer, diagnostic)
+			}
 			return
 		}
 		select {

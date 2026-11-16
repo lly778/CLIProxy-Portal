@@ -459,31 +459,31 @@ func (m *Manager) compactHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
 	if !m.beginRequest() {
-		WriteError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
+		writeWorkerError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
 		return
 	}
 	defer m.requests.Done()
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
-		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))
+		writeWorkerError(w, fail(401, "owner_required", "缺少请求所属用户"))
 		return
 	}
 	b, err := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))
 	if err != nil || len(b) > MaxBody {
-		WriteError(w, fail(413, "request_too_large", "请求超过 10 MB 限制"))
+		writeWorkerError(w, fail(413, "request_too_large", "请求超过 10 MB 限制"))
 		return
 	}
 	req, err := parseRequest(b)
 	if err != nil {
-		WriteError(w, err)
+		writeWorkerError(w, err)
 		return
 	}
 	if req.Previous != "" {
-		WriteError(w, fail(400, "full_history_required", "压缩需要完整 input 历史"))
+		writeWorkerError(w, fail(400, "full_history_required", "压缩需要完整 input 历史"))
 		return
 	}
 	if err = m.expandCheckpoints(owner, &req); err != nil {
-		WriteError(w, err)
+		writeWorkerError(w, err)
 		return
 	}
 	req.owner = owner
@@ -491,7 +491,7 @@ func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
 	defer trace.phase("request_finished")
 	for _, item := range req.Items {
 		if _, err = promptBlocksLimit([]map[string]any{item}, MaxBody); err != nil {
-			WriteError(w, err)
+			writeWorkerError(w, err)
 			return
 		}
 	}
@@ -501,19 +501,19 @@ func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
 	case m.slot <- struct{}{}:
 		defer func() { <-m.slot }()
 	case <-timer.C:
-		WriteError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
+		writeWorkerError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
 		return
 	case <-r.Context().Done():
 		return
 	}
 	if m.hasPendingOwner(owner) {
-		WriteError(w, fail(409, "waiting_for_tools", "请先完成当前工具结果回传，再压缩历史"))
+		writeWorkerError(w, fail(409, "waiting_for_tools", "请先完成当前工具结果回传，再压缩历史"))
 		return
 	}
 	trace.phase("compacting_history")
 	result, err := m.compactWithProof(r.Context(), req, modelProgress(w))
 	if err != nil {
-		WriteError(w, err)
+		writeWorkerError(w, err)
 		return
 	}
 	items := result.Items
@@ -522,7 +522,7 @@ func (m *Manager) executeCompactHTTP(w http.ResponseWriter, r *http.Request) {
 		if text, ok := items[0]["content"].(string); ok && strings.HasPrefix(text, checkpointPrefix) {
 			token, e := m.sealCheckpoint(owner, req.Model, strings.TrimPrefix(text, checkpointPrefix), result.Proof)
 			if e != nil {
-				WriteError(w, e)
+				writeWorkerError(w, e)
 				return
 			}
 			output = append([]map[string]any{{"id": newID("cmp_agy_"), "type": "compaction", "encrypted_content": token}}, items[1:]...)

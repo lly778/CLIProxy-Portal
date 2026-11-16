@@ -186,10 +186,13 @@ type Status struct {
 type Error struct {
 	Status        int
 	Code, Message string
+	Diagnostic    string `json:"-"`
 }
 
-func (e *Error) Error() string                    { return e.Message }
-func fail(status int, code, message string) error { return &Error{status, code, message} }
+func (e *Error) Error() string { return e.Message }
+func fail(status int, code, message string) error {
+	return &Error{Status: status, Code: code, Message: message}
+}
 
 type Usage struct {
 	Input     int64 `json:"input_tokens"`

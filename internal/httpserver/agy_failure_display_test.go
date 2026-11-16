@@ -71,3 +71,17 @@ func TestAGYLogDetailsAreEnglishWithoutChangingStoredOrClientErrors(t *testing.T
 		})
 	}
 }
+
+func TestAGYPortalShowsOriginalDiagnosticInsteadOfTranslatedSummary(t *testing.T) {
+	diagnostic := "RESOURCE_EXHAUSTED (code 429)\r\n  Native Stack: worker.go:123\n  原始诊断 <script>alert(1)</script>"
+	stored, _ := json.Marshal(map[string]string{"code": "upstream_resource_exhausted", "message": "上游额度不足或请求受到限流", "cli_diagnostic": diagnostic})
+	status := int64(429)
+	event := cpamp.EventRow{Model: "agy/gemini", Failed: true, FailStatusCode: &status, FailSummary: string(stored)}
+	if got := requestFailureText(event); got != "HTTP 429 · "+diagnostic {
+		t.Fatalf("original CLI diagnostic was translated or lost: %s", got)
+	}
+	event.Model = "other/model"
+	if strings.Contains(requestFailureText(event), "worker.go") {
+		t.Fatal("AGY diagnostic display changed another provider")
+	}
+}

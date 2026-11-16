@@ -103,7 +103,10 @@ func finishPromptWarning(err, warning error) error {
 	}
 	var native *Error
 	if err == nil || errors.As(err, &native) && (native.Code == "agent_error" || native.Code == "agent_api_error" || native.Code == "agent_execution_failed") {
-		return warning
+		return mergeCLIDiagnostics(warning, warning, err)
+	}
+	if errors.As(err, &native) && native.Diagnostic != "" {
+		return mergeCLIDiagnostics(err, warning, err)
 	}
 	return err
 }

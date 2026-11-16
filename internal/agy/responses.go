@@ -23,7 +23,7 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("GET /internal/catalog", func(w http.ResponseWriter, r *http.Request) {
 		models, e := m.Discover(r.Context())
 		if e != nil {
-			WriteError(w, e)
+			writeWorkerError(w, e)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(models)
@@ -59,7 +59,7 @@ func (m *Manager) Handler() http.Handler {
 	mux.HandleFunc("GET /internal/images/{session}/{name}", m.imageHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, m.cfg.Secret) {
-			WriteError(w, fail(401, "unauthorized", "内部服务身份验证失败"))
+			writeWorkerError(w, fail(401, "unauthorized", "内部服务身份验证失败"))
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -74,35 +74,35 @@ func (m *Manager) responsesHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	if !m.beginRequest() {
-		WriteError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
+		writeWorkerError(w, fail(503, "worker_stopping", "AGY 服务正在停止"))
 		return
 	}
 	defer m.requests.Done()
 	owner := r.Header.Get("X-Portal-Owner")
 	if owner == "" || len(owner) > 256 {
-		WriteError(w, fail(401, "owner_required", "缺少请求所属用户"))
+		writeWorkerError(w, fail(401, "owner_required", "缺少请求所属用户"))
 		return
 	}
 	b, e := io.ReadAll(io.LimitReader(r.Body, MaxBody+1))
 	if e != nil || len(b) > MaxBody {
-		WriteError(w, fail(413, "request_too_large", "AGY 请求超过大小限制"))
+		writeWorkerError(w, fail(413, "request_too_large", "AGY 请求超过大小限制"))
 		return
 	}
 	req, e := parseRequest(b)
 	if e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	if raw := r.Header.Get("X-Portal-Followup-Limit"); raw != "" {
 		limit, err := strconv.Atoi(raw)
 		if err != nil || limit < 0 || limit > maxQueuedFollowups {
-			WriteError(w, fail(400, "invalid_request", "内部追加消息队列上限无效"))
+			writeWorkerError(w, fail(400, "invalid_request", "内部追加消息队列上限无效"))
 			return
 		}
 		req.followupLimit = &limit
 	}
 	if e = m.expandCheckpoints(owner, &req); e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	req.bindRequest = true
@@ -112,18 +112,18 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 	r, trace := m.traceRequest(r, owner, req.Model)
 	defer trace.phase("request_finished")
 	if _, e = systemText(req); e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	// Validate all content, including historical tool images, before releasing
 	// any parked tool or changing the active allowlist.
 	if _, e = promptBlocksLimit(req.Items, MaxBody); e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	retrySession, e := m.prepareHandoffRetry(owner, &req)
 	if e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	trace.phase("waiting_generation_slot")
@@ -142,7 +142,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 				candidate, err = m.find(owner, req)
 			}
 			if err != nil {
-				WriteError(w, err)
+				writeWorkerError(w, err)
 				return
 			}
 			if candidate != nil && canQueueFollowup(candidate, req) {
@@ -154,7 +154,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 			case m.slot <- struct{}{}:
 				slotHeld = true
 			case <-queue.C:
-				WriteError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
+				writeWorkerError(w, fail(429, "busy", "AGY 正忙，请稍后重试"))
 				return
 			case <-r.Context().Done():
 				return
@@ -174,26 +174,26 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s, e = m.find(owner, req)
 	}
 	if e != nil {
-		WriteError(w, e)
+		writeWorkerError(w, e)
 		return
 	}
 	trace.phase("session_loading")
 	if s != nil {
 		if e = prepareLateClientResults(s, &req); e != nil {
-			WriteError(w, e)
+			writeWorkerError(w, e)
 			return
 		}
 	} else if !fullHistoryInput(req.Items) {
 		for _, item := range req.Items {
 			if isToolResultItem(stringField(item, "type")) {
-				WriteError(w, fail(409, "unknown_tool_result", "无法找到工具结果所属的原会话，未另建任务"))
+				writeWorkerError(w, fail(409, "unknown_tool_result", "无法找到工具结果所属的原会话，未另建任务"))
 				return
 			}
 		}
 	}
 	if s != nil && !req.handoffRetry {
 		if e = prepareFailedRecoveryFollowup(s, &req); e != nil {
-			WriteError(w, e)
+			writeWorkerError(w, e)
 			return
 		}
 	}
@@ -203,7 +203,7 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		_, req.detachedResume = detachedTailMatch(s, req)
 		s.mu.Unlock()
 		if req.handoffRetry && !req.detachedResume {
-			WriteError(w, fail(409, "followup_history_changed", "原交接已推进，恢复记录已保留，未将旧请求重新执行"))
+			writeWorkerError(w, fail(409, "followup_history_changed", "原交接已推进，恢复记录已保留，未将旧请求重新执行"))
 			return
 		}
 	}
@@ -212,14 +212,14 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		e = m.prepareRemoteTools(metadataCtx, owner, &req)
 		done()
 		if e != nil {
-			WriteError(w, e)
+			writeWorkerError(w, e)
 			return
 		}
 	}
 	if req.detachedResume {
 		s, e = m.coldDetachedSession(r.Context(), s, &req)
 		if e != nil {
-			WriteError(w, e)
+			writeWorkerError(w, e)
 			return
 		}
 	}
@@ -1415,7 +1415,7 @@ func (o *response) fail(err error) {
 	o.trace.phase("response_failed")
 	var e *Error
 	if !errors.As(err, &e) {
-		e = &Error{502, "agent_error", "AGY 请求中断"}
+		e = &Error{Status: 502, Code: "agent_error", Message: "AGY 请求中断"}
 	}
 	o.failureCode = e.Code
 	if o.onFailure != nil {
@@ -1424,9 +1424,10 @@ func (o *response) fail(err error) {
 		callback()
 	}
 	if !o.started {
-		WriteError(o.w, err)
+		writeWorkerError(o.w, err)
 		return
 	}
+	writeCLIDiagnostic(o.w, e)
 	v := o.envelope("failed", Usage{})
 	v["error"] = map[string]string{"code": e.Code, "message": e.Message}
 	_ = o.event("response.failed", map[string]any{"response": v})

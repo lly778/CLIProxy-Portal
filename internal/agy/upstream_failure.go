@@ -7,7 +7,7 @@ import (
 )
 
 // Inspect only provider diagnostics, never ordinary assistant text. Publish
-// recognized reasons, not raw diagnostics containing credentials or user data.
+// recognized reasons for clients, and retain redacted diagnostics for the portal.
 func upstreamFailure(text string) *Error {
 	v := strings.ToLower(text)
 	has := func(parts ...string) bool {
@@ -45,7 +45,7 @@ func upstreamFailure(text string) *Error {
 	default:
 		return nil
 	}
-	return &Error{Status: status, Code: code, Message: publicFailureMessage(code)}
+	return withCLIDiagnostic(&Error{Status: status, Code: code, Message: publicFailureMessage(code)}, text)
 }
 
 func publicFailureMessage(code string) string {
@@ -137,9 +137,9 @@ func FailureStatus(code string) int {
 func retainPromptWarning(previous, next error) error {
 	var current, prior *Error
 	if errors.As(next, &current) && current.Code == "agent_execution_failed" && errors.As(previous, &prior) && prior.Code != "agent_error" && prior.Code != "agent_api_error" && prior.Code != "agent_execution_failed" {
-		return previous
+		return mergeCLIDiagnostics(previous, previous, next)
 	}
-	return next
+	return mergeCLIDiagnostics(next, previous, next)
 }
 
 // The existing request-log formatter reads this bounded, allowlisted summary.

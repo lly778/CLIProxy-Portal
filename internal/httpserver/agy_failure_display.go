@@ -1,14 +1,15 @@
 package httpserver
 
 import (
+	"encoding/json"
 	"strings"
 	"unicode"
 
 	"cliproxy-portal/internal/cpamp"
 )
 
-// Translate only the portal's request-log detail. Wire errors and stored
-// diagnostics retain their original messages and codes.
+// Translate fallback summaries only. Original CLI diagnostics take precedence
+// in requestFailureText and never enter the client response.
 func agyFailureDisplay(e cpamp.EventRow, code, message string) string {
 	if !strings.HasPrefix(e.Model, "agy/") && !strings.HasPrefix(e.RequestID, "agy:") && !strings.HasPrefix(e.RequestID, "resp_agy_") && !strings.HasPrefix(code, "agy_") {
 		return message
@@ -105,4 +106,19 @@ var agyFailureDisplayMessages = map[string]string{
 	"agent_execution_failed":         "AGY execution terminated due to an error; no successful response was completed.",
 	"model_idle_timeout":             "Timed out waiting for the AGY model.",
 	"worker_lost":                    "The AGY session process has terminated.",
+}
+
+// Only the dedicated diagnostic field bypasses the fallback translation.
+// Existing summaries and other providers keep their original display behavior.
+func agyOriginalDiagnostic(e cpamp.EventRow) string {
+	if !strings.HasPrefix(e.Model, "agy/") && !strings.HasPrefix(e.RequestID, "agy:") && !strings.HasPrefix(e.RequestID, "resp_agy_") {
+		return ""
+	}
+	var detail struct {
+		Diagnostic string `json:"cli_diagnostic"`
+	}
+	if json.Unmarshal([]byte(e.FailSummary), &detail) != nil {
+		return ""
+	}
+	return detail.Diagnostic
 }

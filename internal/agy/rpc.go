@@ -205,14 +205,15 @@ func (p *process) read(r io.Reader) {
 }
 func mapRPCError(e *rpcError) error {
 	if explicitMissingSession(e) {
-		return fail(409, "native_session_missing", "原 AGY 原生会话不存在")
+		return withCLIDiagnostic(&Error{Status: 409, Code: "native_session_missing", Message: "原 AGY 原生会话不存在"}, e.Message)
 	}
 	if failure := upstreamFailure(e.Message); failure != nil {
 		return failure
 	}
-	// Keep unknown diagnostics private; they may contain credentials or prompts.
+	// Unknown errors still get a stable code; only redacted diagnostics reach
+	// the portal through the private diagnostic channel, not the client body.
 	if e.Code == -32000 {
-		return fail(503, "auth_required", "AGY 需要在服务器重新登录")
+		return withCLIDiagnostic(&Error{Status: 503, Code: "auth_required", Message: "AGY 需要在服务器重新登录"}, e.Message)
 	}
-	return fail(502, "agent_error", publicFailureMessage("agent_error"))
+	return withCLIDiagnostic(&Error{Status: 502, Code: "agent_error", Message: publicFailureMessage("agent_error")}, e.Message)
 }

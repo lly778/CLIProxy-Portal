@@ -58,7 +58,9 @@ func NewClient(base, secret string) (*Client, error) {
 	if e != nil || u.Scheme != "http" && u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || len(secret) < 32 {
 		return nil, errors.New("AGY 内部服务地址或凭据无效")
 	}
-	return &Client{base: strings.TrimRight(base, "/"), secret: secret, http: &http.Client{Transport: &http.Transport{DisableCompression: true}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	// Go bounds HTTP trailers by its read buffer; allow the bounded 64 KiB
+	// diagnostic plus base64 encoding on this private worker connection.
+	return &Client{base: strings.TrimRight(base, "/"), secret: secret, http: &http.Client{Transport: &http.Transport{DisableCompression: true, ReadBufferSize: 2 * maxCLIDiagnosticBytes}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // Status reads in-memory worker counters only. Coalesce page/poll requests and
@@ -162,7 +164,7 @@ func authorized(r *http.Request, secret string) bool {
 	return len(v) == len(secret) && subtle.ConstantTimeCompare([]byte(v), []byte(secret)) == 1
 }
 func WriteError(w http.ResponseWriter, err error) {
-	e := &Error{502, "agent_error", "AGY 请求失败"}
+	e := &Error{Status: 502, Code: "agent_error", Message: "AGY 请求失败"}
 	var v *Error
 	if errors.As(err, &v) {
 		e = v

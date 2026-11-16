@@ -757,15 +757,15 @@ func agentFailure(text string) error {
 	if !strings.HasPrefix(v, "⚠") {
 		return nil
 	}
-	if failure := upstreamFailure(v); failure != nil {
+	if failure := upstreamFailure(text); failure != nil {
 		return failure
 	}
 	if strings.Contains(v, "api error") {
-		return fail(502, "agent_api_error", publicFailureMessage("agent_api_error"))
+		return withCLIDiagnostic(&Error{Status: 502, Code: "agent_api_error", Message: publicFailureMessage("agent_api_error")}, text)
 	}
 	message := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(v, "⚠"), "\ufe0f"))
 	if message == "agent execution terminated due to error." || message == "agent execution terminated due to error" || strings.HasPrefix(message, "agent execution terminated due to error.\n") {
-		return fail(502, "agent_execution_failed", publicFailureMessage("agent_execution_failed"))
+		return withCLIDiagnostic(&Error{Status: 502, Code: "agent_execution_failed", Message: publicFailureMessage("agent_execution_failed")}, text)
 	}
 	return nil
 }

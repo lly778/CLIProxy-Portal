@@ -180,7 +180,7 @@ func TestAGYExecutionTerminationIsFailureAndPreservesRetryReason(t *testing.T) {
 				if prior != "" {
 					want = agentFailure(prior).(*Error).Code
 				}
-				if tracker.Completed || tracker.Failure != want || tracker.Usage.Known || calls.Load() != 1 || strings.Contains(w.Body.String(), `"status":"completed"`) || strings.Contains(w.Body.String(), "⚠") {
+				if tracker.Completed || tracker.Failure != want || tracker.Usage.Known || calls.Load() != 1 || strings.Contains(w.Body.String(), `"status":"completed"`) || strings.Contains(w.Body.String(), "⚠") || strings.Contains(w.Body.String(), `"role":"assistant"`) {
 					t.Fatalf("native termination became success or lost its reason: %d %s", w.Code, w.Body.String())
 				}
 				if !stream && w.Code != FailureStatus(want) {
