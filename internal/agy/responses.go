@@ -664,7 +664,8 @@ func (m *Manager) executeResponsesHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		rememberRequest(s, req, fps)
 		for _, actual := range req.lateResults {
-			trace.emit(Observation{Kind: "tool", State: "result_received", Category: "client_tool", CallID: resultCallID(actual), ResultHash: digest(actual["output"]), Outcome: receiptOutcome(actual["output"]), Reason: "late_client_result"})
+			t, classification := classifyLateClientReceipt(s, actual)
+			trace.emit(Observation{Kind: "tool", State: "result_received", Category: "client_tool", Tool: t.key(), CallID: resultCallID(actual), ResultHash: digest(actual["output"]), Outcome: classification.Outcome, OutcomeSource: classification.Source, ExitCode: classification.ExitCode, Reason: "late_client_result"})
 		}
 		s.mu.Lock()
 		commitToolCatalog(s, nextTools, loaded, toolHash)

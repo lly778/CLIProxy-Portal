@@ -27,6 +27,8 @@ type Observation struct {
 	At                                           int64
 	Usage                                        Usage
 	Compaction                                   *compactionProof `json:",omitempty"`
+	OutcomeSource                                string           `json:",omitempty"`
+	ExitCode                                     *int             `json:",omitempty"`
 }
 
 type observationRequestKey struct{}
@@ -114,12 +116,19 @@ func (c *pendingTool) receipt(state string) {
 	if isClientSearch(c.Tool) {
 		category = "tool_search"
 	}
+	var classification receiptClassification
+	if c.remote != nil {
+		classification = receiptClassification{Outcome: c.remote.Outcome, Source: "remote_result"}
+	} else {
+		classification = classifyClientReceipt(c.Tool, c.Output)
+	}
 	c.trace.emit(Observation{
 		ID:        digest([]string{c.trace.owner, c.traceSession, c.ID, state}),
 		SessionID: c.traceSession, Kind: kind, State: state, BatchID: c.BatchID,
 		CallID: c.ID, Category: category, Tool: c.Tool.key(),
 		ArgumentsHash: digest(c.Arguments), ResultHash: c.OutputHash, DefinitionHash: digest(c.Tool),
-		Outcome: c.outcome(), Route: c.Route, ProjectionVersion: c.ProjectionVersion,
+		Outcome: classification.Outcome, OutcomeSource: classification.Source, ExitCode: classification.ExitCode,
+		Route: c.Route, ProjectionVersion: c.ProjectionVersion,
 	})
 }
 
