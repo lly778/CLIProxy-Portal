@@ -97,9 +97,18 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		presetEditorJSON(w, 502, map[string]string{"error": "读取上游账号失败，请刷新配置后重试"})
 		return
 	}
+	compatible, err := s.Keys.CompatibleChannelLabels(r.Context())
+	if err != nil {
+		presetEditorJSON(w, 502, map[string]string{"error": "读取第三方供应商配置失败"})
+		return
+	}
 	visible := service.OAuthPresetSnapshot{Version: snapshot.Version}
 	for _, entry := range snapshot.Channels {
-		if present == nil || present[entry.Channel] {
+		if service.IsCompatibleChannel(entry.Channel) {
+			if compatible[entry.Channel] != "" {
+				visible.Channels = append(visible.Channels, entry)
+			}
+		} else if present == nil || present[entry.Channel] {
 			visible.Channels = append(visible.Channels, entry)
 		}
 	}
@@ -121,6 +130,18 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 				snapshot.Channels = append(snapshot.Channels, service.OAuthChannelPreset{Channel: channel})
 			}
 		}
+		// Old presets have no policy for providers added later. Start those
+		// providers at their current settings rather than turning them off.
+		for channel := range compatible {
+			if !known[channel] {
+				current, err := s.Keys.OAuthChannelConfiguration(r.Context(), channel)
+				if err != nil {
+					presetEditorJSON(w, 502, map[string]string{"error": "读取第三方模型配置失败"})
+					return
+				}
+				snapshot.Channels = append(snapshot.Channels, current.Channels...)
+			}
+		}
 	}
 	channels := []presetEditorChannel{}
 	catalogChanged := false
@@ -134,7 +155,11 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		for _, model := range entry.Models {
 			stored[strings.ToLower(model.ID)] = model
 		}
-		channel := presetEditorChannel{Channel: entry.Channel, Label: service.OAuthChannelLabel(entry.Channel), Models: []presetEditorModel{}}
+		label := service.OAuthChannelLabel(entry.Channel)
+		if name := compatible[entry.Channel]; name != "" {
+			label = name + "（第三方）"
+		}
+		channel := presetEditorChannel{Channel: entry.Channel, Label: label, Models: []presetEditorModel{}}
 		if len(live) != len(stored) {
 			catalogChanged = true
 		}
@@ -145,7 +170,7 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 				catalogChanged = true
 			}
 			row := presetEditorModel{ID: model.ID, Enabled: exists && target.Enabled && model.WildcardRule == "", WildcardRule: model.WildcardRule, Aliases: []string{}, ReasoningCap: entry.ReasoningCaps[key], ReasoningLabels: map[string]string{}}
-			if entry.Channel == "codex" || entry.Channel == "antigravity" || entry.Channel == "agy" {
+			if entry.Channel == "codex" || entry.Channel == "antigravity" || entry.Channel == "agy" || service.IsCompatibleChannel(entry.Channel) {
 				for _, level := range service.OAuthReasoningLevels(entry.Channel, model) {
 					if level != "ultra" {
 						row.ReasoningLevels = append(row.ReasoningLevels, level)
@@ -169,6 +194,9 @@ func (s *Server) adminOAuthPresetEditor(w http.ResponseWriter, r *http.Request) 
 		channels = append(channels, channel)
 	}
 	sort.SliceStable(channels, func(i, j int) bool {
+		if service.IsCompatibleChannel(channels[i].Channel) && service.IsCompatibleChannel(channels[j].Channel) {
+			return strings.ToLower(channels[i].Label) < strings.ToLower(channels[j].Label)
+		}
 		return service.UpstreamChannelLess(channels[i].Channel, channels[j].Channel)
 	})
 	notice := ""
@@ -285,7 +313,7 @@ func (s *Server) adminOAuthPresetEdit(w http.ResponseWriter, r *http.Request) {
 			included[entry.Channel] = true
 		}
 		for _, entry := range previous.Channels {
-			if present != nil && !present[entry.Channel] && !included[entry.Channel] {
+			if !included[entry.Channel] && (service.IsCompatibleChannel(entry.Channel) || present != nil && !present[entry.Channel]) {
 				snapshot.Channels = append(snapshot.Channels, entry)
 			}
 		}

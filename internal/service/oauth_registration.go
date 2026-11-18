@@ -16,7 +16,7 @@ import (
 func (k *Keys) refreshOAuthRegistrations(ctx context.Context, channels ...string) error {
 	filtered := []string{}
 	for _, c := range channels {
-		if c != "agy" {
+		if c != "agy" && !IsCompatibleChannel(c) {
 			filtered = append(filtered, c)
 		}
 	}

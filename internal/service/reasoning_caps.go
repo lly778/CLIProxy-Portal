@@ -45,6 +45,9 @@ func (k *Keys) OAuthReasoningCaps(ctx context.Context, channels ...string) (map[
 	if channel == "agy" {
 		return k.agyCaps(ctx)
 	}
+	if IsCompatibleChannel(channel) {
+		return k.readCompatibleCaps(ctx, channel)
+	}
 	if err := validateReasoningChannel(channel); err != nil {
 		return nil, "", err
 	}

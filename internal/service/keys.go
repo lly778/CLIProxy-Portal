@@ -1260,6 +1260,10 @@ func (k *Keys) readOAuthModelSettings(ctx context.Context, channel string) ([]OA
 	if channel == "agy" {
 		return k.agyModelSettings(ctx)
 	}
+	if IsCompatibleChannel(channel) {
+		models, _, err := k.compatibleModelSettings(ctx, channel)
+		return models, nil, err
+	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelDefinitions(context.Context, string) ([]cpamp.OAuthModelDefinition, error)
 		ListOAuthExcludedModels(context.Context, string) ([]string, error)
@@ -1307,6 +1311,10 @@ func (k *Keys) OAuthModelAliases(ctx context.Context, channels ...string) ([]cpa
 func (k *Keys) readOAuthModelAliases(ctx context.Context, channel string) ([]cpamp.OAuthModelAlias, string, error) {
 	if channel == "agy" {
 		return k.agyAliases(ctx)
+	}
+	if IsCompatibleChannel(channel) {
+		_, aliases, err := k.compatibleModelSettings(ctx, channel)
+		return aliases, oauthChannelAliasRevision(channel, aliases), err
 	}
 	typed, ok := k.CPAMP.(interface {
 		ListOAuthModelAliases(context.Context, string) ([]cpamp.OAuthModelAlias, error)

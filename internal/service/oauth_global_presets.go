@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +24,16 @@ func (k *Keys) oauthPresetSnapshot(ctx context.Context) (OAuthPresetSnapshot, er
 	if err != nil {
 		return OAuthPresetSnapshot{}, err
 	}
+	compatible, err := k.CompatibleChannelLabels(ctx)
+	if err != nil {
+		return OAuthPresetSnapshot{}, err
+	}
+	providerChannels := make([]string, 0, len(compatible))
+	for channel := range compatible {
+		providerChannels = append(providerChannels, channel)
+	}
+	sort.Strings(providerChannels)
+	channels = append(channels, providerChannels...)
 	snapshot := OAuthPresetSnapshot{Version: OAuthPresetVersion}
 	for _, channel := range channels {
 		entry, err := k.oauthChannelPresetSnapshot(ctx, channel)
@@ -136,6 +147,9 @@ func (k *Keys) prepareOAuthPreset(ctx context.Context, requested OAuthPresetSnap
 	// Channels not recorded by a preset (e.g. newly installed providers) remain
 	// unchanged, but still participate in the final cross-channel collision check.
 	for _, entry := range target.Channels {
+		if IsCompatibleChannel(entry.Channel) && oauthChannelPresetsEqual(current.Channels[indices[entry.Channel]], entry) {
+			continue
+		}
 		if err := k.validateOAuthChannelPreset(ctx, entry); err != nil {
 			return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, fmt.Errorf("%s：%w", OAuthChannelLabel(entry.Channel), err)
 		}
@@ -160,6 +174,9 @@ func (k *Keys) prepareOAuthPreset(ctx context.Context, requested OAuthPresetSnap
 		}
 	}
 	if err := validatePresetChannelNames(routingTarget); err != nil {
+		return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, err
+	}
+	if err := validateCompatibleCapScope(routingTarget); err != nil {
 		return OAuthPresetSnapshot{}, OAuthPresetSnapshot{}, nil, err
 	}
 	return current, target, included, nil
@@ -189,6 +206,9 @@ func (k *Keys) applyPreparedOAuthPreset(ctx context.Context, current, target OAu
 	for _, entry := range target.Channels {
 		// Do not rewrite channels absent from the stored preset.
 		if !included[entry.Channel] {
+			continue
+		}
+		if IsCompatibleChannel(entry.Channel) && oauthChannelPresetsEqual(current.Channels[indices[entry.Channel]], entry) {
 			continue
 		}
 		attempted = append(attempted, current.Channels[indices[entry.Channel]])

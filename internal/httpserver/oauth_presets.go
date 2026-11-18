@@ -48,12 +48,14 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 		v.PresetError = "上游账号暂时不可用"
 		return
 	}
+	compatible, _ := s.Keys.CompatibleChannelLabels(r.Context())
 	// Compare exact current inputs, rather than keeping a time-based database cache.
 	// JSON parsing, sorting and applied-state comparisons are shared by unchanged visits.
 	digest := sha256.New()
 	_, _ = fmt.Fprintf(digest, "%t\n", currentErr == nil)
 	_ = json.NewEncoder(digest).Encode(current)
 	_ = json.NewEncoder(digest).Encode(present)
+	_ = json.NewEncoder(digest).Encode(compatible)
 	for _, preset := range presets {
 		for _, value := range []string{preset.ID, preset.Name, preset.Payload} {
 			_, _ = fmt.Fprintf(digest, "%d:%s", len(value), value)
@@ -78,11 +80,18 @@ func (s *Server) loadOAuthPresetViews(r *http.Request, v *webui.AdminUpstreamsVi
 			})
 			enabled, total, aliases, caps, visibleChannels := 0, 0, 0, 0, 0
 			for _, entry := range snapshot.Channels {
-				if present != nil && !present[entry.Channel] {
+				if present != nil && !present[entry.Channel] && !service.IsCompatibleChannel(entry.Channel) {
 					continue
 				}
 				visibleChannels++
 				prefix := service.OAuthChannelLabel(entry.Channel) + " · "
+				if service.IsCompatibleChannel(entry.Channel) {
+					label := compatible[entry.Channel]
+					if label == "" {
+						label = "第三方供应商（当前不可用）"
+					}
+					prefix = label + " · "
+				}
 				total += len(entry.Models)
 				aliases += len(entry.Aliases)
 				caps += len(entry.ReasoningCaps)

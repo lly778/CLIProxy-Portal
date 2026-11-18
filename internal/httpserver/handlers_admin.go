@@ -739,7 +739,36 @@ func (s *Server) adminUpstreams(w http.ResponseWriter, r *http.Request) {
 			v.ChannelPanels = append(v.ChannelPanels, s.adminUpstreamChannelView(r, value, layout, false))
 		}
 	}
+	v.CompatibleModelPanels = s.compatibleModelPanels(r)
 	_ = s.UI.Render(w, webui.PageAdminUpstreams, v)
+}
+
+func (s *Server) compatibleModelPanels(r *http.Request) []webui.AdminUpstreamsView {
+	labels, err := s.Keys.CompatibleChannelLabels(r.Context())
+	if err != nil {
+		s.Logger.Warn("read compatible model summary channels", "error", err)
+		return nil
+	}
+	var panels []webui.AdminUpstreamsView
+	for channel, label := range labels {
+		panel := webui.AdminUpstreamsView{
+			Channel: channel, ChannelLabel: label + "（第三方）", SupportsReasoning: true,
+		}
+		s.loadUpstreamModelView(r, &panel)
+		for _, model := range panel.Models {
+			if model.Enabled {
+				panels = append(panels, panel)
+				break
+			}
+		}
+	}
+	sort.Slice(panels, func(i, j int) bool {
+		if left, right := strings.ToLower(panels[i].ChannelLabel), strings.ToLower(panels[j].ChannelLabel); left != right {
+			return left < right
+		}
+		return panels[i].Channel < panels[j].Channel
+	})
+	return panels
 }
 
 func (s *Server) adminUpstreamRefresh(w http.ResponseWriter, r *http.Request) {
@@ -845,6 +874,21 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 			v.Accounts = append(v.Accounts, row)
 		}
 	}
+	s.loadUpstreamModelView(r, &v)
+	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); showMessages && msg != "" {
+		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("error")); showMessages && msg != "" {
+		v.ModelError = msg
+	}
+	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); showMessages && msg != "" {
+		v.PresetError = msg
+	}
+	return v
+}
+
+func (s *Server) loadUpstreamModelView(r *http.Request, v *webui.AdminUpstreamsView) {
+	channel := v.Channel
 	models, wildcards, modelErr := s.Keys.OAuthModelSettings(r.Context(), channel)
 	aliases, _, aliasErr := s.Keys.OAuthModelAliases(r.Context(), channel)
 	var reasoningCaps map[string]string
@@ -869,7 +913,7 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 		s.Logger.Error("list OAuth reasoning caps", "error", reasoningErr)
 	}
 	if modelErr != nil {
-		v.ModelError = "OAuth 模型状态暂时不可用"
+		v.ModelError = "模型状态暂时不可用"
 		s.Logger.Error("list OAuth model settings", "error", modelErr)
 	} else {
 		v.WildcardRules = wildcards
@@ -896,16 +940,6 @@ func (s *Server) adminUpstreamChannelView(r *http.Request, channel string, layou
 			v.Models = append(v.Models, row)
 		}
 	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("msg")); showMessages && msg != "" {
-		v.Flash = &webui.FlashView{Kind: "success", Message: msg}
-	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("error")); showMessages && msg != "" {
-		v.ModelError = msg
-	}
-	if msg := strings.TrimSpace(r.URL.Query().Get("preset_error")); showMessages && msg != "" {
-		v.PresetError = msg
-	}
-	return v
 }
 
 func (s *Server) adminOAuthPresetApply(w http.ResponseWriter, r *http.Request) {

@@ -564,6 +564,7 @@ type AdminUpstreamsView struct {
 	Channel                       string
 	ChannelLabel                  string
 	ChannelPanels                 []AdminUpstreamsView
+	CompatibleModelPanels         []AdminUpstreamsView
 	SupportsQuota                 bool
 	SupportsReasoning             bool
 	SupportsIdentityCompatibility bool

@@ -12,7 +12,7 @@ import (
 
 const OAuthPresetVersion = 3
 
-// OAuthPresetSnapshot stores portal-managed routing across OAuth channels,
+// OAuthPresetSnapshot stores portal-managed routing across upstream channels,
 // deliberately excluding credentials and all non-portal CPA configuration.
 type OAuthPresetSnapshot struct {
 	Version  int                  `json:"version"`
@@ -55,7 +55,7 @@ func (k *Keys) oauthChannelPresetSnapshot(ctx context.Context, channel string) (
 		return OAuthChannelPreset{}, err
 	}
 	caps := map[string]string{}
-	if channel == "codex" || channel == "antigravity" || channel == "agy" {
+	if channel == "codex" || channel == "antigravity" || channel == "agy" || IsCompatibleChannel(channel) {
 		caps, _, err = k.OAuthReasoningCaps(ctx, channel)
 		if err != nil {
 			return OAuthChannelPreset{}, err
@@ -207,7 +207,7 @@ func (k *Keys) validateOAuthChannelPreset(ctx context.Context, snapshot OAuthCha
 	if err := validateOAuthAliasNames(settings, snapshot.Aliases); err != nil {
 		return fmt.Errorf("预设中的模型别名无效：%w", err)
 	}
-	if channel != "codex" && channel != "antigravity" && channel != "agy" && len(snapshot.ReasoningCaps) > 0 {
+	if channel != "codex" && channel != "antigravity" && channel != "agy" && !IsCompatibleChannel(channel) && len(snapshot.ReasoningCaps) > 0 {
 		return errors.New("该渠道暂不支持思考强度上限")
 	}
 	for id, cap := range snapshot.ReasoningCaps {
@@ -227,6 +227,9 @@ func (k *Keys) applyOAuthChannelPreset(ctx context.Context, snapshot OAuthChanne
 	}
 	if channel == "agy" {
 		return k.applyAGYChannel(ctx, snapshot)
+	}
+	if IsCompatibleChannel(channel) {
+		return k.applyCompatibleChannel(ctx, snapshot)
 	}
 	models, _, err := k.OAuthModelSettings(ctx, channel)
 	if err != nil {

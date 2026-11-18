@@ -1,6 +1,6 @@
 {{define "content"}}
 <div>
-<div class="page-head upstream-page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">按 OAuth 渠道管理上游凭证、模型启停及用户侧别名。更改会影响该渠道的后续请求调度。</p></div><div class="filter-inline upstream-header-actions"><form method="post" action="/admin/upstreams/refresh" class="inline-form" data-upstream-config-refresh><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="channel" value="{{.Channel}}"><button class="button secondary" type="submit">刷新配置</button></form></div></div>
+<div class="page-head upstream-page-head"><div><span class="eyebrow">管理中心</span><h1>上游管理</h1><p class="muted">管理上游凭证、模型启停及用户侧别名。已在 CPA 配置的第三方模型可一起设置。</p></div><div class="filter-inline upstream-header-actions"><form method="post" action="/admin/upstreams/refresh" class="inline-form" data-upstream-config-refresh><input type="hidden" name="csrf_token" value="{{.CSRFToken}}"><input type="hidden" name="channel" value="{{.Channel}}"><button class="button secondary" type="submit">刷新配置</button></form></div></div>
 {{if .ChannelPanels}}{{range .ChannelPanels}}
 {{if and (ne .Channel "agy") (not .HideChannel)}}<div class="section-gap">{{template "upstream-credentials" .}}</div>{{end}}
 {{end}}{{else}}{{if and (ne .Channel "agy") (not .HideChannel)}}<div class="section-gap">{{template "upstream-credentials" .}}</div>{{end}}{{end}}
@@ -95,6 +95,7 @@
 <section class="card upstream-card section-gap" data-global-oauth-presets>
   <div class="section-head compact upstream-config-head"><div><h2>上游模型配置与调用预设</h2><p class="muted small">统一设置各渠道的模型、别名和思考强度上限，可直接应用或保存为调用预设。</p></div><div class="upstream-config-tools"><button class="button secondary" type="button" data-preset-edit="/admin/upstreams/config/edit" data-live-config>配置模型与预设</button></div></div>
   {{if .ChannelPanels}}{{range .ChannelPanels}}{{template "upstream-model-summary" .}}{{end}}{{else}}{{template "upstream-model-summary" .}}{{end}}
+  {{range .CompatibleModelPanels}}{{template "upstream-model-summary" .}}{{end}}
   <div class="section-head compact upstream-saved-presets-head"><div><h3>调用预设</h3><p class="muted small">最多保存 20 个预设，可编辑、应用或删除。</p></div></div>
   {{if .PresetError}}<div class="alert danger" role="alert">{{.PresetError}}</div>{{end}}
   {{if .Presets}}<div class="oauth-preset-list" data-masonry-key="presets" data-masonry-order="{{.PresetCardOrder}}" data-masonry-csrf="{{.CSRFToken}}">
