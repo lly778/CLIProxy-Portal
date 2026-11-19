@@ -296,15 +296,20 @@ function Build-Catalog($Config, [string]$HomePath, [string]$OldToml) {
                 apply_patch_tool_type = 'freeform'; truncation_policy = @{ mode = 'tokens'; limit = 10000 }
                 supports_parallel_tool_calls = $false; context_window = 500000
                 effective_context_window_percent = 95; experimental_supported_tools = @()
-                input_modalities = @('text'); use_responses_lite = $false
+                input_modalities = @('text', 'image'); use_responses_lite = $false
                 portal_sync_fallback = $true
             }
         }
-        # Migrate our old generated default without changing native metadata or
-        # a window the user has explicitly adjusted in their local catalog.
-        if ((Get-Field $entry 'portal_sync_fallback' $false) -eq $true -and
-            (Get-Field $entry 'context_window' 0) -eq 128000) {
+        # Migrate old generated defaults while preserving declared capabilities.
+        $generated = (Get-Field $entry 'portal_sync_fallback' $false) -eq $true
+        if ($generated -and (Get-Field $entry 'context_window' 0) -eq 128000) {
             Set-Field $entry 'context_window' 500000
+        }
+        $modalityField = $entry.PSObject.Properties['input_modalities']
+        $modalities = $null
+        if ($null -ne $modalityField) { $modalities = $modalityField.Value }
+        if ($null -eq $modalities -or ($generated -and @($modalities).Count -eq 1 -and @($modalities)[0] -ceq 'text')) {
+            Set-Field $entry 'input_modalities' @('text', 'image')
         }
         Complete-ModelInstructions $entry
         Set-DeclaredReasoningLevels $entry @(Get-Field $model 'supported_reasoning_levels' @())
@@ -312,13 +317,9 @@ function Build-Catalog($Config, [string]$HomePath, [string]$OldToml) {
         Set-Field $entry 'supported_in_api' $true
         Set-Field $entry 'priority' $entries.Count
         Set-Field $entry 'use_responses_lite' $false
-        # AGY supports client-executed tool discovery and image content. Migrate
-        # stale local entries so Codex can advertise those client capabilities.
+        # AGY supports client-executed tool discovery.
         if ($id.StartsWith('agy/', [StringComparison]::OrdinalIgnoreCase)) {
             Set-Field $entry 'supports_search_tool' $true
-            # The bridge forwards embedded images as ACP image content blocks.
-            # Override stale text-only fallback entries as well as new entries.
-            Set-Field $entry 'input_modalities' @('text', 'image')
         }
         $effort = [string]$model.default_reasoning
         if ($effort) {
